@@ -1,0 +1,32 @@
+name: terraform-validate
+
+on:
+  push:
+    paths:
+      - "terraform/**"
+  pull_request:
+    paths:
+      - "terraform/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+
+      - name: Terraform fmt check (dns-netbird)
+        run: terraform fmt -check -recursive
+        working-directory: terraform/dns-netbird
+
+      - name: Terraform init (dns-netbird)
+        run: terraform init -backend=false
+        working-directory: terraform/dns-netbird
+
+      - name: Terraform validate (dns-netbird)
+        run: terraform validate
+        working-directory: terraform/dns-netbird

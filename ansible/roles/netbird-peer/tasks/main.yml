@@ -1,0 +1,53 @@
+---
+# NetBird peer enrollment — runs on ns2 (Helsinki) and all future k3s nodes
+# Enrolls the host into the NetBird WireGuard mesh using the management server on ns1
+
+- name: Add NetBird apt signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.netbird.io/debian/public.key"
+    dest: /etc/apt/keyrings/netbird.asc
+    mode: '0644'
+
+- name: Add NetBird apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/netbird.asc] https://pkgs.netbird.io/debian stable main"
+    filename: netbird
+    state: present
+
+- name: Install NetBird client
+  ansible.builtin.apt:
+    name: netbird
+    state: present
+    update_cache: true
+
+- name: Deploy NetBird client configuration
+  ansible.builtin.template:
+    src: netbird-client.json.j2
+    dest: /etc/netbird/config.json
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart NetBird service
+
+- name: Start and enable NetBird service
+  ansible.builtin.systemd:
+    name: netbird
+    state: started
+    enabled: true
+
+- name: Enroll this peer with the management server
+  ansible.builtin.command:
+    cmd: netbird up --management-url {{ netbird_management_url }} --setup-key {{ netbird_setup_key }} --hostname {{ inventory_hostname }}.{{ platform_domain }}
+  register: netbird_up_result
+  changed_when: "'Connected' in netbird_up_result.stdout or 'already connected' not in netbird_up_result.stdout"
+  # Idempotent — netbird up is safe to re-run
+
+- name: Verify NetBird peer is connected
+  ansible.builtin.command:
+    cmd: netbird status
+  register: netbird_status
+  changed_when: false
+
+- name: Show NetBird status
+  ansible.builtin.debug:
+    msg: "{{ netbird_status.stdout_lines }}"

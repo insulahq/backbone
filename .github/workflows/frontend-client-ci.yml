@@ -1,0 +1,39 @@
+name: frontend-client-ci
+
+on:
+  push:
+    paths:
+      - "frontend/client-panel/**"
+  pull_request:
+    paths:
+      - "frontend/client-panel/**"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    # Placeholder — expand when client panel is implemented (Phase 1 Week 7+)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/client-panel/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend/client-panel
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend/client-panel
+
+      - name: Type check
+        run: npm run typecheck
+        working-directory: frontend/client-panel
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend/client-panel

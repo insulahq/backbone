@@ -1,0 +1,6 @@
+---
+- name: Restart NetBird management
+  community.docker.docker_compose_v2:
+    project_src: /opt/netbird
+    state: present
+    recreate: always

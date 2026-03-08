@@ -1,0 +1,58 @@
+# PowerDNS Authoritative Server — Master Configuration
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }} (ns1 — Falkenstein)
+
+# Core
+setuid=pdns
+setgid=pdns
+guardian=yes
+daemon=no   # systemd manages the process
+
+# Listening
+local-address=0.0.0.0
+local-port=53
+
+# Master mode — this is the primary authoritative server
+master=yes
+slave=no
+primary=yes
+
+# DNSSEC
+{% if pdns_dnssec_enabled %}
+dnssec=yes
+{% else %}
+dnssec=no
+{% endif %}
+
+# API (used by Management API — bound to localhost, not public)
+api=yes
+api-key={{ pdns_api_key }}
+api-readonly=no
+webserver=yes
+webserver-port={{ pdns_api_port }}
+webserver-address=127.0.0.1
+webserver-allow-from=127.0.0.1,::1
+
+# AXFR — Zone transfers to secondary nameservers
+# Only allow AXFR from known slave IPs
+allow-axfr-ips={{ pdns_axfr_allow_ips | join(',') }}
+allow-unsigned-axfr=no
+axfr-master-only=yes
+
+# Notify slaves on zone changes
+also-notify={{ ns2_public_ip }}
+
+# Performance tuning
+receiver-threads=4
+distributor-threads=4
+cache-ttl=20
+query-cache-ttl=20
+recursive-cache-ttl=10
+
+# Logging (to systemd journal)
+log-dns-queries=no
+log-dns-details=no
+loglevel=4
+
+# Backend — PostgreSQL (configured in pdns.d/gpgsql.conf)
+launch=gpgsql

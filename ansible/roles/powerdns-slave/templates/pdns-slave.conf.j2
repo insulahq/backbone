@@ -1,0 +1,41 @@
+# PowerDNS Authoritative Server — Slave Configuration
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }} (ns2 — Helsinki)
+
+# Core
+setuid=pdns
+setgid=pdns
+guardian=yes
+daemon=no
+
+# Listening
+local-address=0.0.0.0
+local-port=53
+
+# Slave mode — pulls zones from ns1 via AXFR
+master=no
+slave=yes
+secondary=yes
+
+# Accept NOTIFY only from ns1
+allow-notify-from={{ ns1_public_ip }}
+
+# Supermaster — ns1 is authoritative; ns2 auto-creates zones on first NOTIFY
+superslave=yes
+supermasters={{ ns1_public_ip }} ns1.{{ platform_domain }}
+
+# AXFR zone transfer settings
+slave-renotify=no
+xfr-cycle-interval=60       # Check for stale zones every 60 seconds
+axfr-fetch-timeout=10
+
+# No API on slave (read-only, no management needed)
+api=no
+webserver=no
+
+# Logging
+log-dns-queries=no
+loglevel=4
+
+# Backend — SQLite (no PostgreSQL needed for slave)
+launch=gsqlite3

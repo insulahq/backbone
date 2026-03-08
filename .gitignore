@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Environment files — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Terraform state and secrets
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/*.tfvars
+!terraform/*.tfvars.example
+terraform/.terraform.lock.hcl
+
+# Ansible secrets
+ansible/vault_password
+ansible/*.vault
+ansible/host_vars/**/*.vault.yml
+ansible/group_vars/**/*.vault.yml
+
+# Kubernetes secrets (use Sealed Secrets instead)
+k8s/**/*secret*.yaml
+!k8s/**/*sealed-secret*.yaml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.tmp
+*.bak

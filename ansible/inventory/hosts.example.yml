@@ -1,0 +1,30 @@
+---
+# Copy this file to hosts.yml and fill in real IPs.
+# hosts.yml is gitignored.
+
+all:
+  children:
+    dns_servers:
+      children:
+        dns_master:
+          hosts:
+            ns1:
+              ansible_host: "YOUR_NS1_IP"       # Hetzner Falkenstein
+              ansible_user: root
+              ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+        dns_slave:
+          hosts:
+            ns2:
+              ansible_host: "YOUR_NS2_IP"       # Hetzner Helsinki
+              ansible_user: root
+              ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+
+    netbird_management:
+      hosts:
+        ns1:                                    # NetBird management co-hosted on ns1
+
+    netbird_peers:
+      hosts:
+        ns2:                                    # ns2 enrolls as a NetBird peer
+        # k3s_control:                          # Add k3s nodes here later
+        #   ansible_host: "YOUR_K3S_CP_IP"

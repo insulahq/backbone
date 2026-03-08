@@ -1,0 +1,15 @@
+---
+# NetBird-only playbook — use when reconfiguring VPN without touching DNS.
+# Usage: ansible-playbook -i inventory/hosts.yml netbird.yml
+
+- name: Deploy NetBird management server (ns1)
+  hosts: netbird_management
+  become: true
+  roles:
+    - netbird-management
+
+- name: Enroll NetBird peers
+  hosts: netbird_peers
+  become: true
+  roles:
+    - netbird-peer

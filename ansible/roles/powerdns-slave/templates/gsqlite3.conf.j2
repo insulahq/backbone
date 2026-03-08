@@ -1,0 +1,9 @@
+# PowerDNS SQLite3 backend — ns2 slave
+# Managed by Ansible. Do not edit manually.
+
+gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+{% if pdns_dnssec_enabled %}
+gsqlite3-dnssec=yes
+{% else %}
+gsqlite3-dnssec=no
+{% endif %}

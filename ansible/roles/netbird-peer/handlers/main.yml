@@ -1,0 +1,5 @@
+---
+- name: Restart NetBird service
+  ansible.builtin.systemd:
+    name: netbird
+    state: restarted

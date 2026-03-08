@@ -1,0 +1,33 @@
+---
+# Master playbook — runs everything on all servers in order.
+# Usage: ansible-playbook -i inventory/hosts.yml site.yml
+
+- name: Common hardening on all DNS servers
+  hosts: dns_servers
+  become: true
+  roles:
+    - common
+
+- name: Deploy PowerDNS master (ns1 — Falkenstein)
+  hosts: dns_master
+  become: true
+  roles:
+    - powerdns-master
+
+- name: Deploy PowerDNS slave (ns2 — Helsinki)
+  hosts: dns_slave
+  become: true
+  roles:
+    - powerdns-slave
+
+- name: Deploy NetBird management server (ns1)
+  hosts: netbird_management
+  become: true
+  roles:
+    - netbird-management
+
+- name: Enroll NetBird peers (ns2 + future nodes)
+  hosts: netbird_peers
+  become: true
+  roles:
+    - netbird-peer

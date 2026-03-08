@@ -1,0 +1,8 @@
+---
+# Role-specific defaults for netbird-management
+# Override these in group_vars/all.yml or host_vars/ns1/
+
+# NetBird version is set in group_vars/all.yml
+# netbird_version: "0.28.0"
+
+# Caddy config template is inline — no extra vars needed

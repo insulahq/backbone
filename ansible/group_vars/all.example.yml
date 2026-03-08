@@ -1,0 +1,70 @@
+---
+# Copy to group_vars/all.yml and fill in real values.
+# all.yml is gitignored (may contain secrets).
+
+# -----------------------------------------------------------------------
+# Platform identity
+# -----------------------------------------------------------------------
+platform_domain: "phoenix-host.net"
+platform_ns1_hostname: "ns1.phoenix-host.net"
+platform_ns2_hostname: "ns2.phoenix-host.net"
+
+# Public IPs of the nameserver VPS (used in AXFR allow-lists, glue records)
+ns1_public_ip: "YOUR_NS1_PUBLIC_IP"
+ns2_public_ip: "YOUR_NS2_PUBLIC_IP"
+
+# -----------------------------------------------------------------------
+# PowerDNS shared settings
+# -----------------------------------------------------------------------
+pdns_version: "4.9"                         # PowerDNS authoritative version
+pdns_api_port: 8081
+pdns_rndc_port: 953
+
+# API key — generate with: openssl rand -hex 32
+# Use ansible-vault to encrypt this in production:
+#   ansible-vault encrypt_string 'your_key_here' --name 'pdns_api_key'
+pdns_api_key: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
+# RNDC shared secret — generate with: rndc-confgen -a -b 512 (or openssl rand -base64 64)
+pdns_rndc_key: "CHANGE_ME_BASE64_SECRET"
+
+# Database (PostgreSQL on ns1, used by PowerDNS master)
+pdns_db_host: "127.0.0.1"
+pdns_db_port: 5432
+pdns_db_name: "powerdns"
+pdns_db_user: "pdns"
+pdns_db_password: "CHANGE_ME_STRONG_PASSWORD"
+
+# AXFR: which IPs are allowed to pull zones from ns1
+# Must include ns2's public IP
+pdns_axfr_allow_ips:
+  - "{{ ns2_public_ip }}"
+  # Add additional external slaves here if needed
+
+# DNSSEC
+pdns_dnssec_enabled: true
+
+# -----------------------------------------------------------------------
+# NetBird settings
+# -----------------------------------------------------------------------
+netbird_version: "0.28.0"                   # Pin a specific release
+
+# NetBird management server URL (served from ns1)
+netbird_management_url: "https://netbird.phoenix-host.net:443"
+
+# Domain for the NetBird management server
+netbird_domain: "netbird.phoenix-host.net"
+
+# Setup key for peer enrollment (generate in NetBird UI after first deploy)
+# This is the key that ns2 and k3s nodes use to auto-enroll
+netbird_setup_key: "CHANGE_ME_GENERATE_IN_NETBIRD_UI"
+
+# -----------------------------------------------------------------------
+# Common server hardening
+# -----------------------------------------------------------------------
+# SSH port (keep at 22 unless you have a specific reason)
+ssh_port: 22
+
+# Admin SSH public keys (added to authorized_keys on all servers)
+admin_ssh_keys:
+  - "ssh-ed25519 AAAA... your_key_comment"
