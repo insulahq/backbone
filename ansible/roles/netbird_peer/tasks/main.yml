@@ -73,7 +73,7 @@
 - name: Set enrolled fact
   ansible.builtin.set_fact:
     netbird_peer_already_enrolled: >-
-      {{ (netbird_peer_status_check.stdout | from_json).state == 'Connected'
+      {{ (netbird_peer_status_check.stdout | from_json).management.connected | bool
          if netbird_peer_status_check.rc == 0
             and netbird_peer_status_check.stdout | trim | length > 0
             and (netbird_peer_status_check.stdout | trim).startswith('{')

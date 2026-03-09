@@ -2,10 +2,20 @@
   "ManagementURL": "{{ netbird_management_url }}",
   "AdminURL": "{{ netbird_management_url }}",
   "WireGuardPort": 51820,
-  "NATExternalIPs": [],
+  "NATExternalIPs": [
+    "{{ ansible_facts['default_ipv4']['address'] }}"
+  ],
   "CustomDNSAddress": "",
   "DisableAutoConnect": false,
   "ServerSSHAllowed": false,
   "RosenpassEnabled": false,
-  "InterfaceName": "wt0"
+  "InterfaceName": "wt0",
+  "IFaceBlackList": [
+    "docker0",
+    "br-",
+    "veth",
+    "virbr",
+    "vmnet",
+    "lo"
+  ]
 }
