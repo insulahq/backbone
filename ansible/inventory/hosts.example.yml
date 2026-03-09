@@ -1,5 +1,5 @@
 ---
-# Copy this file to hosts.yml and fill in real IPs.
+# Copy this file to inventory/hosts.yml and fill in real values.
 # hosts.yml is gitignored.
 
 all:
@@ -11,13 +11,13 @@ all:
             ns1:
               ansible_host: "YOUR_NS1_PUBLIC_IP"
               ansible_user: root
-              ansible_ssh_private_key_file: ~/your-ssh-key
+              ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME
         dns_slave:
           hosts:
             ns2:
               ansible_host: "YOUR_NS2_PUBLIC_IP"
               ansible_user: root
-              ansible_ssh_private_key_file: ~/your-ssh-key
+              ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME
 
     netbird_management:
       hosts:
@@ -28,3 +28,5 @@ all:
         ns2:                                    # ns2 enrolls as a NetBird peer
         # k3s_control:                          # Add k3s nodes here later
         #   ansible_host: "YOUR_K3S_CP_IP"
+        #   ansible_user: root
+        #   ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME

@@ -1,13 +1,13 @@
 ---
-# Copy to group_vars/all.yml and fill in real values.
-# all.yml is gitignored (may contain secrets).
+# Copy this file to group_vars/all.yml and fill in real values.
+# all.yml is gitignored — never commit it.
 
 # -----------------------------------------------------------------------
 # Platform identity
 # -----------------------------------------------------------------------
-platform_domain: "phoenix-host.net"
-platform_ns1_hostname: "ns1.phoenix-host.net"
-platform_ns2_hostname: "ns2.phoenix-host.net"
+platform_domain: "your-domain.example"
+platform_ns1_hostname: "ns1.your-domain.example"
+platform_ns2_hostname: "ns2.your-domain.example"
 
 # Public IPs of the nameserver VPS (used in AXFR allow-lists, glue records)
 ns1_public_ip: "YOUR_NS1_PUBLIC_IP"
@@ -47,48 +47,53 @@ pdns_dnssec_enabled: true
 # -----------------------------------------------------------------------
 # NetBird settings
 # -----------------------------------------------------------------------
-netbird_version: "0.28.0"                   # Pin a specific release
+# Pin to a tested release — check https://github.com/netbirdio/netbird/releases
+netbird_version: "0.28.0"
 
-# NetBird management server URL (served from ns1)
-netbird_management_url: "https://netbird.phoenix-host.net:443"
-
-# Domain for the NetBird management server
-netbird_domain: "netbird.phoenix-host.net"
+# NetBird management server URL and domain (co-hosted on ns1)
+netbird_management_url: "https://netbird.your-domain.example:443"
+netbird_domain: "netbird.your-domain.example"
 
 # Personal Access Token for the NetBird API — used by Ansible to create
 # one-time setup keys per peer immediately before enrollment.
-# Generate in NetBird dashboard: Settings → Access Tokens → Add Token
-# Scope needed: setup-keys:write, peers:read
+# Steps:
+#   1. Open https://netbird.your-domain.example/setup and create admin account
+#   2. Go to Settings → Access Tokens → Add Token
+#   3. Paste the token value here
+# Scopes needed: setup-keys:write, peers:read
 netbird_api_pat: "CHANGE_ME_GENERATE_IN_NETBIRD_DASHBOARD"
 
-# TURN server credentials (used by coturn and management.json)
+# TURN credentials — used by the embedded relay for peer NAT traversal.
 # Generate with: openssl rand -hex 16
-# TURN credentials — used by coturn for peer relay authentication
 netbird_turn_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_16"
+# Generate with: openssl rand -hex 32
 netbird_turn_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
-# Relay auth secret — internal to netbird-server relay component.
-# Independent from TURN. Generate with: openssl rand -hex 32
-# WARNING: changing after first run disconnects all active relay sessions.
+# Relay auth secret — used internally by netbird-server to authenticate its
+# own relay component. Must be independent from netbird_turn_secret.
+# Generate with: openssl rand -hex 32
+# WARNING: changing this after first run disconnects all active relay sessions.
 netbird_auth_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
 # Store encryption key — encrypts setup keys and API tokens at rest in SQLite.
-# Must be base64-encoded 32 bytes. Generate with:
+# Must be standard base64-encoded 32 bytes (with = padding).
+# Generate with:
 #   python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
-# WARNING: never regenerate this after data exists — you will lose all encrypted data.
+# WARNING: never regenerate this once data exists — encrypted data becomes
+# unreadable and all setup keys and API tokens must be regenerated.
 netbird_store_encryption_key: "CHANGE_ME_BASE64_32_BYTES="
 
 # -----------------------------------------------------------------------
 # Common server hardening
 # -----------------------------------------------------------------------
-# SSH port (keep at 22 unless you have a specific reason)
+# SSH port (keep at 22 unless you have a specific reason to change it)
 ssh_port: 22
 
 # Admin SSH public keys (added to authorized_keys on all servers)
 admin_ssh_keys:
   - "ssh-ed25519 AAAA... your_key_comment"
 
-# Admin IPs exempt from SSH rate-limiting (Ansible control machine, management IPs)
-# These IPs bypass the nftables SSH brute-force meter.
+# Admin IPs exempt from SSH rate-limiting (Ansible control machine, your office IP, etc.)
+# These IPs bypass the nftables SSH brute-force meter entirely.
 admin_ips:
   - "YOUR_CONTROL_MACHINE_IP"
