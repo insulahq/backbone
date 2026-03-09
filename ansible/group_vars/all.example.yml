@@ -61,11 +61,19 @@ netbird_setup_key: "CHANGE_ME_GENERATE_IN_NETBIRD_UI"
 
 # TURN server credentials (used by coturn and management.json)
 # Generate with: openssl rand -hex 16
+# TURN credentials — used by coturn for peer relay authentication
 netbird_turn_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_16"
 netbird_turn_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
-# Base64-encoded 32-byte encryption key for NetBird data store.
-# Generate with: python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
+# Relay auth secret — internal to netbird-server relay component.
+# Independent from TURN. Generate with: openssl rand -hex 32
+# WARNING: changing after first run disconnects all active relay sessions.
+netbird_auth_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
+# Store encryption key — encrypts setup keys and API tokens at rest in SQLite.
+# Must be base64-encoded 32 bytes. Generate with:
+#   python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
+# WARNING: never regenerate this after data exists — you will lose all encrypted data.
 netbird_store_encryption_key: "CHANGE_ME_BASE64_32_BYTES="
 
 # -----------------------------------------------------------------------
