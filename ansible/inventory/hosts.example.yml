@@ -25,6 +25,7 @@ all:
 
     netbird_peers:
       hosts:
+        ns1:                                    # ns1 enrolls as a peer on its own mesh
         ns2:                                    # ns2 enrolls as a NetBird peer
         # k3s_control:                          # Add k3s nodes here later
         #   ansible_host: "YOUR_K3S_CP_IP"

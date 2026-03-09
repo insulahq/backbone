@@ -103,7 +103,7 @@
       Content-Type: "application/json"
     body_format: json
     body:
-      name: "ansible-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}"
+      name: "ansible-{{ inventory_hostname }}-{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
       type: "one-off"
       expires_in: 600          # 10 minutes — expires even if unused
       usage_limit: 1
