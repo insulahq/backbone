@@ -75,7 +75,8 @@
     netbird_peer_already_enrolled: >-
       {{ (netbird_peer_status_check.stdout | from_json).state == 'Connected'
          if netbird_peer_status_check.rc == 0
-            and netbird_peer_status_check.stdout | length > 0
+            and netbird_peer_status_check.stdout | trim | length > 0
+            and (netbird_peer_status_check.stdout | trim).startswith('{')
          else false }}
 
 # ---------------------------------------------------------------------------
