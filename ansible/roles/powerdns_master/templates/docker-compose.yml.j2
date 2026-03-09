@@ -34,9 +34,34 @@ services:
     volumes:
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
     environment:
-      # These env vars are read by the official image's entrypoint to bootstrap
-      # the PostgreSQL schema on first start (idempotent).
       PDNS_AUTH_API_KEY: "{{ pdns_api_key }}"
+
+  # PowerDNS-Admin — web UI, accessible over NetBird mesh only
+  pdns-admin:
+    image: powerdnsadmin/pda-legacy:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pdns:
+        condition: service_started
+    ports:
+      - "127.0.0.1:{{ pdns_admin_port }}:80"   # localhost only; nftables DNAT from wt0
+    environment:
+      SECRET_KEY: "{{ pdns_admin_secret_key }}"
+      SQLALCHEMY_DATABASE_URI: >-
+        postgresql://{{ pdns_db_user }}:{{ pdns_db_password }}@postgres/{{ pdns_db_name }}_admin
+      # PowerDNS API connection — uses internal Docker network name 'pdns'
+      PDNS_API_URL: "http://pdns:8081"
+      PDNS_API_KEY: "{{ pdns_api_key }}"
+      PDNS_VERSION: "4.9"
+      GUNICORN_TIMEOUT: "60"
+      GUNICORN_WORKERS: "2"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   pdns_pgdata:

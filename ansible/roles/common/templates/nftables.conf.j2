@@ -48,6 +48,9 @@ table inet filter {
         # PowerDNS API (localhost only — accessed by Management API on same host)
         # Docker maps this to 127.0.0.1:{{ pdns_api_port }} on the host
         tcp dport {{ pdns_api_port }} ip saddr 127.0.0.1 accept
+
+        # PowerDNS-Admin web UI — NetBird mesh interface only (DNAT'd from wt0)
+        tcp dport {{ pdns_admin_port }} iifname "wt0" accept
 {% endif %}
 
 {% if inventory_hostname in groups['netbird_management'] %}
@@ -91,4 +94,14 @@ table ip nat {
         ip saddr 172.16.0.0/12 masquerade
         ip saddr 192.168.0.0/16 masquerade
     }
+
+{% if inventory_hostname in groups['dns_master'] %}
+    # DNAT: forward PowerDNS-Admin traffic arriving on NetBird wt0 → localhost
+    # Docker binds pdns-admin to 127.0.0.1:{{ pdns_admin_port }} only, so we
+    # redirect inbound wt0 connections to loopback so Docker can receive them.
+    chain prerouting {
+        type nat hook prerouting priority -100;
+        iifname "wt0" tcp dport {{ pdns_admin_port }} dnat to 127.0.0.1:{{ pdns_admin_port }}
+    }
+{% endif %}
 }

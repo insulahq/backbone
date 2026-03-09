@@ -9,4 +9,15 @@
     name: nftables
     state: reloaded
 
+# After nftables reloads it flushes all iptables chains, including Docker's
+# DOCKER/DOCKER-USER chains. Docker must be restarted so it re-creates them.
+# Listens for the same "Reload nftables" notification — fires after nftables
+# reloads. failed_when: false makes this a no-op on hosts without Docker.
+- name: Restart Docker after nftables reload
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  failed_when: false
+  listen: Reload nftables
+
 # fail2ban not available on Debian 13 — brute-force protection via nftables rate limiting

@@ -79,6 +79,17 @@
     state: present
   loop: "{{ admin_ssh_keys }}"
 
+# --- kernel parameters ---
+
+- name: Enable route_localnet for DNAT-to-loopback on dns_master (pdns-admin via NetBird)
+  ansible.posix.sysctl:
+    name: net.ipv4.conf.all.route_localnet
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+  when: inventory_hostname in groups['dns_master']
+
 # --- nftables firewall ---
 
 - name: Deploy nftables ruleset

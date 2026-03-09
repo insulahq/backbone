@@ -35,6 +35,15 @@ pdns_db_name: "powerdns"
 pdns_db_user: "pdns"
 pdns_db_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
+# PowerDNS-Admin web UI — port exposed on NetBird mesh interface only
+# Access at http://{{ ns1_netbird_ip }}:{{ pdns_admin_port }} from any NetBird peer
+pdns_admin_port: 8082
+# Secret key for Flask session signing. Generate with: openssl rand -hex 32
+pdns_admin_secret_key: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
+# NetBird mesh IP of ns1 — shown in NetBird dashboard or: netbird status on ns1
+ns1_netbird_ip: "YOUR_NS1_NETBIRD_IP"
+
 # AXFR: which IPs are allowed to pull zones from ns1
 # Must include ns2's public IP
 pdns_axfr_allow_ips:

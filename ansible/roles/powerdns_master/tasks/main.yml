@@ -118,7 +118,7 @@
 # Schema initialisation — idempotent: only runs if the domains table is absent
 # ---------------------------------------------------------------------------
 
-- name: Wait for PostgreSQL to be ready
+- name: Wait for PostgreSQL to be ready (pre-schema)
   ansible.builtin.command:
     cmd: >
       docker compose exec -T postgres
@@ -130,6 +130,28 @@
   delay: 5
   until: powerdns_master_pg_ready.rc == 0
   changed_when: false
+
+- name: Check if powerdns_admin database exists
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T postgres
+      psql -U {{ pdns_db_user }} -d postgres -tAc
+      "SELECT 1 FROM pg_database WHERE datname='{{ pdns_db_name }}_admin'"
+  args:
+    chdir: /opt/powerdns
+  register: powerdns_master_admindb_check
+  changed_when: false
+
+- name: Create powerdns_admin database for PDns-Admin web UI
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T postgres
+      psql -U {{ pdns_db_user }} -d postgres -c
+      "CREATE DATABASE {{ pdns_db_name }}_admin OWNER {{ pdns_db_user }}"
+  args:
+    chdir: /opt/powerdns
+  when: powerdns_master_admindb_check.stdout | trim != '1'
+  changed_when: true
 
 - name: Check if PowerDNS schema already exists
   ansible.builtin.command:
@@ -171,3 +193,10 @@
     host: "127.0.0.1"
     timeout: 30
     delay: 2
+
+- name: Wait for PowerDNS-Admin web UI to be ready
+  ansible.builtin.wait_for:
+    port: "{{ pdns_admin_port }}"
+    host: "127.0.0.1"
+    timeout: 120
+    delay: 5
