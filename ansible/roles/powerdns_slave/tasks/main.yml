@@ -70,6 +70,21 @@
     mode: '0644'
   notify: Restart Docker
 
+# Allow unprivileged processes (uid 953 — pdns) to bind port 53 in the host
+# network namespace. Required because the PowerDNS container runs with
+# network_mode: host; with host networking, Docker sysctls: cannot set
+# per-network-namespace parameters — they must be applied to the host itself.
+# Setting ip_unprivileged_port_start=53 means any process may bind ports >= 53
+# without CAP_NET_BIND_SERVICE or root. Combined with cap_add: NET_BIND_SERVICE
+# in the compose file, this lets the container run as uid 953 (not root).
+- name: Allow unprivileged port 53 binding for PowerDNS (network_mode host)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_unprivileged_port_start
+    value: '53'
+    state: present
+    sysctl_set: true
+    reload: true
+
 # ---------------------------------------------------------------------------
 # Directory layout
 # ---------------------------------------------------------------------------
