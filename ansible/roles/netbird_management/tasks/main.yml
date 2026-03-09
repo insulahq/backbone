@@ -1,12 +1,12 @@
 ---
 # NetBird self-hosted management server — runs on ns1 (Falkenstein)
-# Provides: WireGuard mesh VPN for zero-trust admin access to all cluster nodes
-# Co-hosted with PowerDNS master (ns1) per architecture decision ADR-013
-#
-# Firewall ports (80, 443, 3478, 51820) are handled by the common/nftables role.
+# Architecture: netbirdio/netbird-server (combined management+signal+relay+STUN)
+#               + netbirdio/dashboard + Traefik (TLS via Let's Encrypt)
+# Docs: https://docs.netbird.io/selfhosted/selfhosted-quickstart
 
 # ---------------------------------------------------------------------------
-# Docker — install from Docker's official apt repo (docker.io removed in Debian 13)
+# Docker — already installed by powerdns_master role on ns1.
+# Ensure Docker daemon is configured with external DNS.
 # ---------------------------------------------------------------------------
 
 - name: Ensure /etc/apt/keyrings directory exists
@@ -49,8 +49,25 @@
     state: started
     enabled: true
 
+- name: Configure Docker daemon DNS and log rotation
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "dns": ["1.1.1.1", "8.8.8.8"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Docker
+
 # ---------------------------------------------------------------------------
-# NetBird management stack directory layout
+# NetBird stack directory
 # ---------------------------------------------------------------------------
 
 - name: Create NetBird management directory
@@ -61,52 +78,35 @@
     group: root
     mode: '0750'
 
-- name: Create NetBird data directory
-  ansible.builtin.file:
-    path: /opt/netbird/data
-    state: directory
+# ---------------------------------------------------------------------------
+# Configuration files
+# ---------------------------------------------------------------------------
+
+- name: Deploy NetBird server config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /opt/netbird/config.yaml
     owner: root
     group: root
-    mode: '0750'
+    mode: '0644'
+  notify: Restart NetBird management
 
-# ---------------------------------------------------------------------------
-# Configuration files (templates)
-# ---------------------------------------------------------------------------
+- name: Deploy dashboard environment file
+  ansible.builtin.template:
+    src: dashboard.env.j2
+    dest: /opt/netbird/dashboard.env
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart NetBird management
 
-- name: Deploy NetBird Docker Compose file
+- name: Deploy Docker Compose stack
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/netbird/docker-compose.yml
     owner: root
     group: root
-    mode: '0640'
-  notify: Restart NetBird management
-
-- name: Deploy Caddy reverse proxy configuration
-  ansible.builtin.template:
-    src: Caddyfile.j2
-    dest: /opt/netbird/Caddyfile
-    owner: root
-    group: root
-    mode: '0640'
-  notify: Restart NetBird management
-
-- name: Deploy coturn STUN/TURN configuration
-  ansible.builtin.template:
-    src: coturn.conf.j2
-    dest: /opt/netbird/coturn.conf
-    owner: root
-    group: root
-    mode: '0640'
-  notify: Restart NetBird management
-
-- name: Deploy NetBird management config
-  ansible.builtin.template:
-    src: management.json.j2
-    dest: /opt/netbird/data/management.json
-    owner: root
-    group: root
-    mode: '0640'
+    mode: '0644'
   notify: Restart NetBird management
 
 # ---------------------------------------------------------------------------
@@ -119,9 +119,9 @@
     state: present
     pull: always
 
-- name: Wait for NetBird management to be healthy
+- name: Wait for NetBird to be healthy (port 443)
   ansible.builtin.wait_for:
     port: 443
     host: "127.0.0.1"
-    timeout: 60
-    delay: 5
+    timeout: 120
+    delay: 10

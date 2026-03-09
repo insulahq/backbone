@@ -52,6 +52,23 @@
     state: started
     enabled: true
 
+- name: Configure Docker daemon DNS and log rotation
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "dns": ["1.1.1.1", "8.8.8.8"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Docker
+
 # ---------------------------------------------------------------------------
 # Directory layout
 # ---------------------------------------------------------------------------

@@ -67,9 +67,28 @@ table inet filter {
 
     chain forward {
         type filter hook forward priority 0; policy drop;
+
+        # Allow Docker container traffic to be forwarded (NAT outbound + inter-container)
+        iifname "docker*" accept
+        oifname "docker*" accept
+        iifname "br-*" accept
+        oifname "br-*" accept
+
+        # Allow established/related forwarded traffic (return paths)
+        ct state established,related accept
     }
 
     chain output {
         type filter hook output priority 0; policy accept;
+    }
+}
+
+# NAT masquerade — required for Docker containers to reach the internet
+table ip nat {
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        # Masquerade outbound traffic from Docker bridge networks
+        ip saddr 172.16.0.0/12 masquerade
+        ip saddr 192.168.0.0/16 masquerade
     }
 }

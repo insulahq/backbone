@@ -53,6 +53,23 @@
     state: started
     enabled: true
 
+- name: Configure Docker daemon DNS and log rotation
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "dns": ["1.1.1.1", "8.8.8.8"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Docker
+
 # ---------------------------------------------------------------------------
 # Directory layout
 # ---------------------------------------------------------------------------
@@ -108,10 +125,10 @@
       pg_isready -U {{ pdns_db_user }} -d {{ pdns_db_name }}
   args:
     chdir: /opt/powerdns
-  register: pg_ready
+  register: powerdns_master_pg_ready
   retries: 12
   delay: 5
-  until: pg_ready.rc == 0
+  until: powerdns_master_pg_ready.rc == 0
   changed_when: false
 
 - name: Check if PowerDNS schema already exists
@@ -122,20 +139,23 @@
       -tAc "SELECT to_regclass('public.domains')"
   args:
     chdir: /opt/powerdns
-  register: pdns_schema_check
+  register: powerdns_master_schema_check
   changed_when: false
 
 - name: Load PowerDNS PostgreSQL schema
   ansible.builtin.shell:
-    cmd: >
-      docker run --rm --entrypoint=sh --network powerdns_default
-      {{ pdns_image }}
-      -c "cat /usr/local/share/doc/pdns/schema.pgsql.sql" |
-      docker compose exec -T postgres
-      psql -U {{ pdns_db_user }} -d {{ pdns_db_name }}
+    cmd: |
+      set -o pipefail
+      docker run --rm --entrypoint=sh --network powerdns_default \
+        {{ pdns_image }} \
+        -c "cat /usr/local/share/doc/pdns/schema.pgsql.sql" | \
+        docker compose exec -T postgres \
+        psql -U {{ pdns_db_user }} -d {{ pdns_db_name }}
+    executable: /bin/bash
   args:
     chdir: /opt/powerdns
-  when: pdns_schema_check.stdout | trim == ''
+  when: powerdns_master_schema_check.stdout | trim == ''
+  changed_when: true
   notify: Restart PowerDNS
 
 - name: Wait for PowerDNS to be listening on port 53

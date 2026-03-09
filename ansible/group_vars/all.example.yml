@@ -64,6 +64,10 @@ netbird_setup_key: "CHANGE_ME_GENERATE_IN_NETBIRD_UI"
 netbird_turn_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_16"
 netbird_turn_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
+# Base64-encoded 32-byte encryption key for NetBird data store.
+# Generate with: python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
+netbird_store_encryption_key: "CHANGE_ME_BASE64_32_BYTES="
+
 # -----------------------------------------------------------------------
 # Common server hardening
 # -----------------------------------------------------------------------
