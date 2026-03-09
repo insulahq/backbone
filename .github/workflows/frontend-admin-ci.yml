@@ -4,18 +4,30 @@ on:
   push:
     paths:
       - "frontend/admin-panel/**"
+      - ".github/workflows/frontend-admin-ci.yml"
   pull_request:
     paths:
       - "frontend/admin-panel/**"
+      - ".github/workflows/frontend-admin-ci.yml"
 
 jobs:
   ci:
     runs-on: ubuntu-latest
-    # Placeholder — expand when admin panel is implemented (Phase 1 Week 5+)
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if admin panel is implemented
+        id: check
+        run: |
+          if [ -f frontend/admin-panel/package.json ]; then
+            echo "implemented=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "implemented=false" >> "$GITHUB_OUTPUT"
+            echo "frontend/admin-panel/package.json not found — skipping CI (Phase 1 Week 5+ placeholder)"
+          fi
+
       - name: Set up Node.js
+        if: steps.check.outputs.implemented == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -23,17 +35,21 @@ jobs:
           cache-dependency-path: frontend/admin-panel/package-lock.json
 
       - name: Install dependencies
+        if: steps.check.outputs.implemented == 'true'
         run: npm ci
         working-directory: frontend/admin-panel
 
       - name: Lint
+        if: steps.check.outputs.implemented == 'true'
         run: npm run lint
         working-directory: frontend/admin-panel
 
       - name: Type check
+        if: steps.check.outputs.implemented == 'true'
         run: npm run typecheck
         working-directory: frontend/admin-panel
 
       - name: Build
+        if: steps.check.outputs.implemented == 'true'
         run: npm run build
         working-directory: frontend/admin-panel

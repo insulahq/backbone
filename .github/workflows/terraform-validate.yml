@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - "terraform/**"
+      - ".github/workflows/terraform-validate.yml"
   pull_request:
     paths:
       - "terraform/**"
+      - ".github/workflows/terraform-validate.yml"
 
 jobs:
   validate:

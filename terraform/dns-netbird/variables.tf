@@ -7,7 +7,8 @@ variable "hcloud_token" {
 variable "ns1_server_type" {
   description = "Hetzner server type for ns1 (Falkenstein)"
   type        = string
-  default     = "cx22"  # 2 vCPU, 4GB RAM — sufficient for DNS + NetBird
+  # cx22 = 2 vCPU, 4GB RAM — sufficient for DNS + NetBird
+  default = "cx22"
 }
 
 variable "ns2_server_type" {
@@ -17,7 +18,8 @@ variable "ns2_server_type" {
 }
 
 variable "admin_ssh_ips" {
-  description = "CIDR blocks allowed to SSH into DNS servers"
+  description = "CIDR blocks allowed to SSH into DNS servers (fill in via tfvars)"
   type        = list(string)
-  default     = []  # Fill in via tfvars — never leave open to 0.0.0.0/0
+  # Never leave open to 0.0.0.0/0
+  default = []
 }
