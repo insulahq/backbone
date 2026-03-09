@@ -1271,7 +1271,10 @@ Don't need ADR for:
 - [ ] ADR-013: NetBird WireGuard mesh deployed (admin access VPN)
 - [ ] ADR-014: DNS-based ingress routing active (DaemonSet NGINX + PowerDNS multi-A records)
 - [ ] ADR-015: MinIO removed; backups on offsite server; media on Longhorn PV
-- [ ] ADR-016: PowerDNS Docker Compose stacks deployed on ns1 + ns2
+- [x] ADR-016: PowerDNS Docker Compose stacks deployed on ns1 + ns2
+- [x] ADR-017: PowerDNS-Admin bound to loopback + nftables DNAT from NetBird wt0
+- [x] ADR-018: Docker restarted after every nftables reload via handler listen
+- [x] ADR-019: route_localnet enabled on dns_master for DNAT-to-loopback
 - [ ] Create ADR for any new architectural decisions
 - [ ] Review ADRs quarterly for relevance
 
@@ -1509,6 +1512,179 @@ CREATE TABLE deployment_history (
 - `04-deployment/DEPLOYMENT_PROCESS.md` — Git Deploy section expanded
 - `02-operations/CLIENT_PANEL_FEATURES.md` — FileBrowser and Git Deploy details added
 - `DATABASE_SCHEMA.md` — New tables added
+
+---
+
+## ADR-017: PowerDNS-Admin Port Binding — Loopback + nftables DNAT from NetBird wt0
+
+**Date:** 2026-03-09
+**Status:** Accepted
+**Deciders:** Platform Architect
+
+### Context
+
+PowerDNS-Admin (pdns-admin) is an internal management web UI that must only be accessible to
+platform operators over the NetBird mesh (not the public internet). It runs as a Docker container
+on ns1.
+
+Initial attempt bound the Docker port to the NetBird IP directly
+(`{{ ns1_netbird_ip }}:8082:80`). This failed with:
+
+```
+iptables: No chain/target/match by that name
+```
+
+Docker's iptables backend initialises its `DOCKER` chain only for interfaces known at startup
+(typically `0.0.0.0` or a specific interface already established). Binding to the NetBird `wt0`
+IP at container start time fails because Docker's iptables `DOCKER` chain has not been
+initialised for that interface.
+
+### Decision
+
+Bind Docker to **loopback only**: `127.0.0.1:{{ pdns_admin_port }}:80`.
+
+Expose the service to NetBird peers via an **nftables prerouting DNAT rule**:
+
+```nftables
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat;
+        iifname "wt0" tcp dport 8082 dnat to 127.0.0.1:8082
+    }
+}
+```
+
+Additionally, enable `net.ipv4.conf.all.route_localnet = 1` (ADR-019) so the kernel routes
+DNAT-rewritten packets (destination `127.0.0.1`) arriving on `wt0` to the loopback interface.
+
+### Consequences
+
+- pdns-admin is inaccessible from public internet; only reachable from a NetBird peer
+- Binding to `127.0.0.1` avoids all Docker iptables interface initialisation problems
+- The nftables DNAT approach is independent of Docker — works regardless of Docker restart order
+- `route_localnet` is a non-default kernel parameter; must be set persistently via sysctl
+
+### Alternatives Considered
+
+- **Bind to `0.0.0.0:8082`** — exposes the UI to the public internet (rejected)
+- **Reverse proxy (nginx/Traefik) on wt0** — adds complexity; DNAT approach is simpler
+- **Bind to `wt0` IP directly** — fails due to Docker iptables chain initialisation (rejected)
+
+---
+
+## ADR-018: Docker Daemon Restart After nftables Reload
+
+**Date:** 2026-03-09
+**Status:** Accepted
+**Deciders:** Platform Architect
+
+### Context
+
+The `common` role manages the nftables firewall. When the nftables config changes, Ansible
+notifies the `Reload nftables` handler which runs `systemctl reload nftables`. This causes
+`nft -f /etc/nftables.conf` to execute `flush ruleset` then reload all rules.
+
+`flush ruleset` removes **all** nftables tables and chains, including the `DOCKER`,
+`DOCKER-USER`, `DOCKER-ISOLATION-STAGE-*` chains that Docker creates via `iptables-nft` when it
+starts. After the flush, those chains no longer exist.
+
+When Docker then tries to start a new container with a port mapping, it calls:
+```
+iptables --wait -t nat -A DOCKER -p tcp ... -j DNAT ...
+```
+This fails with `iptables: No chain/target/match by that name` because the `DOCKER` chain was
+wiped by the nftables flush.
+
+### Decision
+
+Add a second handler in `common/handlers/main.yml` that **listens** for the `Reload nftables`
+notification and restarts Docker:
+
+```yaml
+- name: Restart Docker after nftables reload
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  failed_when: false
+  listen: Reload nftables
+```
+
+`failed_when: false` ensures this is a no-op on hosts where Docker is not installed (e.g. ns2
+before Docker is deployed, future k3s nodes).
+
+Using `listen:` causes Ansible to run both handlers in declaration order when any task notifies
+`Reload nftables` — nftables reloads first, then Docker restarts and re-creates its iptables
+chains.
+
+### Consequences
+
+- Every nftables ruleset change causes a Docker restart on Docker hosts
+- Docker restart takes ~2 seconds; running containers are unaffected (only the daemon restarts)
+- Docker Compose stacks auto-recover because Docker restarts containers that have `restart: unless-stopped`
+- `failed_when: false` silently ignores Docker-not-found on non-Docker hosts
+
+### Alternatives Considered
+
+- **Manual Docker restart** — error-prone, breaks idempotency (rejected)
+- **iptables-save/restore** — saves Docker's chains before nftables reload and restores after;
+  fragile across Docker version updates (rejected)
+- **nftables `include` Docker chains** — Docker manages its chains dynamically; static includes
+  would be stale immediately (rejected)
+
+---
+
+## ADR-019: Enable route_localnet for DNAT-to-Loopback on dns_master
+
+**Date:** 2026-03-09
+**Status:** Accepted
+**Deciders:** Platform Architect
+
+### Context
+
+ADR-017 establishes that pdns-admin traffic arriving on NetBird `wt0` is DNAT'd to
+`127.0.0.1:8082`. However, Linux by default drops packets routed to `127.0.0.0/8` that arrive
+on non-loopback interfaces, even after a prerouting DNAT rewrites the destination.
+
+The kernel parameter controlling this is `net.ipv4.conf.<iface>.route_localnet` (default `0`).
+With `route_localnet=0`, DNAT packets destined for `127.0.0.1` are silently dropped after
+prerouting — they never reach the Docker port.
+
+Symptom: `curl http://100.76.182.198:8082/` from ns2 returns `000` (connection refused/timeout)
+even though the DNAT rule and Docker port binding are both correct.
+
+### Decision
+
+Set `net.ipv4.conf.all.route_localnet = 1` persistently via Ansible `ansible.posix.sysctl` on
+hosts in the `dns_master` group:
+
+```yaml
+- name: Enable route_localnet for DNAT-to-loopback on dns_master
+  ansible.posix.sysctl:
+    name: net.ipv4.conf.all.route_localnet
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+  when: inventory_hostname in groups['dns_master']
+```
+
+`sysctl_set: true` applies the parameter immediately; `state: present` writes it to
+`/etc/sysctl.d/` for persistence across reboots.
+
+### Consequences
+
+- Packets DNAT'd to `127.0.0.1` from `wt0` are correctly routed to the loopback interface
+- `route_localnet=1` is a mild security relaxation: it allows traffic from any interface to
+  reach loopback services. Mitigated here by the nftables input chain which only accepts port
+  8082 from `wt0` (NetBird peers) — the public internet cannot reach port 8082
+- Must be set on any future host that uses DNAT-to-loopback from a non-loopback interface
+
+### Alternatives Considered
+
+- **Bind Docker to `0.0.0.0`** — exposes service publicly (rejected)
+- **Use a Unix socket + reverse proxy** — adds component complexity (rejected)
+- **WireGuard/NetBird built-in routing** — NetBird does not support per-peer port forwarding
+  rules at the application layer (rejected)
 
 ---
 

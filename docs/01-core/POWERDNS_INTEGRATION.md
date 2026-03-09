@@ -1,9 +1,12 @@
 # PowerDNS Integration Workflow
 
-**Document Version:** 3.0
+**Document Version:** 3.1
 **Last Updated:** 2026-03-09
-**Status:** UPDATED — reflects Docker Compose deployment on ns1 + ns2
+**Status:** UPDATED — reflects Docker Compose deployment on ns1 + ns2, pdns-admin deployed
 **Audience:** Backend developers, DevOps engineers, platform architects
+
+> **Operations runbook:** See [NS_SERVERS_OPERATIONS.md](../02-operations/NS_SERVERS_OPERATIONS.md)
+> for deployment gotchas, troubleshooting steps, and firewall reference.
 
 ---
 
@@ -63,7 +66,13 @@ ns1 (Hetzner Falkenstein — 23.88.111.142)
 │   ├── pdns (powerdns/pdns-auth-49:latest)
 │   │   ├── Port 53 TCP+UDP (public — serves DNS queries)
 │   │   └── Port 8081 → mapped to 127.0.0.1:8081 (API — localhost only)
+│   ├── pdns-admin (powerdnsadmin/pda-legacy:latest)
+│   │   └── Port 80 → mapped to 127.0.0.1:8082 (web UI)
+│   │       nftables DNAT: wt0:8082 → 127.0.0.1:8082 (NetBird peers only)
+│   │       Access: http://100.76.182.198:8082/ from any NetBird peer
 │   └── postgres (postgres:16-alpine)
+│       ├── Database: powerdns  (PowerDNS zones/records)
+│       ├── Database: powerdns_admin  (pdns-admin users/settings)
 │       └── Named volume: pdns_pgdata
 │
 └── Primary for all customer zones
