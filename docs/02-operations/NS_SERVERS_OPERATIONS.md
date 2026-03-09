@@ -1,7 +1,7 @@
 # NS Servers Operations Guide
 
 **Applies to:** ns1 (`23.88.111.142`, Hetzner Falkenstein) and ns2 (`89.167.125.29`, Hetzner Helsinki)  
-**Last Updated:** 2026-03-09  
+**Last Updated:** 2026-03-09 (TSIG added)  
 **Status:** Live — both servers provisioned and operational
 
 ---
@@ -282,6 +282,96 @@ fail at startup with a cryptic decryption error.
 
 ---
 
+### 11. `autosecondary` NOTIFY silently ignored without supermasters entry
+
+**Symptom:** ns2 log shows:
+```
+Received NOTIFY for phoenix-host.net from 23.88.111.142 for which we are not authoritative, trying autoprimary
+Unable to find backend willing to host phoenix-host.net for potential autoprimary 23.88.111.142.
+```
+Zone never appears on ns2 despite repeated NOTIFY.
+
+**Root cause:** PowerDNS `autosecondary=yes` mode requires the sending primary to be registered
+in the `supermasters` (4.9 renamed: `autoprimaries`) table. Without this row, ns2 rejects all
+autoprimary NOTIFYs regardless of IP whitelist config.
+
+**Fix (already in place):** Ansible runs `pdnsutil add-autoprimary {{ ns1_public_ip }} ns1.{{ platform_domain }}` on ns2. Verify:
+
+```bash
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil list-autoprimaries
+# Expected: 23.88.111.142  ns1.phoenix-host.net  (account field empty)
+```
+
+---
+
+### 12. `pdnsutil import-tsig-key` is not idempotent
+
+**Symptom:** Second Ansible run fails with:
+```
+ERROR:  duplicate key value violates unique constraint "namealgoindex"
+```
+
+**Root cause:** `import-tsig-key` does a plain `INSERT`. Running it again on an existing key
+raises a PostgreSQL unique constraint violation (or SQLite equivalent).
+
+**Fix (already in place):** Ansible checks `list-tsig-keys` first and only imports if the key
+name is absent.
+
+---
+
+### 13. TSIG key must be activated after every new zone is created
+
+**Symptom:** A new zone created via the Management API transfers to ns2 without TSIG, meaning
+ns2 accepts unsigned AXFR for that zone.
+
+**Root cause:** `activate-tsig-key` is zone-level — it must be called for each zone separately
+after the zone is created. The Ansible playbook does this for existing zones at deploy time, but
+the Management API must also call it for zones it creates.
+
+**Required Management API action:**
+
+After `POST /api/v1/zones` on ns1:
+```
+pdnsutil activate-tsig-key <zone> axfr-tsig primary   # on ns1
+pdnsutil activate-tsig-key <zone> axfr-tsig secondary  # on ns2 (after AXFR)
+```
+
+---
+
+## TSIG Zone Transfer Security
+
+AXFR/NOTIFY between ns1 and ns2 is authenticated with HMAC-SHA256 TSIG (key: `axfr-tsig`).
+
+| Property | Status |
+|---|---|
+| Authenticity | **Yes** — HMAC-SHA256 signed |
+| Integrity | **Yes** — any modification invalidates signature |
+| Confidentiality | No — zone data is cleartext (it's public DNS data) |
+| Replay protection | Yes — 300s timestamp window |
+
+**Verify TSIG is active on a zone:**
+
+```bash
+# On ns1:
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
+  pdnsutil show-zone phoenix-host.net | grep -i tsig
+# Expected: TSIG-ALLOW-AXFR  axfr-tsig
+
+# On ns2:
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
+  pdnsutil show-zone phoenix-host.net | grep -i tsig
+# Expected: AXFR-MASTER-TSIG  axfr-tsig
+```
+
+**Rotate the TSIG key:**
+
+1. Generate new key: `python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"`
+2. Update `pdns_tsig_key_secret` in `ansible/group_vars/all.yml`
+3. Delete old key on both servers: `pdnsutil delete-tsig-key axfr-tsig`
+4. Re-run `ansible-playbook dns.yml` — imports new key and re-activates on all zones
+
+---
+
 ## Firewall Rules Summary (ns1)
 
 | Port | Proto | Source | Purpose |
@@ -318,9 +408,27 @@ fail at startup with a cryptic decryption error.
 ### DNS not resolving
 
 ```bash
+# On ns1 or ns2:
 dig @23.88.111.142 phoenix-host.net A    # query ns1 directly
 dig @89.167.125.29 phoenix-host.net A    # query ns2 directly
-# Check container: docker compose -f /opt/powerdns/docker-compose.yml logs pdns
+# Check container logs:
+docker compose -f /opt/powerdns/docker-compose.yml logs pdns
+```
+
+### Zone not on ns2 / AXFR not working
+
+```bash
+# Check autoprimary is registered on ns2:
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil list-autoprimaries
+
+# Trigger manual NOTIFY from ns1:
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdns_control notify phoenix-host.net
+
+# Watch ns2 logs for AXFR:
+docker compose -f /opt/powerdns/docker-compose.yml logs --tail=20 pdns
+
+# Verify zone exists on ns2:
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil list-all-zones
 ```
 
 ### NetBird peers not connected

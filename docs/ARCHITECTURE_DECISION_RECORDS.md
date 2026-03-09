@@ -1275,6 +1275,7 @@ Don't need ADR for:
 - [x] ADR-017: PowerDNS-Admin bound to loopback + nftables DNAT from NetBird wt0
 - [x] ADR-018: Docker restarted after every nftables reload via handler listen
 - [x] ADR-019: route_localnet enabled on dns_master for DNAT-to-loopback
+- [x] ADR-020: TSIG (HMAC-SHA256) for AXFR/NOTIFY authentication between ns1 and ns2
 - [ ] Create ADR for any new architectural decisions
 - [ ] Review ADRs quarterly for relevance
 
@@ -1685,6 +1686,81 @@ hosts in the `dns_master` group:
 - **Use a Unix socket + reverse proxy** — adds component complexity (rejected)
 - **WireGuard/NetBird built-in routing** — NetBird does not support per-peer port forwarding
   rules at the application layer (rejected)
+
+---
+
+## ADR-020: TSIG (HMAC-SHA256) for AXFR/NOTIFY Authentication Between ns1 and ns2
+
+**Date:** 2026-03-09
+**Status:** Accepted
+**Deciders:** Platform Architect
+
+### Context
+
+Zone transfers (AXFR) and change notifications (NOTIFY) between ns1 (primary) and ns2
+(secondary) travel over the public internet in cleartext. Without authentication, an attacker
+with a network position between Hetzner Falkenstein and Hetzner Helsinki could:
+
+- **Read** all zone data (A, MX, TXT, DKIM, SPF records) as it transfers
+- **Inject** a forged AXFR response, poisoning ns2 with false records
+
+The DNS protocol itself (RFC 2845) provides TSIG (Transaction Signature) to authenticate DNS
+messages with a shared HMAC key, without encrypting them.
+
+### Decision
+
+Implement **HMAC-SHA256 TSIG** for all AXFR and NOTIFY traffic between ns1 and ns2.
+
+- Algorithm: `hmac-sha256` (256-bit key)
+- Key name: `axfr-tsig`
+- Key stored in: `ansible/group_vars/all.yml` (gitignored) as `pdns_tsig_key_secret`
+- Key provisioned to both servers via Ansible `pdnsutil import-tsig-key`
+- Activated per-zone via `pdnsutil activate-tsig-key <zone> axfr-tsig primary` (ns1) and
+  `pdnsutil activate-tsig-key <zone> axfr-tsig secondary` (ns2)
+
+ns2's `supermasters` table must contain ns1's public IP so `autosecondary` NOTIFY acceptance
+works. This is provisioned by `pdnsutil add-autoprimary {{ ns1_public_ip }} ns1.{{ platform_domain }}`.
+
+### What TSIG provides
+
+| Property | With TSIG |
+|---|---|
+| Authenticity | Yes — only holders of the shared key can produce a valid HMAC |
+| Integrity | Yes — any in-transit modification invalidates the HMAC |
+| Confidentiality | **No** — zone data is still sent in cleartext |
+| Replay protection | Yes — timestamp in TSIG record (300s window) |
+
+Zone data (A, MX, TXT records) is public DNS information by definition — confidentiality is not
+required. The primary risk is zone poisoning via a forged AXFR, which TSIG prevents.
+
+### Consequences
+
+- AXFR without a valid TSIG signature is rejected by both servers
+- Any new zone created by the Management API must have `activate-tsig-key` called on it
+  immediately after creation on both ns1 and ns2 — document this in the Management API spec
+- Rotating the TSIG key requires updating `all.yml` and re-running `dns.yml` — the existing key
+  is replaced via `pdnsutil import-tsig-key` (delete + re-insert)
+- TSIG does not encrypt; if encryption of zone content in transit is required in future,
+  route AXFR over the NetBird WireGuard tunnel instead (or in addition)
+
+### Implementation Gotchas
+
+1. `pdnsutil import-tsig-key` does a plain `INSERT` — not an `UPSERT`. Running it twice fails
+   with a unique constraint violation. Must check `list-tsig-keys` first.
+2. `autosecondary` NOTIFY acceptance requires ns1 to be registered in `supermasters` table
+   via `pdnsutil add-autoprimary`. Without this, ns2 logs:
+   `Unable to find backend willing to host <zone> for potential autoprimary`.
+3. `activate-tsig-key` on ns2 can only run after the zone exists (after first AXFR). The
+   Ansible task runs on every playbook execution — it is a no-op if the key is already
+   active, safe to repeat.
+
+### Alternatives Considered
+
+- **WireGuard tunnel (NetBird)** — full encryption + authentication; deferred because TSIG
+  meets the tamper-detection requirement at lower complexity
+- **DNSSEC** — signs zone records, not the transfer channel; does not prevent AXFR injection
+  (complementary, not a replacement)
+- **No authentication** — rejected; zone injection risk is real on shared Hetzner backbone
 
 ---
 
