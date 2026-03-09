@@ -119,3 +119,76 @@
     host: "127.0.0.1"
     timeout: 60
     delay: 5
+
+# ---------------------------------------------------------------------------
+# Autoprimary registration — ns1 must be in supermasters table for
+# autosecondary to accept NOTIFY and pull zones via AXFR
+# ---------------------------------------------------------------------------
+
+- name: Check if ns1 is registered as autoprimary on secondary
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil list-autoprimaries
+  args:
+    chdir: /opt/powerdns
+  register: powerdns_slave_autoprimaries
+  changed_when: false
+
+- name: Register ns1 as autoprimary on secondary
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil add-autoprimary {{ ns1_public_ip }} ns1.{{ platform_domain }} ""
+  args:
+    chdir: /opt/powerdns
+  when: ns1_public_ip not in powerdns_slave_autoprimaries.stdout
+  changed_when: true
+
+# ---------------------------------------------------------------------------
+# TSIG — authenticate AXFR/NOTIFY from ns1 (primary)
+# ---------------------------------------------------------------------------
+
+- name: Check if TSIG key already exists in PowerDNS database (secondary)
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil list-tsig-keys
+  args:
+    chdir: /opt/powerdns
+  register: powerdns_slave_tsig_keys
+  changed_when: false
+
+- name: Import TSIG key into PowerDNS database (secondary)
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil import-tsig-key
+      {{ pdns_tsig_key_name }}
+      {{ pdns_tsig_key_algo }}
+      {{ pdns_tsig_key_secret }}
+  args:
+    chdir: /opt/powerdns
+  when: pdns_tsig_key_name not in powerdns_slave_tsig_keys.stdout
+  changed_when: true
+
+- name: Get list of DNS zones on secondary
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil list-all-zones
+  args:
+    chdir: /opt/powerdns
+  register: powerdns_slave_zone_list
+  changed_when: false
+
+- name: Activate TSIG key as secondary on every zone
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T pdns
+      pdnsutil activate-tsig-key
+      {{ item | trim }} {{ pdns_tsig_key_name }} secondary
+  args:
+    chdir: /opt/powerdns
+  loop: "{{ powerdns_slave_zone_list.stdout_lines | select('match', '^[a-zA-Z0-9]') | list }}"
+  changed_when: true
