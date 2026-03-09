@@ -74,7 +74,7 @@
     dest: /opt/powerdns/pdns.conf
     owner: root
     group: root
-    mode: '0640'
+    mode: '0644'
   notify: Restart PowerDNS
 
 - name: Deploy Docker Compose stack

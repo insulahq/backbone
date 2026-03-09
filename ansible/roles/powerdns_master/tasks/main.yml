@@ -75,7 +75,7 @@
     dest: /opt/powerdns/pdns.conf
     owner: root
     group: root
-    mode: '0640'
+    mode: '0644'
   notify: Restart PowerDNS
 
 - name: Deploy Docker Compose stack
@@ -96,6 +96,47 @@
     project_src: /opt/powerdns
     state: present
     pull: always
+
+# ---------------------------------------------------------------------------
+# Schema initialisation — idempotent: only runs if the domains table is absent
+# ---------------------------------------------------------------------------
+
+- name: Wait for PostgreSQL to be ready
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T postgres
+      pg_isready -U {{ pdns_db_user }} -d {{ pdns_db_name }}
+  args:
+    chdir: /opt/powerdns
+  register: pg_ready
+  retries: 12
+  delay: 5
+  until: pg_ready.rc == 0
+  changed_when: false
+
+- name: Check if PowerDNS schema already exists
+  ansible.builtin.command:
+    cmd: >
+      docker compose exec -T postgres
+      psql -U {{ pdns_db_user }} -d {{ pdns_db_name }}
+      -tAc "SELECT to_regclass('public.domains')"
+  args:
+    chdir: /opt/powerdns
+  register: pdns_schema_check
+  changed_when: false
+
+- name: Load PowerDNS PostgreSQL schema
+  ansible.builtin.shell:
+    cmd: >
+      docker run --rm --entrypoint=sh --network powerdns_default
+      {{ pdns_image }}
+      -c "cat /usr/local/share/doc/pdns/schema.pgsql.sql" |
+      docker compose exec -T postgres
+      psql -U {{ pdns_db_user }} -d {{ pdns_db_name }}
+  args:
+    chdir: /opt/powerdns
+  when: pdns_schema_check.stdout | trim == ''
+  notify: Restart PowerDNS
 
 - name: Wait for PowerDNS to be listening on port 53
   ansible.builtin.wait_for:
