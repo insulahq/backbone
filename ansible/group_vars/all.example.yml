@@ -43,24 +43,16 @@ pdns_admin_secret_key: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
 # NetBird mesh IP of ns1 — shown in NetBird dashboard or: netbird status on ns1
 ns1_netbird_ip: "YOUR_NS1_NETBIRD_IP"
+ns2_netbird_ip: "YOUR_NS2_NETBIRD_IP"
 
 # AXFR: which IPs are allowed to pull zones from ns1
 # Must include ns2's public IP
 pdns_axfr_allow_ips:
-  - "{{ ns2_public_ip }}"
+  - "{{ ns2_netbird_ip }}"   # AXFR over NetBird WireGuard tunnel — encrypted in transit
   # Add additional external slaves here if needed
 
 # DNSSEC
 pdns_dnssec_enabled: true
-
-# TSIG key for signing AXFR/NOTIFY between ns1 (primary) and ns2 (secondary).
-# Algorithm: hmac-sha256 — provides authentication and tamper detection for zone transfers.
-# Key name is arbitrary but must match on both servers.
-# Generate value with: python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
-# WARNING: changing this key after deployment requires re-running dns.yml on both servers.
-pdns_tsig_key_name: "axfr-tsig"
-pdns_tsig_key_algo: "hmac-sha256"
-pdns_tsig_key_secret: "CHANGE_ME_GENERATE_WITH_PYTHON3_BASE64_32_BYTES="
 
 # -----------------------------------------------------------------------
 # NetBird settings

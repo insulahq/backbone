@@ -13,12 +13,13 @@ local-port=53
 primary=yes
 secondary=no
 
-# AXFR — allow ns2 to pull zones
+# AXFR — allow ns2 to pull zones over NetBird WireGuard tunnel only.
+# Using the NetBird IP (100.76.x.x) means traffic travels through the
+# encrypted WireGuard tunnel — not the public internet.
 allow-axfr-ips={{ pdns_axfr_allow_ips | join(',') }}
-allow-unsigned-autoprimary=no
 
-# Notify ns2 on zone changes
-also-notify={{ ns2_public_ip }}
+# Notify ns2 on zone changes — send to ns2 NetBird IP so NOTIFY goes over WireGuard tunnel
+also-notify={{ ns2_netbird_ip }}:53
 
 # REST API — bound to 0.0.0.0 inside container; host maps it to 127.0.0.1:{{ pdns_api_port }}
 api=yes

@@ -1275,7 +1275,7 @@ Don't need ADR for:
 - [x] ADR-017: PowerDNS-Admin bound to loopback + nftables DNAT from NetBird wt0
 - [x] ADR-018: Docker restarted after every nftables reload via handler listen
 - [x] ADR-019: route_localnet enabled on dns_master for DNAT-to-loopback
-- [x] ADR-020: TSIG (HMAC-SHA256) for AXFR/NOTIFY authentication between ns1 and ns2
+- [x] ADR-020: AXFR/NOTIFY routed over NetBird WireGuard tunnel (TSIG removed)
 - [ ] Create ADR for any new architectural decisions
 - [ ] Review ADRs quarterly for relevance
 
@@ -1689,78 +1689,101 @@ hosts in the `dns_master` group:
 
 ---
 
-## ADR-020: TSIG (HMAC-SHA256) for AXFR/NOTIFY Authentication Between ns1 and ns2
+## ADR-020: AXFR/NOTIFY Routed Over NetBird WireGuard Tunnel (TSIG Removed)
 
-**Date:** 2026-03-09
+**Date:** 2026-03-10 (supersedes 2026-03-09 TSIG draft)
 **Status:** Accepted
 **Deciders:** Platform Architect
 
 ### Context
 
 Zone transfers (AXFR) and change notifications (NOTIFY) between ns1 (primary) and ns2
-(secondary) travel over the public internet in cleartext. Without authentication, an attacker
-with a network position between Hetzner Falkenstein and Hetzner Helsinki could:
+(secondary) must be authenticated and protected against injection or eavesdropping.
 
-- **Read** all zone data (A, MX, TXT, DKIM, SPF records) as it transfers
-- **Inject** a forged AXFR response, poisoning ns2 with false records
+An initial implementation used TSIG (HMAC-SHA256) to authenticate DNS messages while still
+routing them over the public internet. TSIG was then removed in favour of routing AXFR/NOTIFY
+exclusively over the existing NetBird WireGuard mesh.
 
-The DNS protocol itself (RFC 2845) provides TSIG (Transaction Signature) to authenticate DNS
-messages with a shared HMAC key, without encrypting them.
+The platform already runs NetBird on both ns1 and ns2 for admin access (ADR-013). The
+WireGuard tunnel between them provides:
+
+- **Authentication:** Public-key WireGuard handshake — only peers with the correct private key
+  can establish or inject traffic into the tunnel
+- **Encryption:** ChaCha20-Poly1305 AEAD — zone data is encrypted in transit
+- **Replay protection:** WireGuard nonce prevents packet replay
+
+TSIG provided authentication + integrity (HMAC-SHA256) but **no encryption** — zone data
+(A, MX, TXT, DKIM, SPF records) travelled in cleartext. WireGuard provides all three properties.
+TSIG is redundant when WireGuard is already in use.
 
 ### Decision
 
-Implement **HMAC-SHA256 TSIG** for all AXFR and NOTIFY traffic between ns1 and ns2.
+Route all AXFR and NOTIFY traffic between ns1 and ns2 exclusively over the NetBird WireGuard
+tunnel. TSIG is not used.
 
-- Algorithm: `hmac-sha256` (256-bit key)
-- Key name: `axfr-tsig`
-- Key stored in: `ansible/group_vars/all.yml` (gitignored) as `pdns_tsig_key_secret`
-- Key provisioned to both servers via Ansible `pdnsutil import-tsig-key`
-- Activated per-zone via `pdnsutil activate-tsig-key <zone> axfr-tsig primary` (ns1) and
-  `pdnsutil activate-tsig-key <zone> axfr-tsig secondary` (ns2)
+**ns1 (primary) configuration:**
+- `also-notify = {{ ns2_netbird_ip }}:53` — sends NOTIFY to ns2's WireGuard IP
+- `allow-axfr-ips = {{ ns2_netbird_ip }}` — only accepts AXFR requests from ns2's WireGuard IP
 
-ns2's `supermasters` table must contain ns1's public IP so `autosecondary` NOTIFY acceptance
-works. This is provisioned by `pdnsutil add-autoprimary {{ ns1_public_ip }} ns1.{{ platform_domain }}`.
+**ns2 (secondary) configuration:**
+- `allow-notify-from = {{ ns1_netbird_ip }}` — only accepts NOTIFYs from ns1's WireGuard IP
+- Autoprimary registered with ns1's **WireGuard IP** (`{{ ns1_netbird_ip }}`), not its public IP
 
-### What TSIG provides
+**NetBird IPs:**
+- ns1: `100.76.182.198`
+- ns2: `100.76.92.172`
 
-| Property | With TSIG |
+### What WireGuard provides
+
+| Property | Status |
 |---|---|
-| Authenticity | Yes — only holders of the shared key can produce a valid HMAC |
-| Integrity | Yes — any in-transit modification invalidates the HMAC |
-| Confidentiality | **No** — zone data is still sent in cleartext |
-| Replay protection | Yes — timestamp in TSIG record (300s window) |
-
-Zone data (A, MX, TXT records) is public DNS information by definition — confidentiality is not
-required. The primary risk is zone poisoning via a forged AXFR, which TSIG prevents.
+| Authenticity | **Yes** — WireGuard public-key handshake |
+| Integrity | **Yes** — ChaCha20-Poly1305 AEAD |
+| Confidentiality | **Yes** — encrypted in transit |
+| Replay protection | **Yes** — WireGuard nonce |
 
 ### Consequences
 
-- AXFR without a valid TSIG signature is rejected by both servers
-- Any new zone created by the Management API must have `activate-tsig-key` called on it
-  immediately after creation on both ns1 and ns2 — document this in the Management API spec
-- Rotating the TSIG key requires updating `all.yml` and re-running `dns.yml` — the existing key
-  is replaced via `pdnsutil import-tsig-key` (delete + re-insert)
-- TSIG does not encrypt; if encryption of zone content in transit is required in future,
-  route AXFR over the NetBird WireGuard tunnel instead (or in addition)
+- Zone transfers are encrypted and authenticated — no plain-text zone data on the wire
+- NOTIFY from ns1's public IP is rejected by ns2 (`allow-notify-from` only accepts `100.76.182.198`)
+- AXFR from ns2's public IP is rejected by ns1 (`allow-axfr-ips` only accepts `100.76.92.172`)
+- Zone transfer depends on the WireGuard mesh being up. If both ns1 and ns2 lose NetBird
+  connectivity simultaneously (extremely unlikely — different datacenters), AXFR will not work
+  until the tunnel is restored. Mitigation: the xfr-cycle-interval (60s) ensures automatic
+  recovery once the tunnel is re-established.
+- Management API must create zones with `kind: "Master"` (not `kind: "Native"`) — `Native`
+  zones on ns1 do not serve AXFR out. See Gotcha #14 in NS_SERVERS_OPERATIONS.md.
 
 ### Implementation Gotchas
 
-1. `pdnsutil import-tsig-key` does a plain `INSERT` — not an `UPSERT`. Running it twice fails
-   with a unique constraint violation. Must check `list-tsig-keys` first.
-2. `autosecondary` NOTIFY acceptance requires ns1 to be registered in `supermasters` table
-   via `pdnsutil add-autoprimary`. Without this, ns2 logs:
-   `Unable to find backend willing to host <zone> for potential autoprimary`.
-3. `activate-tsig-key` on ns2 can only run after the zone exists (after first AXFR). The
-   Ansible task runs on every playbook execution — it is a no-op if the key is already
-   active, safe to repeat.
+1. **Docker userland-proxy masquerades source IPs.** With Docker's default `userland-proxy=true`,
+   PowerDNS inside the container sees AXFR/NOTIFY sources as `172.18.0.1` (Docker bridge
+   gateway) instead of the real remote IP. Fix: `"userland-proxy": false` in `daemon.json` on
+   both ns1 and ns2.
+2. **ns2 PowerDNS must use `network_mode: host`.** Even with `userland-proxy: false`, NetBird's
+   postrouting masquerade chain rewrites source IPs for packets forwarded from `wt0` through
+   Docker's bridge network. `network_mode: host` bypasses all Docker NAT entirely, preserving
+   the original WireGuard source IP (`100.76.182.198`) end-to-end.
+3. **`network_mode: host` requires `user: root`** for the `powerdns/pdns-auth-49` image to bind
+   port 53 (privileged port, below 1024). The image's default uid 953 cannot bind privileged
+   ports without ambient capabilities, so the container is run as root.
+4. **Zone type must be `primary`** for AXFR out. pdns-admin creates `Native` zones by default.
+   Set with: `pdnsutil set-kind <zone> primary` on ns1.
+5. **Old public-IP autoprimary must be removed** if it was ever registered on ns2. Having both
+   `23.88.111.142` and `100.76.182.198` as autoprimaries allows the old public-IP NOTIFY path
+   to bypass `allow-notify-from`. Remove with:
+   `pdnsutil remove-autoprimary 23.88.111.142 ns1.phoenix-host.net`
 
 ### Alternatives Considered
 
-- **WireGuard tunnel (NetBird)** — full encryption + authentication; deferred because TSIG
-  meets the tamper-detection requirement at lower complexity
+- **TSIG (HMAC-SHA256)** — authentication + integrity but no encryption; requires shared secret
+  management; `pdnsutil import-tsig-key` is not idempotent (plain INSERT). TSIG was briefly
+  implemented and then removed in favour of this approach (WireGuard supersedes it).
+- **TSIG + WireGuard** — belt-and-suspenders; redundant given WireGuard already provides auth +
+  encryption. Adds operational complexity for no security benefit.
 - **DNSSEC** — signs zone records, not the transfer channel; does not prevent AXFR injection
-  (complementary, not a replacement)
-- **No authentication** — rejected; zone injection risk is real on shared Hetzner backbone
+  (complementary, not a replacement for transport security).
+- **No protection** — rejected; zone injection risk is real on shared Hetzner backbone.
 
 ---
 

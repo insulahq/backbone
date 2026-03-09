@@ -13,8 +13,8 @@ local-port=53
 primary=no
 secondary=yes
 
-# Accept NOTIFY only from ns1
-allow-notify-from={{ ns1_public_ip }}
+# Accept NOTIFY only from ns1 via NetBird WireGuard tunnel
+allow-notify-from={{ ns1_netbird_ip }}
 
 # Autosecondary — auto-create zones on first NOTIFY from ns1
 autosecondary=yes

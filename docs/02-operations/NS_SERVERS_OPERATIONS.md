@@ -1,7 +1,7 @@
 # NS Servers Operations Guide
 
 **Applies to:** ns1 (`23.88.111.142`, Hetzner Falkenstein) and ns2 (`89.167.125.29`, Hetzner Helsinki)  
-**Last Updated:** 2026-03-09 (TSIG added)  
+**Last Updated:** 2026-03-10 (WireGuard tunnel AXFR; TSIG removed)  
 **Status:** Live — both servers provisioned and operational
 
 ---
@@ -304,71 +304,147 @@ docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil list-au
 
 ---
 
-### 12. `pdnsutil import-tsig-key` is not idempotent
+### 12. Docker userland-proxy masquerades source IP — disabling it is required
 
-**Symptom:** Second Ansible run fails with:
+**Symptom:** PowerDNS on ns1 or ns2 sees AXFR/NOTIFY source as `172.18.0.1` (Docker gateway)
+instead of the real remote IP (e.g. `100.76.92.172`), causing `allow-axfr-ips` and
+`allow-notify-from` checks to fail with "client IP has no permission" or "Refused".
+
+**Root cause:** Docker's default `userland-proxy` (docker-proxy) is a userspace process that
+receives inbound packets and forwards them to the container. It does not preserve the original
+source IP — all forwarded packets appear to come from the Docker bridge gateway (`172.18.0.1`).
+
+**Fix (already in place):** `daemon.json` on both ns1 and ns2 includes `"userland-proxy": false`.
+With this setting, Docker uses kernel-level iptables DNAT instead of docker-proxy, which
+preserves the original source IP end-to-end.
+
+**Verify:**
+```bash
+cat /etc/docker/daemon.json | grep userland
+# Expected: "userland-proxy": false
+
+# On ns2 (no docker-proxy process for port 53):
+ss -lunp | grep :53
+# Expected: pdns_server directly (not docker-proxy or dockerd)
 ```
-ERROR:  duplicate key value violates unique constraint "namealgoindex"
-```
 
-**Root cause:** `import-tsig-key` does a plain `INSERT`. Running it again on an existing key
-raises a PostgreSQL unique constraint violation (or SQLite equivalent).
-
-**Fix (already in place):** Ansible checks `list-tsig-keys` first and only imports if the key
-name is absent.
+See: **ADR-021** (new — Docker userland-proxy)
 
 ---
 
-### 13. TSIG key must be activated after every new zone is created
+### 13. ns2 PowerDNS container uses `network_mode: host` + `user: root`
 
-**Symptom:** A new zone created via the Management API transfers to ns2 without TSIG, meaning
-ns2 accepts unsigned AXFR for that zone.
+**Context:** ns2's PowerDNS container must use `network_mode: host` so that source IPs are
+preserved end-to-end through the NetBird WireGuard interface — even with `userland-proxy: false`,
+NetBird's postrouting masquerade chain rewrites the source IP of forwarded packets entering via
+`wt0`. Host networking bypasses all Docker NAT and masquerade chains entirely.
 
-**Root cause:** `activate-tsig-key` is zone-level — it must be called for each zone separately
-after the zone is created. The Ansible playbook does this for existing zones at deploy time, but
-the Management API must also call it for zones it creates.
+With host networking, the container cannot bind to port 53 unless it runs as root (non-root
+process with `NET_BIND_SERVICE` is not sufficient for ambient capabilities in this image).
 
-**Required Management API action:**
-
-After `POST /api/v1/zones` on ns1:
+**What's deployed:**
+```yaml
+# docker-compose.yml on ns2 (Ansible-managed)
+pdns:
+  image: powerdns/pdns-auth-49:latest
+  restart: unless-stopped
+  network_mode: host
+  user: root
+  volumes:
+    - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+    - pdns_sqlite:/var/lib/powerdns
 ```
-pdnsutil activate-tsig-key <zone> axfr-tsig primary   # on ns1
-pdnsutil activate-tsig-key <zone> axfr-tsig secondary  # on ns2 (after AXFR)
+
+**Verify:**
+```bash
+# On ns2:
+docker compose -f /opt/powerdns/docker-compose.yml ps
+# Expected: STATUS = Up (not Restarting)
+
+ss -lunp | grep :53
+# Expected: pdns_server pid directly on host (no docker-proxy)
 ```
 
 ---
 
-## TSIG Zone Transfer Security
+### 14. Zone type must be `primary` (not `native`) for AXFR out
 
-AXFR/NOTIFY between ns1 and ns2 is authenticated with HMAC-SHA256 TSIG (key: `axfr-tsig`).
+**Symptom:** AXFR from ns2 to ns1 fails with:
+```
+AXFR chunk error: Server Not Authoritative for zone / Not Authorized
+```
 
-| Property | Status |
-|---|---|
-| Authenticity | **Yes** — HMAC-SHA256 signed |
-| Integrity | **Yes** — any modification invalidates signature |
-| Confidentiality | No — zone data is cleartext (it's public DNS data) |
-| Replay protection | Yes — 300s timestamp window |
+**Root cause:** Zones created via pdns-admin default to `Native` type. A `Native` zone does not
+serve AXFR even if `primary=yes` is set in `pdns.conf`. The zone must be explicitly set to
+`Primary` type.
 
-**Verify TSIG is active on a zone:**
+**Fix:** Run on ns1 once per zone:
+```bash
+docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
+  pdnsutil set-kind <zone> primary
+```
 
+The Management API must also create zones as `kind: "Master"` (the API term for Primary):
+```
+POST /api/v1/servers/localhost/zones
+{"name": "example.com.", "kind": "Master", "nameservers": [...]}
+```
+
+**Verify:**
 ```bash
 # On ns1:
 docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
-  pdnsutil show-zone phoenix-host.net | grep -i tsig
-# Expected: TSIG-ALLOW-AXFR  axfr-tsig
-
-# On ns2:
-docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
-  pdnsutil show-zone phoenix-host.net | grep -i tsig
-# Expected: AXFR-MASTER-TSIG  axfr-tsig
+  pdnsutil show-zone phoenix-host.net | head -1
+# Expected: This is a Master zone
 ```
 
-**Rotate the TSIG key:**
+---
 
-1. Generate new key: `python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"`
-2. Update `pdns_tsig_key_secret` in `ansible/group_vars/all.yml`
-3. Delete old key on both servers: `pdnsutil delete-tsig-key axfr-tsig`
-4. Re-run `ansible-playbook dns.yml` — imports new key and re-activates on all zones
+## WireGuard Tunnel AXFR/NOTIFY Security
+
+AXFR/NOTIFY between ns1 and ns2 is routed exclusively over the NetBird WireGuard mesh (no
+public-internet zone transfers). TSIG has been removed — WireGuard provides both authentication
+and encryption at the transport layer.
+
+| Property | Status |
+|---|---|
+| Authenticity | **Yes** — WireGuard public-key authentication |
+| Integrity | **Yes** — ChaCha20-Poly1305 AEAD |
+| Confidentiality | **Yes** — encrypted in transit |
+| Replay protection | **Yes** — WireGuard nonce |
+
+**Transport:** ns1 → ns2 NOTIFY via `also-notify=100.76.92.172:53` (ns2 NetBird IP).
+ns2 → ns1 AXFR via primary `100.76.182.198` (ns1 NetBird IP, stored in zone record).
+
+**Enforcement:**
+- `allow-notify-from=100.76.182.198` on ns2 — rejects NOTIFYs from any non-tunnel IP
+- `allow-axfr-ips=100.76.92.172` on ns1 — rejects AXFR requests from any non-tunnel IP
+- ns2 autoprimary registered with ns1's NetBird IP `100.76.182.198` (not public IP)
+
+**Verify the full chain:**
+
+```bash
+# 1. Force a NOTIFY from ns1:
+ssh -i ~/phoenix-host.key root@23.88.111.142 \
+  'docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdns_control notify phoenix-host.net'
+
+# 2. Check ns2 logs — NOTIFY from 23.88.111.142 must be REFUSED:
+ssh -i ~/phoenix-host.key root@89.167.125.29 \
+  'docker compose -f /opt/powerdns/docker-compose.yml logs --tail=10 pdns'
+# Expected:
+#   "from 23.88.111.142 but the remote is not providing a TSIG key or in allow-notify-from (Refused)"
+#   (no error for 100.76.182.198 — it is accepted silently, triggers SOA check/AXFR)
+
+# 3. Force a zone retrieve (bypasses NOTIFY, tests AXFR path directly):
+ssh -i ~/phoenix-host.key root@89.167.125.29 \
+  'docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdns_control retrieve phoenix-host.net'
+# Then check logs for:
+#   "AXFR-in zone: 'phoenix-host.net', primary: '100.76.182.198', zone committed with serial ..."
+
+# 4. Verify zone is current on ns2:
+ssh -i ~/phoenix-host.key root@89.167.125.29 \
+  'docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil list-all-zones'
+```
 
 ---
 
