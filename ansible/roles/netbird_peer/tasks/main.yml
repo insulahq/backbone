@@ -1,18 +1,20 @@
 ---
-# NetBird peer enrollment — runs on ns2 (Helsinki) and all future k3s nodes
+# NetBird peer enrollment — runs on all platform servers (ns1, ns2, k3s nodes, etc.)
 # Enrolls the host into the NetBird WireGuard mesh using the management server on ns1.
 #
 # Setup key strategy:
 #   A one-time setup key is generated via the NetBird API (from the Ansible control
 #   machine) immediately before enrollment. It expires after 1 use or 10 minutes,
-#   whichever comes first. This prevents key reuse and limits exposure.
+#   whichever comes first. The key carries auto_groups so the peer is placed into
+#   the "phoenix-host.net" group automatically at enrollment — no separate API call
+#   needed. This prevents key reuse and limits exposure.
 #
 #   Requires: netbird_api_pat set in group_vars/all.yml (a Personal Access Token
 #   generated in the NetBird dashboard under Settings → Access Tokens).
 #
 # Idempotency:
-#   If the peer is already enrolled (netbird status shows Connected), the
-#   enrollment tasks are skipped. Re-running the playbook is safe.
+#   If the peer is already enrolled (netbird status shows Connected), the enrollment
+#   and group tasks are skipped. Re-running the playbook is safe.
 
 # ---------------------------------------------------------------------------
 # Install NetBird client
@@ -94,6 +96,42 @@
     - not netbird_peer_already_enrolled
     - netbird_api_pat == "CHANGE_ME_GENERATE_IN_NETBIRD_DASHBOARD"
 
+# ---------------------------------------------------------------------------
+# Resolve the "phoenix-host.net" group ID — used as auto_groups on the key
+# so the peer is placed into the group automatically at enrollment time.
+# ---------------------------------------------------------------------------
+
+- name: Fetch NetBird groups from API
+  ansible.builtin.uri:
+    url: "{{ netbird_management_url }}/api/groups"
+    method: GET
+    headers:
+      Authorization: "Token {{ netbird_api_pat }}"
+    status_code: 200
+    validate_certs: true
+  register: netbird_peer_groups_response
+  delegate_to: localhost
+  when: not netbird_peer_already_enrolled
+
+- name: Resolve phoenix-host.net group ID
+  ansible.builtin.set_fact:
+    netbird_peer_platform_group_id: >-
+      {{ (netbird_peer_groups_response.json
+          | selectattr('name', 'equalto', netbird_platform_group)
+          | map(attribute='id')
+          | list
+          | first) }}
+  when: not netbird_peer_already_enrolled
+
+- name: Fail if platform group not found
+  ansible.builtin.fail:
+    msg: >
+      NetBird group "{{ netbird_platform_group }}" not found.
+      Create it in the NetBird dashboard before enrolling peers.
+  when:
+    - not netbird_peer_already_enrolled
+    - netbird_peer_platform_group_id is not defined or netbird_peer_platform_group_id == ''
+
 - name: Create one-time setup key via NetBird API
   ansible.builtin.uri:
     url: "{{ netbird_management_url }}/api/setup-keys"
@@ -107,7 +145,8 @@
       type: "one-off"
       expires_in: 600          # 10 minutes — expires even if unused
       usage_limit: 1
-      auto_groups: []
+      auto_groups:
+        - "{{ netbird_peer_platform_group_id }}"
       ephemeral: false
     status_code: 200
     validate_certs: true

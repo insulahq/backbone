@@ -54,6 +54,11 @@ netbird_version: "0.28.0"
 netbird_management_url: "https://netbird.your-domain.example:443"
 netbird_domain: "netbird.your-domain.example"
 
+# NetBird group all platform servers must belong to.
+# Every peer enrolled via Ansible is automatically added to this group.
+# Access control policies in the dashboard are applied at group level.
+netbird_platform_group: "phoenix-host.net"
+
 # Personal Access Token for the NetBird API — used by Ansible to create
 # one-time setup keys per peer immediately before enrollment.
 # Steps:
