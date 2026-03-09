@@ -1107,6 +1107,114 @@ A second requirement has emerged: **admins need to access individual customer fi
 
 ---
 
+## ADR-016: PowerDNS Runs in Docker Compose (Not Bare-Metal, Not Kubernetes)
+
+**Date:** 2026-03-09
+**Status:** Accepted
+**Deciders:** Platform Architecture Team
+
+### Context
+
+PowerDNS needs to run on ns1 (Hetzner Falkenstein, Debian 13 trixie) and ns2 (Hetzner
+Helsinki, Debian 13 trixie). These VPS nodes are **not** part of the k3s cluster — they
+are standalone nodes that serve DNS and host NetBird management.
+
+Three deployment options were evaluated:
+
+1. **Bare-metal apt install** — Install PowerDNS directly from the system package manager
+2. **Kubernetes pod** — Run PowerDNS as a pod inside the k3s cluster
+3. **Docker Compose on VPS nodes** — Run PowerDNS as a Docker Compose stack on ns1/ns2
+
+Bare-metal was attempted first (via Ansible) and immediately encountered problems:
+
+- The PowerDNS official apt repository only provides `bookworm` (Debian 12) builds
+- The `bookworm` PowerDNS packages depend on `libboost1.74`, which does not exist on
+  Debian 13 trixie (trixie ships `libboost1.83+`)
+- Backporting or building from source adds operational complexity and an unbounded
+  maintenance burden
+
+### Decision
+
+Run PowerDNS as a **Docker Compose stack** on each VPS node using the official
+`powerdns/pdns-auth-49` Docker image. Files live at `/opt/powerdns/` on each node.
+
+**ns1 (primary):** `powerdns/pdns-auth-49` + `postgres:16-alpine` sidecar, named volume
+`pdns_pgdata` for PostgreSQL data.
+
+**ns2 (secondary):** `powerdns/pdns-auth-49` only, named volume `pdns_sqlite` for SQLite
+data (no PostgreSQL needed on the secondary).
+
+Ansible deploys and manages both stacks via the `powerdns_master` and `powerdns_slave`
+roles using `community.docker.docker_compose_v2`.
+
+### Rationale
+
+1. **Distro-independent** — Docker image works identically on Debian 12, Debian 13, or
+   any future OS. No apt repo compatibility issues.
+2. **Official image** — `powerdns/pdns-auth-49` is maintained by the PowerDNS project,
+   tracks 4.9.x releases, and gets security updates independently of the host OS.
+3. **Easy backup** — `docker volume` commands back up all PowerDNS state. On ns2, zones
+   can be fully rebuilt via AXFR from ns1 anyway.
+4. **Clean separation** — Config at `/opt/powerdns/pdns.conf`, mounted read-only into
+   the container. Ansible manages config + compose file; Docker manages the process.
+5. **No k8s dependency** — ns1 and ns2 are DNS + NetBird VPS that must function
+   independently of the k3s cluster. Running DNS inside k3s would create a circular
+   dependency (cluster needs DNS to start; DNS needs cluster to run).
+6. **Fast iteration** — Config changes apply with `docker compose restart pdns`. No
+   `systemctl` reload race conditions or `systemctl reset-failed` required.
+
+### Consequences
+
+**Positive:**
+- DNS deployment is distro-independent — works on any Debian/Ubuntu/RHEL host with Docker CE
+- Single `docker compose up` deploys the full stack
+- Volumes provide clear backup targets (`pdns_pgdata`, `pdns_sqlite`)
+- No apt repository compatibility issues
+- Same image supports Phase 2 multi-region deployment
+
+**Negative:**
+- Docker CE must be installed on ns1 and ns2 (handled by Ansible `powerdns_master` and
+  `powerdns_slave` roles — Docker CE installed from official repo with `bookworm stable`
+  channel, which works on Debian 13)
+- Config files must be deployed **before** `docker compose up` (Docker creates a directory
+  at the bind-mount target if the file doesn't exist — Ansible task order enforces this)
+- API endpoint is `http://127.0.0.1:8081` on ns1 host (not a k8s service) — Management
+  API must reach it via NetBird WireGuard mesh
+
+### PowerDNS 4.9 Setting Name Changes
+
+The Docker image uses **PowerDNS 4.9**, which renamed several settings from the 4.x era:
+
+| Old name (4.x) | New name (4.9) | Notes |
+|----------------|----------------|-------|
+| `master=yes` | `primary=yes` | |
+| `slave=yes` | `secondary=yes` | |
+| `superslave=yes` | `autosecondary=yes` | |
+| `allow-unsigned-axfr` | `allow-unsigned-autoprimary` | |
+| `axfr-master-only` | *(removed)* | |
+| `api-readonly` | *(removed)* | |
+
+Using old names results in startup warnings or silent ignored config. All Ansible templates
+use the 4.9 names exclusively.
+
+### Alternatives Considered
+
+1. **Bare-metal apt install** — Rejected: PowerDNS official apt repo only has `bookworm`
+   builds; `bookworm` packages depend on `libboost1.74` which doesn't exist on Debian 13.
+   Building from source is a maintenance burden.
+2. **Kubernetes pod** — Rejected: creates circular dependency (DNS needed by k3s CoreDNS
+   and by the cluster's own domain resolution). ns1/ns2 must run independently.
+3. **PowerDNS from Debian trixie main** — The trixie repo ships PowerDNS 4.9.x but was
+   not always current at the time of initial deployment. Docker image provides a consistent
+   version regardless of repo state.
+
+### Related ADRs
+
+- ADR-013: NetBird WireGuard Mesh (ns1 + ns2 are co-hosted DNS + NetBird nodes)
+- ADR-014: DNS-Based Ingress Routing (PowerDNS API on ns1 is called by the DNS Ingress Controller)
+
+---
+
 ## Decision Matrix: When to Create ADR
 
 Create ADR for decisions that meet ANY of:
@@ -1163,7 +1271,7 @@ Don't need ADR for:
 - [ ] ADR-013: NetBird WireGuard mesh deployed (admin access VPN)
 - [ ] ADR-014: DNS-based ingress routing active (DaemonSet NGINX + PowerDNS multi-A records)
 - [ ] ADR-015: MinIO removed; backups on offsite server; media on Longhorn PV
-- [ ] ADR-016: Traditional hosting deployment model configured
+- [ ] ADR-016: PowerDNS Docker Compose stacks deployed on ns1 + ns2
 - [ ] Create ADR for any new architectural decisions
 - [ ] Review ADRs quarterly for relevance
 

@@ -22,11 +22,14 @@ terraform/*.tfvars
 !terraform/*.tfvars.example
 terraform/.terraform.lock.hcl
 
-# Ansible secrets
+# Ansible secrets and local overrides
 ansible/vault_password
 ansible/*.vault
 ansible/host_vars/**/*.vault.yml
 ansible/group_vars/**/*.vault.yml
+# Real inventory and vars files (contain secrets/IPs) — commit only *.example.yml
+ansible/inventory/hosts.yml
+ansible/group_vars/all.yml
 
 # Kubernetes secrets (use Sealed Secrets instead)
 k8s/**/*secret*.yaml

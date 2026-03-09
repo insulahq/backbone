@@ -284,27 +284,34 @@ Manager escalates to engineering team
 **Procedure:**
 
 ```bash
-# Step 1: Verify zone exists
-dig @ns1.k8s.local customer.com A +short
+# PowerDNS runs in Docker Compose on ns1 (23.88.111.142) and ns2 (89.167.125.29).
+# SSH to these nodes via NetBird WireGuard mesh.
 
-# If no response:
-# Check zone exists in API
-curl -H "X-API-Key: $API_KEY" http://ns1.k8s.local:8081/api/v1/zones/customer.com.
+# Step 1: Verify zone exists on ns1
+dig @23.88.111.142 customer.com A +short
 
-# Check PowerDNS pod status
-kubectl get pod -n hosting powerdns-master-0
-kubectl logs -f pod/powerdns-master-0
+# If no response, check zone exists in ns1 API (run on ns1 via NetBird mesh SSH)
+curl -H "X-API-Key: $PDNS_API_KEY" http://127.0.0.1:8081/api/v1/zones/customer.com.
 
-# Step 2: If not in slave:
-# Trigger zone sync
-kubectl exec -it powerdns-slave-0 -n hosting -- pdns_control force-soa-edit
+# Check PowerDNS container status on ns1
+ssh admin@23.88.111.142  # via NetBird mesh
+docker compose -f /opt/powerdns/docker-compose.yml ps
+docker compose -f /opt/powerdns/docker-compose.yml logs pdns --tail=50
 
-# Wait 5 minutes, check slave
-dig @ns2.k8s.local customer.com A +short
+# Step 2: If zone exists on ns1 but not on ns2, trigger NOTIFY:
+# (run on ns1)
+docker compose -f /opt/powerdns/docker-compose.yml exec pdns \
+  pdns_control notify customer.com.
 
-# Step 3: If still failing, restart pods
-kubectl delete pod powerdns-master-0 -n hosting
-kubectl delete pod powerdns-slave-0 -n hosting
+# Check ns2 received the zone (< 5 seconds)
+dig @89.167.125.29 customer.com A +short
+
+# Step 3: If still failing, restart containers
+ssh admin@23.88.111.142
+docker compose -f /opt/powerdns/docker-compose.yml restart pdns
+
+ssh admin@89.167.125.29
+docker compose -f /opt/powerdns/docker-compose.yml restart pdns
 ```
 
 ---
@@ -369,7 +376,7 @@ kubectl exec -it docker-mailserver-0 -n hosting -- \
   postqueue -f
 
 # If isolated to one domain, check DNS
-dig @ns1.k8s.local customer.com MX  # Should return mail server
+dig @23.88.111.142 customer.com MX  # Should return mail server (ns1)
 
 # Restart mail server
 kubectl delete pod docker-mailserver-0 -n hosting

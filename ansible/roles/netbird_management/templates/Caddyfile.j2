@@ -1,0 +1,32 @@
+# Caddy reverse proxy for NetBird self-hosted management stack
+# Managed by Ansible. Do not edit manually.
+# Docs: https://docs.netbird.io/selfhosted/selfhosted-quickstart
+
+{
+    # Let's Encrypt production CA
+    email admin@{{ platform_domain }}
+}
+
+# NetBird management + signal — served on the netbird subdomain
+{{ netbird_domain }} {
+    # gRPC — management API (used by NetBird clients)
+    @grpc {
+        protocol grpc
+    }
+    reverse_proxy @grpc management:80 {
+        transport http {
+            versions h2c
+        }
+    }
+
+    # REST — management dashboard + API
+    reverse_proxy /api/* management:80
+    reverse_proxy management:80
+
+    # Signal server — WebRTC signalling
+    reverse_proxy /signalexchange.SignalExchange/* signal:80 {
+        transport http {
+            versions h2c
+        }
+    }
+}

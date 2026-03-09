@@ -16,24 +16,24 @@ ns2_public_ip: "YOUR_NS2_PUBLIC_IP"
 # -----------------------------------------------------------------------
 # PowerDNS shared settings
 # -----------------------------------------------------------------------
-pdns_version: "4.9"                         # PowerDNS authoritative version
+# Docker image — powerdns/pdns-auth-49 is the official image for PowerDNS 4.9
+# Must use Docker because the official apt repo only has bookworm packages which
+# are incompatible with Debian 13 (trixie) — see ADR-016.
+pdns_image: "powerdns/pdns-auth-49:latest"
+
+# Port that the PowerDNS REST API is exposed on (localhost only on ns1)
 pdns_api_port: 8081
-pdns_rndc_port: 953
 
 # API key — generate with: openssl rand -hex 32
 # Use ansible-vault to encrypt this in production:
 #   ansible-vault encrypt_string 'your_key_here' --name 'pdns_api_key'
 pdns_api_key: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
-# RNDC shared secret — generate with: rndc-confgen -a -b 512 (or openssl rand -base64 64)
-pdns_rndc_key: "CHANGE_ME_BASE64_SECRET"
-
-# Database (PostgreSQL on ns1, used by PowerDNS master)
-pdns_db_host: "127.0.0.1"
-pdns_db_port: 5432
+# PostgreSQL credentials (used by the postgres sidecar container on ns1)
+# Host/port are internal to the Docker Compose network — not exposed on the host.
 pdns_db_name: "powerdns"
 pdns_db_user: "pdns"
-pdns_db_password: "CHANGE_ME_STRONG_PASSWORD"
+pdns_db_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
 # AXFR: which IPs are allowed to pull zones from ns1
 # Must include ns2's public IP
@@ -59,6 +59,11 @@ netbird_domain: "netbird.phoenix-host.net"
 # This is the key that ns2 and k3s nodes use to auto-enroll
 netbird_setup_key: "CHANGE_ME_GENERATE_IN_NETBIRD_UI"
 
+# TURN server credentials (used by coturn and management.json)
+# Generate with: openssl rand -hex 16
+netbird_turn_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_16"
+netbird_turn_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
 # -----------------------------------------------------------------------
 # Common server hardening
 # -----------------------------------------------------------------------
@@ -68,3 +73,8 @@ ssh_port: 22
 # Admin SSH public keys (added to authorized_keys on all servers)
 admin_ssh_keys:
   - "ssh-ed25519 AAAA... your_key_comment"
+
+# Admin IPs exempt from SSH rate-limiting (Ansible control machine, management IPs)
+# These IPs bypass the nftables SSH brute-force meter.
+admin_ips:
+  - "YOUR_CONTROL_MACHINE_IP"

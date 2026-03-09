@@ -9,15 +9,15 @@ all:
         dns_master:
           hosts:
             ns1:
-              ansible_host: "YOUR_NS1_IP"       # Hetzner Falkenstein
+              ansible_host: "YOUR_NS1_PUBLIC_IP"
               ansible_user: root
-              ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+              ansible_ssh_private_key_file: ~/your-ssh-key
         dns_slave:
           hosts:
             ns2:
-              ansible_host: "YOUR_NS2_IP"       # Hetzner Helsinki
+              ansible_host: "YOUR_NS2_PUBLIC_IP"
               ansible_user: root
-              ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+              ansible_ssh_private_key_file: ~/your-ssh-key
 
     netbird_management:
       hosts:

@@ -57,7 +57,7 @@
 | **CNI Plugin**              | **Flannel** (k3s default) → Calico later  | Simple overlay, low overhead; upgrade to Calico for network policies at scale |
 | **Ingress Controller**      | **NGINX Ingress Controller** (k3s default Traefik disabled) | Mature, battle-tested, native ModSecurity WAF support, large community. See ADR-010. |
 | **Traffic Routing**         | **DNS-based ingress routing** (NGINX DaemonSet + PowerDNS multi-A records) | No hoster lock-in, no Floating IP needed, automatic failover via DNS. See ADR-014. |
-| **External DNS**            | **PowerDNS Authoritative** — 2 regionally diversified VPS (ns1: Falkenstein, ns2: Helsinki). Primary/secondary AXFR replication. API-driven zone management via NetBird mesh. | Fully self-hosted, static IPs for glue records, geographic redundancy. Co-hosted with NetBird VPN. |
+| **External DNS**            | **PowerDNS Authoritative** (`powerdns/pdns-auth-49` Docker image) — 2 regionally diversified VPS (ns1: Falkenstein, ns2: Helsinki). Deployed via Docker Compose at `/opt/powerdns/`. Primary/secondary AXFR/NOTIFY replication (< 5s). API-driven zone management via NetBird mesh. No RNDC — native 4.9 replication only. See ADR-016. | Fully self-hosted, static IPs for glue records, geographic redundancy. Co-hosted with NetBird VPN. Docker avoids Debian 13 apt repo compatibility issues. |
 
 ### 0.3 Security & Authentication
 

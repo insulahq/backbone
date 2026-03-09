@@ -12,22 +12,22 @@
   hosts: dns_master
   become: true
   roles:
-    - powerdns-master
+    - powerdns_master
 
 - name: Deploy PowerDNS slave (ns2 — Helsinki)
   hosts: dns_slave
   become: true
   roles:
-    - powerdns-slave
+    - powerdns_slave
 
 - name: Deploy NetBird management server (ns1)
   hosts: netbird_management
   become: true
   roles:
-    - netbird-management
+    - netbird_management
 
 - name: Enroll NetBird peers (ns2 + future nodes)
   hosts: netbird_peers
   become: true
   roles:
-    - netbird-peer
+    - netbird_peer

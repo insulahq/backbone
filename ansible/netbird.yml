@@ -6,10 +6,10 @@
   hosts: netbird_management
   become: true
   roles:
-    - netbird-management
+    - netbird_management
 
 - name: Enroll NetBird peers
   hosts: netbird_peers
   become: true
   roles:
-    - netbird-peer
+    - netbird_peer

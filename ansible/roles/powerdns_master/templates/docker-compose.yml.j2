@@ -1,0 +1,43 @@
+# PowerDNS Primary — Docker Compose stack
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }} (ns1 — Falkenstein)
+
+services:
+
+  # PostgreSQL backend — data persisted on named volume for easy backup
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "{{ pdns_db_name }}"
+      POSTGRES_USER: "{{ pdns_db_user }}"
+      POSTGRES_PASSWORD: "{{ pdns_db_password }}"
+    volumes:
+      - pdns_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ pdns_db_user }} -d {{ pdns_db_name }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # PowerDNS authoritative primary
+  pdns:
+    image: powerdns/pdns-auth-49:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:53:53/udp"
+      - "0.0.0.0:53:53/tcp"
+      - "127.0.0.1:{{ pdns_api_port }}:8081"   # API — localhost only
+    volumes:
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+    environment:
+      # These env vars are read by the official image's entrypoint to bootstrap
+      # the PostgreSQL schema on first start (idempotent).
+      PDNS_AUTH_API_KEY: "{{ pdns_api_key }}"
+
+volumes:
+  pdns_pgdata:
+    driver: local

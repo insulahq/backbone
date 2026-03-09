@@ -1,0 +1,75 @@
+#!/usr/sbin/nft -f
+# nftables firewall configuration
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }}
+#
+# SSH brute-force protection via per-source-IP rate limiting (meter).
+# fail2ban is not available on Debian 13 (trixie); ufw was removed.
+
+flush ruleset
+
+table inet filter {
+
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        # Allow established and related connections
+        ct state established,related accept
+
+        # Drop invalid packets
+        ct state invalid drop
+
+        # Allow loopback
+        iif lo accept
+
+        # Allow ICMP (ping) — rate-limited to prevent flood
+        ip protocol icmp limit rate 10/second accept
+        ip6 nexthdr icmpv6 limit rate 10/second accept
+
+        # SSH — admin IPs bypass rate limiting entirely
+{% for ip in admin_ips %}
+        tcp dport {{ ssh_port }} ip saddr {{ ip }} accept
+{% endfor %}
+
+        # SSH — per-source-IP rate limit: max 5 new connections per minute
+        tcp dport {{ ssh_port }} ct state new \
+            meter ssh_ratelimit { ip saddr limit rate 5/minute burst 5 packets } accept
+        tcp dport {{ ssh_port }} ct state new drop
+        tcp dport {{ ssh_port }} accept
+
+        # DNS (UDP + TCP)
+        udp dport 53 accept
+        tcp dport 53 accept
+
+        # WireGuard / NetBird data plane
+        udp dport 51820 accept
+
+{% if inventory_hostname in groups['dns_master'] %}
+        # PowerDNS API (localhost only — accessed by Management API on same host)
+        # Docker maps this to 127.0.0.1:{{ pdns_api_port }} on the host
+        tcp dport {{ pdns_api_port }} ip saddr 127.0.0.1 accept
+{% endif %}
+
+{% if inventory_hostname in groups['netbird_management'] %}
+        # NetBird management server (HTTPS + HTTP for ACME)
+        tcp dport 80 accept
+        tcp dport 443 accept
+
+        # STUN/TURN relay
+        udp dport 3478 accept
+        tcp dport 3478 accept
+{% endif %}
+
+        # Log and drop everything else
+        log prefix "[nft-drop] " level warn
+        drop
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}

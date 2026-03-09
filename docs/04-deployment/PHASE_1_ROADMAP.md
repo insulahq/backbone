@@ -114,7 +114,7 @@ gh api repos/hosting-platform/hosting-platform/branches/staging/protection \
 | 5 | Install cert-manager + Let's Encrypt ClusterIssuer | `infrastructure` `phase:1` | DevOps |
 | 6 | Install Sealed Secrets controller | `infrastructure` `phase:1` | DevOps |
 | 7 | Set up NetBird WireGuard mesh (admin VPN) | `infrastructure` `phase:1` | DevOps |
-| 8 | Install PowerDNS (primary NS) + configure zone | `infrastructure` `phase:1` | DevOps |
+| 8 | Deploy PowerDNS Docker Compose stacks on ns1 (primary) + ns2 (secondary) via Ansible | `infrastructure` `phase:1` | DevOps |
 | 9 | Configure offsite SSHFS backup server | `infrastructure` `phase:1` | DevOps |
 | 10 | Install Prometheus + Grafana + Alertmanager + Loki | `infrastructure` `phase:1` | DevOps |
 | 11 | Install Harbor container registry | `infrastructure` `phase:1` | DevOps |

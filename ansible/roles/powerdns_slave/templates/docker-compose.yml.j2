@@ -1,0 +1,20 @@
+# PowerDNS Secondary — Docker Compose stack
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }} (ns2 — Helsinki)
+
+services:
+
+  # PowerDNS authoritative secondary (SQLite backend — no separate DB container needed)
+  pdns:
+    image: powerdns/pdns-auth-49:latest
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:53:53/udp"
+      - "0.0.0.0:53:53/tcp"
+    volumes:
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - pdns_sqlite:/var/lib/powerdns
+
+volumes:
+  pdns_sqlite:
+    driver: local

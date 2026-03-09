@@ -1,5 +1,6 @@
 ---
 # Common hardening tasks applied to all servers (ns1, ns2, and future nodes)
+# Tested on: Debian 13 (trixie) — nftables replaces ufw on this release
 
 - name: Update apt cache and upgrade all packages
   ansible.builtin.apt:
@@ -12,15 +13,13 @@
     name:
       - curl
       - wget
-      - gnupg2
+      - gnupg
       - ca-certificates
-      - apt-transport-https
-      - ufw
-      - fail2ban
+      - nftables            # apt-transport-https built into apt since Debian 10
       - unattended-upgrades
       - logrotate
       - htop
-      - jq
+      # jq not yet in Debian 13 (trixie) — install manually from binary if needed
     state: present
 
 - name: Set hostname
@@ -80,67 +79,23 @@
     state: present
   loop: "{{ admin_ssh_keys }}"
 
-# --- UFW firewall ---
+# --- nftables firewall ---
 
-- name: Set UFW default policy — deny all incoming
-  community.general.ufw:
-    default: deny
-    direction: incoming
+- name: Deploy nftables ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Reload nftables
 
-- name: Set UFW default policy — allow all outgoing
-  community.general.ufw:
-    default: allow
-    direction: outgoing
-
-- name: Allow SSH
-  community.general.ufw:
-    rule: allow
-    port: "{{ ssh_port }}"
-    proto: tcp
-
-- name: Allow DNS (UDP)
-  community.general.ufw:
-    rule: allow
-    port: "53"
-    proto: udp
-
-- name: Allow DNS (TCP — zone transfers)
-  community.general.ufw:
-    rule: allow
-    port: "53"
-    proto: tcp
-
-- name: Allow WireGuard/NetBird (UDP 51820)
-  community.general.ufw:
-    rule: allow
-    port: "51820"
-    proto: udp
-
-- name: Enable UFW
-  community.general.ufw:
-    state: enabled
-
-# --- fail2ban ---
-
-- name: Deploy fail2ban jail config
-  ansible.builtin.copy:
-    dest: /etc/fail2ban/jail.local
-    content: |
-      [DEFAULT]
-      bantime  = 3600
-      findtime = 600
-      maxretry = 5
-      backend  = systemd
-
-      [sshd]
-      enabled  = true
-      port     = {{ ssh_port }}
-      logpath  = %(sshd_log)s
-    mode: '0644'
-  notify: Restart fail2ban
-
-- name: Start and enable fail2ban
+- name: Start and enable nftables
   ansible.builtin.systemd:
-    name: fail2ban
+    name: nftables
     state: started
     enabled: true
+
+# Note: fail2ban is not available in Debian 13 (trixie) repos.
+# SSH brute-force protection is handled directly in the nftables ruleset
+# via connection-rate limiting (see templates/nftables.conf.j2).

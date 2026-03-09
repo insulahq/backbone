@@ -12,10 +12,10 @@
   hosts: dns_master
   become: true
   roles:
-    - powerdns-master
+    - powerdns_master
 
 - name: Deploy PowerDNS slave (ns2)
   hosts: dns_slave
   become: true
   roles:
-    - powerdns-slave
+    - powerdns_slave

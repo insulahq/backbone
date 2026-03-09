@@ -1,0 +1,112 @@
+---
+# PowerDNS authoritative primary — runs on ns1 (Falkenstein)
+# Provides: primary DNS for all customer zones, REST API for Management API, AXFR to ns2
+#
+# Runs as a Docker Compose stack:
+#   - powerdns/pdns-auth-49  — PowerDNS authoritative server
+#   - postgres:16             — PostgreSQL backend (sidecar, data on named volume)
+#
+# Firewall: port 53 (UDP+TCP) already opened by common/nftables role.
+# API port 8081 is bound to 127.0.0.1 only — not exposed publicly.
+
+# ---------------------------------------------------------------------------
+# Docker — install from Docker's official apt repo
+# ---------------------------------------------------------------------------
+
+- name: Ensure /etc/apt/keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Add Docker apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+    force: false
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/debian
+      bookworm stable
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker CE and Docker Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+
+- name: Start and enable Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Directory layout
+# ---------------------------------------------------------------------------
+
+- name: Create PowerDNS stack directory
+  ansible.builtin.file:
+    path: /opt/powerdns
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+# ---------------------------------------------------------------------------
+# Configuration files
+# ---------------------------------------------------------------------------
+
+- name: Deploy PowerDNS primary configuration
+  ansible.builtin.template:
+    src: pdns.conf.j2
+    dest: /opt/powerdns/pdns.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart PowerDNS
+
+- name: Deploy Docker Compose stack
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/powerdns/docker-compose.yml
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart PowerDNS
+
+# ---------------------------------------------------------------------------
+# Start the stack
+# ---------------------------------------------------------------------------
+
+- name: Pull and start PowerDNS stack
+  community.docker.docker_compose_v2:
+    project_src: /opt/powerdns
+    state: present
+    pull: always
+
+- name: Wait for PowerDNS to be listening on port 53
+  ansible.builtin.wait_for:
+    port: 53
+    host: "127.0.0.1"
+    timeout: 60
+    delay: 5
+
+- name: Wait for PowerDNS API to be ready
+  ansible.builtin.wait_for:
+    port: "{{ pdns_api_port }}"
+    host: "127.0.0.1"
+    timeout: 30
+    delay: 2

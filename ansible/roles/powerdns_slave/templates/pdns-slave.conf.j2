@@ -1,0 +1,42 @@
+# PowerDNS Authoritative Server — Secondary Configuration
+# Managed by Ansible. Do not edit manually.
+# Host: {{ inventory_hostname }}.{{ platform_domain }} (ns2 — Helsinki)
+#
+# Runs inside Docker — no setuid/setgid/daemon/guardian needed.
+# PowerDNS 4.9 terminology: primary/secondary (master/slave removed).
+
+# Listening — Docker maps 0.0.0.0:53 on the host
+local-address=0.0.0.0
+local-port=53
+
+# Secondary mode — pulls zones from ns1 via AXFR
+primary=no
+secondary=yes
+
+# Accept NOTIFY only from ns1
+allow-notify-from={{ ns1_public_ip }}
+
+# Autosecondary — auto-create zones on first NOTIFY from ns1
+autosecondary=yes
+
+# AXFR transfer settings
+xfr-cycle-interval=60
+axfr-fetch-timeout=10
+
+# No API on secondary
+api=no
+webserver=no
+
+# Logging — stdout for Docker log collection
+log-dns-queries=no
+loglevel=4
+logging-facility=0
+
+# Backend — SQLite (persisted on Docker named volume at /var/lib/powerdns)
+launch=gsqlite3
+gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+{% if pdns_dnssec_enabled %}
+gsqlite3-dnssec=yes
+{% else %}
+gsqlite3-dnssec=no
+{% endif %}

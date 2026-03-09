@@ -22,8 +22,8 @@ A consolidated summary of all major technology choices made for the Kubernetes W
 
 | Component | Choice | Version | Rationale |
 | --- | --- | --- | --- |
-| **External DNS** | PowerDNS Authoritative | Latest | API-driven, self-hosted. 2 VPS: ns1 (Falkenstein, primary) + ns2 (Helsinki, secondary). AXFR replication. Co-hosted with NetBird VPN. |
-| **DNS Replication** | PowerDNS native AXFR/IXFR | Built-in | Primary pushes NOTIFY → secondary does zone transfer. < 5s propagation. |
+| **External DNS** | PowerDNS Authoritative (`powerdns/pdns-auth-49` Docker image) | 4.9 | API-driven, self-hosted. 2 VPS: ns1 (Falkenstein, primary, PostgreSQL backend) + ns2 (Helsinki, secondary, SQLite backend). Docker Compose at `/opt/powerdns/` on both nodes. Co-hosted with NetBird VPN. |
+| **DNS Replication** | PowerDNS 4.9 native AXFR/NOTIFY | Built-in | ns1 sends NOTIFY on zone change → ns2 pulls via AXFR. < 5s propagation. No RNDC. |
 | **TLS Certificates** | cert-manager + Let's Encrypt | Latest | Automatic, free SSL/TLS, renewal handling |
 | **DNS (Cluster)** | CoreDNS | k3s built-in | Standard Kubernetes DNS, built into k3s |
 
@@ -33,7 +33,7 @@ A consolidated summary of all major technology choices made for the Kubernetes W
 | --- | --- | --- | --- |
 | **OIDC Provider** | Dex | Latest | Lightweight IdP federation, Google/Apple support |
 | **Secrets Management** | Sealed Secrets | Latest | GitOps-friendly, simple, encryption key-based |
-| **Intrusion Detection** | fail2ban | Latest | Multi-layer (HTTP, SFTP, mail, SSH) |
+| **Intrusion Detection** | fail2ban (k8s cluster nodes) | Latest | Multi-layer (HTTP, SFTP, mail, SSH). Note: not available on Debian 13 DNS/VPN VPS nodes — those use nftables rate limiting instead. |
 | **WAF** | ModSecurity (with NGINX) | Latest | OWASP CRS v4, detection-only initially |
 | **Pod Security** | Kubernetes Pod Security Standards | Built-in | `restricted` for platform, `baseline` for clients |
 | **RBAC** | Kubernetes RBAC | Native | Role-based access control for all users |
