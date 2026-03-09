@@ -55,9 +55,11 @@ netbird_management_url: "https://netbird.phoenix-host.net:443"
 # Domain for the NetBird management server
 netbird_domain: "netbird.phoenix-host.net"
 
-# Setup key for peer enrollment (generate in NetBird UI after first deploy)
-# This is the key that ns2 and k3s nodes use to auto-enroll
-netbird_setup_key: "CHANGE_ME_GENERATE_IN_NETBIRD_UI"
+# Personal Access Token for the NetBird API — used by Ansible to create
+# one-time setup keys per peer immediately before enrollment.
+# Generate in NetBird dashboard: Settings → Access Tokens → Add Token
+# Scope needed: setup-keys:write, peers:read
+netbird_api_pat: "CHANGE_ME_GENERATE_IN_NETBIRD_DASHBOARD"
 
 # TURN server credentials (used by coturn and management.json)
 # Generate with: openssl rand -hex 16

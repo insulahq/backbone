@@ -1,2 +1,2 @@
 ---
-# netbird_management_url and netbird_setup_key are set in group_vars/all.yml
+# netbird_management_url and netbird_api_pat are set in group_vars/all.yml
