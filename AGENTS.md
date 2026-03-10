@@ -192,6 +192,40 @@ Recommendation: Option [X] because [brief reason]. Confirm?
 - Admin panel deployment: serve from admin1 (current) or deploy to k3s cluster once provisioned?
 - Monitoring: Prometheus + Grafana + Loki all in Week 1–2 scope, or defer Loki to reduce initial complexity?
 
+### 4.6 Keep AGENTS.md Current — Update After Every Session
+
+**AGENTS.md is a living document.** At the end of every session — or immediately after completing any significant unit of work — update it to reflect the new state of the project. A future agent must be able to resume from this file alone without asking the user to recap.
+
+**What to update and when:**
+
+| Trigger | What to update |
+|---------|----------------|
+| After any `git commit` | §2 "Last commits" block — paste the new commit hash + message |
+| After infra changes (Ansible runs, new servers, config changes) | §2 server table, status column, any relevant gotcha in §10 |
+| After backend changes (new routes, migrations, schema changes) | §7 Backend API state |
+| After a milestone is completed | §13 Roadmap table — mark the row as COMPLETE |
+| After a tradeoff is resolved with the user | §4.5 Known pending tradeoffs — remove the resolved item, add any new ones |
+| After discovering a new gotcha | §10 Critical Gotchas — append it immediately, before it is forgotten |
+| After any new Phase 2+ feature decision | §11 Do NOT — add it if it must be deferred |
+
+**How to update §2 (Current State):**
+
+```bash
+# Get the last 4 commits to paste into §2
+git -C /config/hosting-platform log --oneline -4
+```
+
+Paste the output into the "Last commits" block in §2, replacing the previous entries. Then update the infrastructure table and any status lines that changed.
+
+**Commit the AGENTS.md update as part of the same commit as the work, or as an immediate follow-up:**
+
+```bash
+git add AGENTS.md
+git commit -m "docs(agents): update current state after <brief description of work done>"
+```
+
+Never leave a session with AGENTS.md describing stale state. A future agent that reads outdated "Current State" will waste time re-verifying or re-doing completed work.
+
 ---
 
 ## 5. Environment Setup (Prerequisites)
