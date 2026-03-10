@@ -31,3 +31,15 @@
   become: true
   roles:
     - netbird_peer
+
+- name: Common hardening on management API server
+  hosts: management_api
+  become: true
+  roles:
+    - common
+
+- name: Deploy Management API (admin.phoenix-host.net)
+  hosts: management_api
+  become: true
+  roles:
+    - management_api

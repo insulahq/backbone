@@ -1,0 +1,82 @@
+---
+# Deploy the Phoenix Host Management API on admin.phoenix-host.net
+# Runs as Docker Compose stack: management-api + mariadb
+# Accessible via NetBird mesh only (port {{ management_api_port }})
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - /opt/management-api
+    - /opt/management-api/src
+
+- name: Sync backend source to server
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../backend/"
+    dest: /opt/management-api/src/
+    delete: true
+    rsync_opts:
+      - "--exclude=node_modules/"
+      - "--exclude=dist/"
+      - "--exclude=.env"
+      - "--exclude=coverage/"
+  notify: Rebuild management-api image
+
+- name: Write Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/management-api/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart management-api stack
+
+- name: Write .env file
+  ansible.builtin.template:
+    src: env.j2
+    dest: /opt/management-api/.env
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart management-api stack
+
+- name: Build management-api Docker image
+  community.docker.docker_image:
+    name: management-api
+    tag: latest
+    source: build
+    build:
+      path: /opt/management-api/src
+      pull: false
+    force_source: false
+  register: management_api_image_build
+
+- name: Start management-api stack
+  community.docker.docker_compose_v2:
+    project_src: /opt/management-api
+    state: present
+
+- name: Add admin DNS A record to PowerDNS
+  ansible.builtin.uri:
+    url: "http://{{ ns1_netbird_ip }}:{{ pdns_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ pdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "admin.{{ platform_domain }}."
+          type: A
+          ttl: 300
+          changetype: REPLACE
+          records:
+            - content: "{{ admin1_public_ip }}"
+              disabled: false
+    status_code: [200, 204]
+  delegate_to: localhost
+  run_once: true

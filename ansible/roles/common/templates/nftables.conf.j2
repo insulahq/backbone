@@ -37,19 +37,30 @@ table inet filter {
         tcp dport {{ ssh_port }} ct state new drop
         tcp dport {{ ssh_port }} accept
 
-        # DNS (UDP + TCP)
+{% if inventory_hostname in groups['dns_servers'] %}
+        # DNS (UDP + TCP) — authoritative nameservers only
         udp dport 53 accept
         tcp dport 53 accept
 
+{% endif %}
         # WireGuard / NetBird data plane
         udp dport 51820 accept
 
+{% if inventory_hostname in groups['management_api'] %}
+        # Management API — NetBird mesh only
+        tcp dport {{ management_api_port }} iifname "wt0" accept
+        tcp dport {{ management_api_port }} drop
+
+{% endif %}
 {% if inventory_hostname in groups['dns_master'] %}
         # PowerDNS API — Docker binds to 0.0.0.0:{{ pdns_api_port }}; nftables restricts access
-        # localhost: Management API on same host; wt0 from ns2: reconciliation cron + future Management API
+        # Allow: localhost, ns2 reconciliation cron, management API server (admin1)
         tcp dport {{ pdns_api_port }} ip saddr 127.0.0.1 accept
         tcp dport {{ pdns_api_port }} iifname "wt0" ip saddr {{ ns2_netbird_ip }} accept
-        # Block everything else reaching the API port (public internet, other IPs)
+{% if admin1_netbird_ip is defined and admin1_netbird_ip %}
+        tcp dport {{ pdns_api_port }} iifname "wt0" ip saddr {{ admin1_netbird_ip }} accept
+{% endif %}
+        # Block everything else
         tcp dport {{ pdns_api_port }} drop
 
         # PowerDNS-Admin web UI — NetBird mesh only; Docker binds to 0.0.0.0, nftables restricts access

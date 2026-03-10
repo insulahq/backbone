@@ -23,10 +23,18 @@ all:
       hosts:
         ns1:                                    # NetBird management co-hosted on ns1
 
+    management_api:
+      hosts:
+        admin1:
+          ansible_host: "YOUR_ADMIN1_PUBLIC_IP"
+          ansible_user: root
+          ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME
+
     netbird_peers:
       hosts:
         ns1:                                    # ns1 enrolls as a peer on its own mesh
         ns2:                                    # ns2 enrolls as a NetBird peer
+        admin1:                                 # management API server
         # k3s_control:                          # Add k3s nodes here later
         #   ansible_host: "YOUR_K3S_CP_IP"
         #   ansible_user: root

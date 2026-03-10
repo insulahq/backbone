@@ -1,0 +1,19 @@
+---
+- name: Rebuild management-api image
+  community.docker.docker_image:
+    name: management-api
+    tag: latest
+    source: build
+    build:
+      path: /opt/management-api/src
+      pull: false
+    force_source: true
+  listen: Rebuild management-api image
+  notify: Restart management-api stack
+
+- name: Restart management-api stack
+  community.docker.docker_compose_v2:
+    project_src: /opt/management-api
+    state: present
+    recreate: always
+  listen: Restart management-api stack

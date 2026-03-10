@@ -1,0 +1,41 @@
+---
+# Managed by Ansible. Do not edit manually.
+services:
+  mariadb:
+    image: mariadb:10.6-alpine
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "{{ management_api_db_root_password }}"
+      MYSQL_DATABASE: "{{ management_api_db_name }}"
+      MYSQL_USER: "{{ management_api_db_user }}"
+      MYSQL_PASSWORD: "{{ management_api_db_password }}"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p{{ management_api_db_root_password }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: management-api:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Bind to NetBird interface only so the API is reachable from NetBird peers
+      # but NOT from the public internet.
+      - "{{ admin1_netbird_ip }}:{{ management_api_port }}:3000"
+    networks:
+      - internal
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  mariadb_data:

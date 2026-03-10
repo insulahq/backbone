@@ -112,3 +112,22 @@ admin_ssh_keys:
 # These IPs bypass the nftables SSH brute-force meter entirely.
 admin_ips:
   - "YOUR_CONTROL_MACHINE_IP"
+
+# -----------------------------------------------------------------------
+# Management API server (admin.phoenix-host.net)
+# -----------------------------------------------------------------------
+admin1_public_ip: "YOUR_ADMIN1_PUBLIC_IP"
+admin1_public_ipv6: "YOUR_ADMIN1_PUBLIC_IPV6"
+admin1_netbird_ip: ""   # Fill in after NetBird enrollment: run netbird status on admin1
+
+management_api_port: 3000
+
+management_api_db_name: "platform"
+management_api_db_user: "platform"
+management_api_db_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+management_api_db_root_password: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
+management_api_jwt_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
+
+management_api_admin_username: "admin"
+management_api_admin_password: "CHANGE_ME_STRONG_PASSWORD"
