@@ -102,10 +102,13 @@ table inet filter {
 
 {% if inventory_hostname in groups['dns_master'] %}
         # dns_master exposes services via 0.0.0.0 bindings (pdns-admin, pdns API).
-        # Without this restriction, Docker's kernel DNAT would forward public-internet
-        # traffic to containers. Only allow external→container traffic from NetBird (wt0).
+        # Restrict Docker bridge access to NetBird (wt0) and loopback only.
         iifname "wt0" oifname "br-*" accept
         iifname "lo"  oifname "br-*" accept
+{% if inventory_hostname in groups['netbird_management'] %}
+        # Exception: Traefik reverse proxy (NetBird dashboard) needs public 80/443 via DNAT
+        tcp dport { 80, 443 } oifname "br-*" accept
+{% endif %}
         oifname "br-*" drop
         oifname "docker*" accept
 {% else %}
