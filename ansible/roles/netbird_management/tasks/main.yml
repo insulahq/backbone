@@ -59,7 +59,8 @@
         "log-opts": {
           "max-size": "10m",
           "max-file": "3"
-        }
+        },
+        "userland-proxy": false
       }
     owner: root
     group: root

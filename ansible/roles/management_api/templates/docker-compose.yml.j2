@@ -2,7 +2,7 @@
 # Managed by Ansible. Do not edit manually.
 services:
   mariadb:
-    image: mariadb:10.6-alpine
+    image: mariadb:10.6
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: "{{ management_api_db_root_password }}"

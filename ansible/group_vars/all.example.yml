@@ -131,3 +131,23 @@ management_api_jwt_secret: "CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32"
 
 management_api_admin_username: "admin"
 management_api_admin_password: "CHANGE_ME_STRONG_PASSWORD"
+
+# -----------------------------------------------------------------------
+# Backup (restic → Hetzner Storagebox via SFTP)
+# -----------------------------------------------------------------------
+backup_storagebox_host: "uXXXXXX.your-storagebox.de"
+backup_storagebox_user: "uXXXXXX"
+# Generate: ssh-keygen -t ed25519 -f ~/.ssh/storagebox -C "restic@phoenix-host.net" -N ""
+# Add public key to Storagebox → Robot → Authorized Keys
+# Paste private key content here (use ansible-vault encrypt_string in production):
+backup_storagebox_ssh_private_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  ...
+  -----END OPENSSH PRIVATE KEY-----
+# Run: ssh-keyscan -H uXXXXXX.your-storagebox.de
+backup_storagebox_known_host: "uXXXXXX.your-storagebox.de ssh-ed25519 AAAA..."
+# Generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+backup_restic_password: "CHANGE_ME_GENERATE_RANDOM"
+backup_retention_days: 14
+# Stagger servers: ns1=02:00, ns2=02:15, admin1=02:30
+backup_schedule: "02:00:00"

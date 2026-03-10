@@ -1,0 +1,98 @@
+---
+# Install and configure restic backups to Hetzner Storagebox via SFTP.
+# One restic repository per server: sftp:storagebox:/backups/{{ inventory_hostname }}/
+# Runs daily at {{ backup_schedule }} UTC via systemd timer.
+
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+    update_cache: false
+
+- name: Create restic config directory
+  ansible.builtin.file:
+    path: /etc/restic
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Deploy Storagebox SSH private key
+  ansible.builtin.copy:
+    content: "{{ backup_storagebox_ssh_private_key }}"
+    dest: /etc/restic/storagebox.key
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Configure SSH alias for Storagebox
+  ansible.builtin.blockinfile:
+    path: /root/.ssh/config
+    create: true
+    mode: "0600"
+    marker: "# {mark} ANSIBLE MANAGED — restic storagebox"
+    block: |
+      Host storagebox
+          HostName {{ backup_storagebox_host }}
+          User {{ backup_storagebox_user }}
+          IdentityFile /etc/restic/storagebox.key
+          StrictHostKeyChecking yes
+          UserKnownHostsFile /etc/restic/known_hosts
+
+- name: Add Storagebox to known_hosts
+  ansible.builtin.known_hosts:
+    path: /etc/restic/known_hosts
+    name: "{{ backup_storagebox_host }}"
+    key: "{{ backup_storagebox_known_host }}"
+    state: present
+
+- name: Deploy restic environment file
+  ansible.builtin.template:
+    src: restic-env.j2
+    dest: /etc/restic/env
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Deploy backup script
+  ansible.builtin.template:
+    src: backup.sh.j2
+    dest: /usr/local/bin/restic-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy systemd backup service
+  ansible.builtin.template:
+    src: backup.service.j2
+    dest: /etc/systemd/system/restic-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Deploy systemd backup timer
+  ansible.builtin.template:
+    src: backup.timer.j2
+    dest: /etc/systemd/system/restic-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Enable and start backup timer
+  ansible.builtin.systemd:
+    name: restic-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Initialise restic repository (idempotent)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    source /etc/restic/env
+    restic snapshots --quiet > /dev/null 2>&1 || restic init
+  args:
+    executable: /bin/bash
+  register: backup_restic_init
+  changed_when: "'created restic repository' in backup_restic_init.stdout"

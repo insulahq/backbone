@@ -1,4 +1,10 @@
 ---
+- name: Restart Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  listen: Restart Docker
+
 - name: Rebuild management-api image
   community.docker.docker_image:
     name: management-api

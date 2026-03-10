@@ -1,0 +1,12 @@
+[Unit]
+Description=Restic backup for {{ inventory_hostname }}.{{ platform_domain }}
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/restic-backup.sh
+StandardOutput=journal
+StandardError=journal
+# Prevent concurrent runs
+TimeoutStartSec=3600
