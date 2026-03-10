@@ -1,0 +1,190 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: management-api-config
+  namespace: platform
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  PDNS_API_URL: "http://{{ ns1_netbird_ip }}:{{ pdns_api_port }}"
+  ADMIN_USERNAME: "admin"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: management-api
+  namespace: platform
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  selector:
+    app: management-api
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: management-api
+  namespace: platform
+  labels:
+    app: management-api
+    version: "0.1.0"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: management-api
+  template:
+    metadata:
+      labels:
+        app: management-api
+    spec:
+      imagePullPolicy: IfNotPresent
+      
+      initContainers:
+        - name: db-migrate
+          image: management-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              node_modules/.bin/knex --knexfile src/db/knexfile.ts migrate:latest
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_PASSWORD
+
+      containers:
+        - name: management-api
+          image: management-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: management-api-config
+                  key: LOG_LEVEL
+            - name: PDNS_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: management-api-config
+                  key: PDNS_API_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: JWT_SECRET
+            - name: ADMIN_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: management-api-config
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: ADMIN_PASSWORD
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: DB_PASSWORD
+            - name: PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: management-api-secrets
+                  key: PDNS_API_KEY
+
+          livenessProbe:
+            httpGet:
+              path: /api/v1/admin/status
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/v1/admin/status
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

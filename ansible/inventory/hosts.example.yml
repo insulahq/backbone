@@ -30,12 +30,12 @@ all:
           ansible_user: root
           ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME
 
+    k3s_control:
+      hosts:
+        admin1:                                 # k3s control plane on admin1 (Phase 1 PoC)
+
     netbird_peers:
       hosts:
         ns1:                                    # ns1 enrolls as a peer on its own mesh
         ns2:                                    # ns2 enrolls as a NetBird peer
-        admin1:                                 # management API server
-        # k3s_control:                          # Add k3s nodes here later
-        #   ansible_host: "YOUR_K3S_CP_IP"
-        #   ansible_user: root
-        #   ansible_ssh_private_key_file: ~/YOUR_SSH_KEY_NAME
+        admin1:                                 # management API server + k3s control plane
