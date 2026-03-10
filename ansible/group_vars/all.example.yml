@@ -59,6 +59,8 @@ pdns_dnssec_enabled: true
 # -----------------------------------------------------------------------
 # Pin to a tested release — check https://github.com/netbirdio/netbird/releases
 netbird_version: "0.28.0"
+# Dashboard has independent versioning — check https://github.com/netbirdio/dashboard/releases
+netbird_dashboard_version: "v2.34.0"
 
 # NetBird management server URL and domain (co-hosted on ns1)
 netbird_management_url: "https://netbird.your-domain.example:443"

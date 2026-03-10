@@ -34,7 +34,7 @@
 
 - name: Install NetBird client
   ansible.builtin.apt:
-    name: netbird
+    name: "netbird={{ netbird_version }}"
     state: present
     update_cache: true
 

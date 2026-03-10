@@ -118,7 +118,7 @@
   community.docker.docker_compose_v2:
     project_src: /opt/netbird
     state: present
-    pull: always
+    pull: missing
 
 - name: Wait for NetBird to be healthy (port 443)
   ansible.builtin.wait_for:
