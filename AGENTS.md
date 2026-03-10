@@ -33,10 +33,10 @@
 
 **Last commits:**
 ```
+4dacce2  docs(agents): add §4.6 instructions to keep AGENTS.md current after every session
+fdbe998  docs: add AGENTS.md agent handoff and project instructions file
 4d18c0c  Back up MariaDB on admin1; fix prune --group-by "host,paths"
 1dc35cb  Add weekly Docker image prune timer to common role
-37815fc  Pin NetBird versions; switch docker-compose pull to missing
-99cd6df  All work through backup + admin1 deployment
 ```
 
 **Infrastructure: COMPLETE**
