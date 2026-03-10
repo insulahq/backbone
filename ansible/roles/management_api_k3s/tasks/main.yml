@@ -54,26 +54,29 @@
       path: /opt/management-api/src
       pull: false
     force_source: false
+  register: api_image_build
 
 - name: Export management-api image as tar for k3s
   ansible.builtin.shell: |
-    docker save management-api:latest | gzip > /tmp/management-api-latest.tar.gz
+    docker save management-api:latest > /tmp/management-api-latest.tar
 
-- name: Import image into k3s containerd
+- name: Import image into k3s containerd via ctr
   ansible.builtin.shell: |
-    cat /tmp/management-api-latest.tar.gz | gunzip | \
-    KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/kubectl run --image-command \
-    -it --rm --image=localhost/busybox ctr-image -- \
-    /bin/sh -c "cat > /tmp/img.tar && ctr -n k8s.io images import /tmp/img.tar"
-  ignore_errors: true
-
-# Simpler approach: use containerd directly
-- name: Import management-api image into k3s containerd
-  ansible.builtin.shell: |
-    KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
-    /usr/local/bin/kubectl load image --image management-api:latest || true
+    /var/lib/rancher/k3s/data/current/bin/ctr -n k8s.io images import /tmp/management-api-latest.tar
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: ctr_import_result
+  until: ctr_import_result.rc == 0
+  retries: 3
+  delay: 5
+
+- name: Verify image is available in containerd
+  ansible.builtin.shell: |
+    /var/lib/rancher/k3s/data/current/bin/ctr -n k8s.io images ls | grep management-api
+  register: containerd_image_check
+  until: "'management-api' in containerd_image_check.stdout"
+  retries: 5
+  delay: 2
 
 - name: Apply k8s manifests to platform namespace
   ansible.builtin.shell: |
