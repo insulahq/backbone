@@ -8,6 +8,20 @@
 
 flush ruleset
 
+{% if inventory_hostname in groups['dns_master'] %}
+# Pre-DNAT filter: runs at priority -150, BEFORE Docker's DNAT at -100.
+# Drops public internet access to pdns-admin and pdns-api on eth0 so they
+# can never be DNAT'd to their containers from outside NetBird.
+# The FORWARD chain alone is insufficient because after DNAT the destination
+# port changes (e.g. 8082→80), making it indistinguishable from Traefik traffic.
+table inet filter {
+    chain pre_dnat {
+        type filter hook prerouting priority -150; policy accept;
+        iifname "eth0" tcp dport { {{ pdns_api_port }}, {{ pdns_admin_port }} } drop
+    }
+}
+
+{% endif %}
 table inet filter {
 
     chain input {
@@ -53,19 +67,18 @@ table inet filter {
 
 {% endif %}
 {% if inventory_hostname in groups['dns_master'] %}
-        # PowerDNS API — Docker binds to 0.0.0.0:{{ pdns_api_port }}; nftables restricts access
-        # Allow: localhost, ns2 reconciliation cron, management API server (admin1)
+        # PowerDNS API — Docker binds to 0.0.0.0:{{ pdns_api_port }}
+        # eth0 access is blocked in pre_dnat chain (before Docker DNAT).
+        # These INPUT rules defend against non-Docker direct access (belt-and-suspenders).
         tcp dport {{ pdns_api_port }} ip saddr 127.0.0.1 accept
         tcp dport {{ pdns_api_port }} iifname "wt0" ip saddr {{ ns2_netbird_ip }} accept
 {% if admin1_netbird_ip is defined and admin1_netbird_ip %}
         tcp dport {{ pdns_api_port }} iifname "wt0" ip saddr {{ admin1_netbird_ip }} accept
 {% endif %}
-        # Block everything else
         tcp dport {{ pdns_api_port }} drop
 
-        # PowerDNS-Admin web UI — NetBird mesh only; Docker binds to 0.0.0.0, nftables restricts access
+        # PowerDNS-Admin — eth0 blocked in pre_dnat; INPUT rule for belt-and-suspenders
         tcp dport {{ pdns_admin_port }} iifname "wt0" accept
-        # Block pdns-admin from public internet
         tcp dport {{ pdns_admin_port }} drop
 {% endif %}
 
