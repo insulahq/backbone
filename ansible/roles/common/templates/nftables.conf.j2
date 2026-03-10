@@ -45,12 +45,23 @@ table inet filter {
         udp dport 51820 accept
 
 {% if inventory_hostname in groups['dns_master'] %}
-        # PowerDNS API (localhost only — accessed by Management API on same host)
-        # Docker maps this to 127.0.0.1:{{ pdns_api_port }} on the host
+        # PowerDNS API — Docker binds to 0.0.0.0:{{ pdns_api_port }}; nftables restricts access
+        # localhost: Management API on same host; wt0 from ns2: reconciliation cron + future Management API
         tcp dport {{ pdns_api_port }} ip saddr 127.0.0.1 accept
+        tcp dport {{ pdns_api_port }} iifname "wt0" ip saddr {{ ns2_netbird_ip }} accept
+        # Block everything else reaching the API port (public internet, other IPs)
+        tcp dport {{ pdns_api_port }} drop
 
-        # PowerDNS-Admin web UI — NetBird mesh interface only (DNAT'd from wt0)
+        # PowerDNS-Admin web UI — NetBird mesh only; Docker binds to 0.0.0.0, nftables restricts access
         tcp dport {{ pdns_admin_port }} iifname "wt0" accept
+        # Block pdns-admin from public internet
+        tcp dport {{ pdns_admin_port }} drop
+{% endif %}
+
+{% if inventory_hostname in groups['dns_slave'] %}
+        # PowerDNS API — NetBird mesh only (DNAT'd from wt0 to 127.0.0.1:{{ pdns_api_port }})
+        # Accessible to any NetBird peer (Management API, reconciliation cron on other slaves, etc.)
+        tcp dport {{ pdns_api_port }} iifname "wt0" accept
 {% endif %}
 
 {% if inventory_hostname in groups['netbird_management'] %}
@@ -71,14 +82,26 @@ table inet filter {
     chain forward {
         type filter hook forward priority 0; policy drop;
 
-        # Allow Docker container traffic to be forwarded (NAT outbound + inter-container)
+        # Allow Docker container outbound traffic (container → internet)
         iifname "docker*" accept
-        oifname "docker*" accept
         iifname "br-*" accept
-        oifname "br-*" accept
 
         # Allow established/related forwarded traffic (return paths)
         ct state established,related accept
+
+{% if inventory_hostname in groups['dns_master'] %}
+        # dns_master exposes services via 0.0.0.0 bindings (pdns-admin, pdns API).
+        # Without this restriction, Docker's kernel DNAT would forward public-internet
+        # traffic to containers. Only allow external→container traffic from NetBird (wt0).
+        iifname "wt0" oifname "br-*" accept
+        iifname "lo"  oifname "br-*" accept
+        oifname "br-*" drop
+        oifname "docker*" accept
+{% else %}
+        # Allow Docker NAT outbound and inter-container (other hosts have no exposed ports)
+        oifname "docker*" accept
+        oifname "br-*" accept
+{% endif %}
     }
 
     chain output {
@@ -95,13 +118,19 @@ table ip nat {
         ip saddr 192.168.0.0/16 masquerade
     }
 
-{% if inventory_hostname in groups['dns_master'] %}
-    # DNAT: forward PowerDNS-Admin traffic arriving on NetBird wt0 → localhost
-    # Docker binds pdns-admin to 127.0.0.1:{{ pdns_admin_port }} only, so we
-    # redirect inbound wt0 connections to loopback so Docker can receive them.
+{% if inventory_hostname in groups['dns_master'] or inventory_hostname in groups['dns_slave'] %}
+    # DNAT: forward wt0 traffic arriving on NetBird to services bound to 127.0.0.1.
+    # route_localnet=1 (set via sysctl) is required for DNAT-to-loopback to work on non-lo interfaces.
     chain prerouting {
         type nat hook prerouting priority -100;
-        iifname "wt0" tcp dport {{ pdns_admin_port }} dnat to 127.0.0.1:{{ pdns_admin_port }}
+{% if inventory_hostname in groups['dns_master'] %}
+        # pdns-admin and PowerDNS API are both bound to 0.0.0.0 — no DNAT needed.
+        # nftables input rules (above) restrict access to wt0/localhost only.
+{% endif %}
+{% if inventory_hostname in groups['dns_slave'] %}
+        # PowerDNS API — bound to 127.0.0.1, reachable from any NetBird peer via DNAT
+        iifname "wt0" tcp dport {{ pdns_api_port }} dnat to 127.0.0.1:{{ pdns_api_port }}
+{% endif %}
     }
 {% endif %}
 }

@@ -30,7 +30,7 @@ services:
     ports:
       - "0.0.0.0:53:53/udp"
       - "0.0.0.0:53:53/tcp"
-      - "127.0.0.1:{{ pdns_api_port }}:8081"   # API — localhost only
+      - "0.0.0.0:{{ pdns_api_port }}:8081"   # API — nftables restricts to 127.0.0.1 + ns2 NetBird IP
     volumes:
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
     environment:
@@ -46,7 +46,7 @@ services:
       pdns:
         condition: service_started
     ports:
-      - "127.0.0.1:{{ pdns_admin_port }}:80"   # localhost only; nftables DNAT from wt0
+      - "0.0.0.0:{{ pdns_admin_port }}:80"   # nftables restricts to wt0 (NetBird) only
     environment:
       SECRET_KEY: "{{ pdns_admin_secret_key }}"
       SQLALCHEMY_DATABASE_URI: >-

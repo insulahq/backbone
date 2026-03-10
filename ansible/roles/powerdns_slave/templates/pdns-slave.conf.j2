@@ -23,9 +23,16 @@ autosecondary=yes
 xfr-cycle-interval=60
 axfr-fetch-timeout=10
 
-# No API on secondary
-api=no
-webserver=no
+# REST API — bound to 127.0.0.1 on the host (network_mode: host).
+# Accessible locally by the reconciliation cron and from any NetBird peer
+# via nftables DNAT (wt0:{{ pdns_api_port }} → 127.0.0.1:{{ pdns_api_port }}).
+# Access control is enforced at the nftables layer; all NetBird peers are trusted.
+api=yes
+api-key={{ pdns_api_key }}
+webserver=yes
+webserver-port={{ pdns_api_port }}
+webserver-address=127.0.0.1
+webserver-allow-from=0.0.0.0/0,::/0
 
 # Logging — stdout for Docker log collection
 log-dns-queries=no

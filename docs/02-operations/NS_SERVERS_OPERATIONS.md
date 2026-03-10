@@ -80,7 +80,7 @@ Credentials: created on first login via the setup flow.
 
 | Service | Image | Purpose | Ports |
 |---------|-------|---------|-------|
-| `pdns` | `powerdns/pdns-auth-49:latest` | Authoritative DNS secondary | `0.0.0.0:53` (UDP+TCP) |
+| `pdns` | `powerdns/pdns-auth-49:latest` | Authoritative DNS secondary | `0.0.0.0:53` (UDP+TCP), `127.0.0.1:8081` (API, DNAT'd from `wt0:8081`) |
 
 ---
 
@@ -332,15 +332,21 @@ See: **ADR-021** (new — Docker userland-proxy)
 
 ---
 
-### 13. ns2 PowerDNS container uses `network_mode: host` + `user: root`
+### 13. ns2 PowerDNS container uses `network_mode: host` + `cap_add: NET_BIND_SERVICE`
 
 **Context:** ns2's PowerDNS container must use `network_mode: host` so that source IPs are
 preserved end-to-end through the NetBird WireGuard interface — even with `userland-proxy: false`,
 NetBird's postrouting masquerade chain rewrites the source IP of forwarded packets entering via
 `wt0`. Host networking bypasses all Docker NAT and masquerade chains entirely.
 
-With host networking, the container cannot bind to port 53 unless it runs as root (non-root
-process with `NET_BIND_SERVICE` is not sufficient for ambient capabilities in this image).
+With host networking, the container binds port 53 in the host network namespace. The image runs
+as uid 953 (pdns). Two things are required to allow uid 953 to bind port 53 without root:
+
+1. `net.ipv4.ip_unprivileged_port_start=53` set via Ansible sysctl — allows any process to bind
+   ports ≥ 53 without `CAP_NET_BIND_SERVICE`
+2. `cap_add: NET_BIND_SERVICE` in docker-compose.yml — grants the capability explicitly
+
+**Do NOT use `user: root`** — running PowerDNS as root is unnecessary and increases attack surface.
 
 **What's deployed:**
 ```yaml
@@ -349,7 +355,8 @@ pdns:
   image: powerdns/pdns-auth-49:latest
   restart: unless-stopped
   network_mode: host
-  user: root
+  cap_add:
+    - NET_BIND_SERVICE
   volumes:
     - ./pdns.conf:/etc/powerdns/pdns.conf:ro
     - pdns_sqlite:/var/lib/powerdns
@@ -363,6 +370,10 @@ docker compose -f /opt/powerdns/docker-compose.yml ps
 
 ss -lunp | grep :53
 # Expected: pdns_server pid directly on host (no docker-proxy)
+
+# Confirm not running as root:
+docker compose -f /opt/powerdns/docker-compose.yml exec pdns id
+# Expected: uid=953(pdns) gid=953(pdns)
 ```
 
 ---
@@ -396,6 +407,170 @@ POST /api/v1/servers/localhost/zones
 docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns \
   pdnsutil show-zone phoenix-host.net | head -1
 # Expected: This is a Master zone
+```
+
+---
+
+### 15. Zone deletion does not propagate — reconciliation cron required
+
+**Root cause:** The DNS NOTIFY protocol has no "delete zone" message. When a zone is deleted on
+ns1 (via REST API or pdns-admin), ns2 retains it indefinitely. There is no built-in PowerDNS
+mechanism to remove secondary zones when the primary deletes them.
+
+**Fix (already in place):** A reconciliation script runs every 5 minutes on ns2 (and any future
+slaves). It queries ns1's REST API over the NetBird WireGuard tunnel for the authoritative zone
+list and deletes any zone that is present locally but absent on ns1.
+
+Key safety guards in the script:
+- If ns1 API is unreachable, reconciliation is **skipped entirely** — no zones are deleted
+- If ns1 returns an empty list, reconciliation is **skipped** (safety guard against mass deletion)
+
+**Script location on ns2:** `/usr/local/bin/pdns-reconcile-zones.sh`  
+**Cron file:** `/etc/cron.d/pdns-reconcile` (runs as root every 5 minutes)  
+**Logs:** `journalctl -t pdns-reconcile`
+
+The script uses only REST API calls (no `docker exec`):
+- Queries ns1 at `http://100.76.182.198:8081/api/v1` over NetBird
+- Queries ns2 locally at `http://127.0.0.1:8081/api/v1`
+- Deletes orphan zones via `DELETE /api/v1/servers/localhost/zones/<zone>`
+
+```bash
+# Monitor reconciliation logs on ns2:
+ssh -i ~/phoenix-host.key root@89.167.125.29 'journalctl -t pdns-reconcile -n 20'
+
+# Run manually to test:
+ssh -i ~/phoenix-host.key root@89.167.125.29 '/usr/local/bin/pdns-reconcile-zones.sh'
+
+# Verify cron is installed:
+ssh -i ~/phoenix-host.key root@89.167.125.29 'cat /etc/cron.d/pdns-reconcile'
+```
+
+**Important — Management API zone deletion requirements:**
+
+When the Management API (to be built) deletes a zone, it **must** call the PowerDNS REST API on
+**every primary nameserver** (`ns1` and any future ns nodes). The reconciliation cron on slaves
+provides eventual consistency (within 5 minutes), but for immediate deletion, the API should also
+trigger the cron or use `pdnsutil delete-zone` on each slave via SSH.
+
+Minimum required steps for zone deletion in the Management API:
+1. `DELETE /api/v1/servers/localhost/zones/<zone>` on ns1
+2. (Optional but recommended for immediate effect) SSH to each slave and run:
+   `docker compose -f /opt/powerdns/docker-compose.yml exec -T pdns pdnsutil delete-zone <zone>`
+3. If step 2 is skipped, the reconciliation cron will clean up within 5 minutes.
+
+ns2's PowerDNS API is enabled and bound to `127.0.0.1:8081`. It is accessible from any NetBird
+peer via nftables DNAT (`wt0:8081` → `127.0.0.1:8081`). The Management API can call both ns1
+and ns2 REST APIs uniformly over NetBird — no SSH required.
+
+**ns1 API now accessible from ns2 over NetBird (for reconciliation script):**
+
+The nftables config on ns1 adds a DNAT rule and allow rule for `wt0:{{ pdns_api_port }}` from
+ns2's NetBird IP. This means the reconciliation script on ns2 can reach:
+`http://100.76.182.198:8081/api/v1` via the WireGuard tunnel. This port is **not** accessible
+from the public internet — only from NetBird peers.
+
+---
+
+### 16. Docker `127.0.0.1` port binding breaks DNAT from external interfaces
+
+**Symptom:** Service accessible from localhost (`curl http://127.0.0.1:PORT/` returns 200/302)
+but connection times out from NetBird peers despite nftables DNAT rule being present and
+conntrack confirming the DNAT fires (`[UNREPLIED]` state — SYN sent, no SYN-ACK received).
+
+**Root cause:** When Docker binds a port to `127.0.0.1:PORT`, it uses a `dockerd`-managed socket
+(even with `"userland-proxy": false`). When nftables DNAT rewrites an external packet's destination
+from e.g. `100.76.182.198:8082` → `127.0.0.1:8082`, `dockerd` receives the SYN. But the kernel
+cannot route the SYN-ACK response out through `wt0` because the source address would be `127.0.0.1`
+— loopback source addresses cannot egress on non-loopback interfaces, even with `route_localnet=1`.
+Conntrack records the entry as `[UNREPLIED]` because no SYN-ACK is ever sent.
+
+**Fix:** Bind to `0.0.0.0:PORT` instead. Docker then uses kernel iptables DNAT directly to the
+container IP (e.g. `172.18.0.x`), which has a routable source address. Conntrack reverse-NATing
+works correctly. Protect the port from public internet access via the FORWARD chain (see gotcha #17).
+
+**What's deployed on ns1:**
+- `pdns-admin`: `0.0.0.0:8082:80`
+- PowerDNS API: `0.0.0.0:8081:8081`
+- Access restricted by nftables INPUT (localhost + wt0) and FORWARD chain rules
+
+**Diagnostic commands:**
+```bash
+# Confirm DNAT fires but SYN-ACK never arrives (UNREPLIED):
+apt-get install -y conntrack
+conntrack -E -p tcp --dport 8082   # watch for [NEW] ... [UNREPLIED] while client connects
+
+# Confirm no packet reaches lo (DNAT-to-loopback is silently failing):
+tcpdump -i lo -n tcp port 8082 -c 5
+
+# Confirm packet arrives on wt0 (tunnel is fine, problem is after DNAT):
+tcpdump -i wt0 -n tcp port 8082 -c 5
+```
+
+---
+
+### 17. Docker `0.0.0.0` port binding exposes ports via FORWARD chain — nftables INPUT rules do not protect them
+
+**Symptom:** Port restricted in nftables INPUT chain (e.g. `tcp dport 8082 iifname "wt0" accept`
+then `drop`) is still reachable from the public internet after switching Docker binding to
+`0.0.0.0:PORT`.
+
+**Root cause:** Docker's kernel iptables DNAT (for `0.0.0.0`-bound ports) rewrites the destination
+to the container IP in PREROUTING. The packet then takes the **FORWARD** path (not INPUT), so
+nftables INPUT rules are never evaluated. Docker's own FORWARD chain rules explicitly allow the
+traffic regardless of source interface.
+
+**Fix (already in place):** The `chain forward` in `nftables.conf.j2` on `dns_master` hosts
+replaces the blanket `oifname "br-*" accept` with an explicit allowlist:
+
+```nftables
+# Allow only NetBird (wt0) and loopback → Docker bridge containers
+iifname "wt0" oifname "br-*" accept
+iifname "lo"  oifname "br-*" accept
+oifname "br-*" drop   # blocks eth0 (public internet) and all other interfaces
+```
+
+This ensures only NetBird-mesh peers can reach Docker containers, regardless of which port
+the service is bound to on the host.
+
+**Verify:**
+```bash
+# From NetBird peer — must succeed:
+curl -sf http://100.76.182.198:8082/ -o /dev/null -w "%{http_code}\n"
+# Expected: 302
+
+# From public internet — must timeout (000):
+curl --max-time 4 http://23.88.111.142:8082/ -o /dev/null -w "%{http_code}\n"
+# Expected: 000
+```
+
+---
+
+### 18. nftables `dnat` verdict in nat table chains is terminal — counters placed after it show 0
+
+**Symptom:** Added a counter rule immediately after a `dnat` rule in `table ip nat prerouting` for
+debugging. Counter shows `packets 0 bytes 0` even though tcpdump confirms packets are arriving on
+the interface and conntrack confirms the DNAT is firing.
+
+**Root cause:** In nftables `nat` table chains, the `dnat` statement is a **terminal verdict** —
+it terminates processing of the current chain immediately, just like `accept` or `drop`. Subsequent
+rules in the same chain are never evaluated. This differs from `dnat` in `filter` table chains
+where it is non-terminal.
+
+**Implication for debugging:** Counters placed after `dnat` rules in nat chains will always show
+zero. Use conntrack to verify DNAT is firing instead:
+
+```bash
+# Correct way to verify DNAT is firing:
+conntrack -E -p tcp --dport 8082
+# Look for: [NEW] tcp ... dst=100.76.182.198 dport=8082 [UNREPLIED] src=<dnat-target> ...
+# If the reply tuple shows the DNAT target, the rule fired.
+
+# Correct way to count pre-DNAT packets (place counter BEFORE the dnat rule):
+nft add rule ip nat prerouting iifname "wt0" tcp dport 8082 counter
+# Then add the dnat rule after — but counter must precede dnat in chain order.
+
+# Alternatively, use tcpdump on the input interface:
+tcpdump -i wt0 -n tcp port 8082 -c 5
 ```
 
 ---
@@ -458,7 +633,7 @@ ssh -i ~/phoenix-host.key root@89.167.125.29 \
 | 443 | TCP | `0.0.0.0/0` | NetBird HTTPS (management + dashboard) |
 | 3478 | UDP+TCP | `0.0.0.0/0` | NetBird STUN/TURN relay |
 | 51820 | UDP | `0.0.0.0/0` | WireGuard data plane |
-| 8081 | TCP | `127.0.0.1` | PowerDNS API (localhost only) |
+| 8081 | TCP | `127.0.0.1` + `100.76.92.172` (ns2 NetBird, DNAT'd from wt0) | PowerDNS API |
 | 8082 | TCP | `wt0` (NetBird) | pdns-admin UI (DNAT'd from wt0) |
 
 ## Firewall Rules Summary (ns2)
@@ -468,6 +643,7 @@ ssh -i ~/phoenix-host.key root@89.167.125.29 \
 | 22 | TCP | `160.242.115.95` (admin) + rate limit | SSH |
 | 53 | UDP+TCP | `0.0.0.0/0` | DNS secondary |
 | 51820 | UDP | `0.0.0.0/0` | WireGuard data plane |
+| 8081 | TCP | `wt0` (any NetBird peer, DNAT'd to `127.0.0.1:8081`) | PowerDNS API |
 
 ---
 

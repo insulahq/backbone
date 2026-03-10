@@ -81,14 +81,18 @@
 
 # --- kernel parameters ---
 
-- name: Enable route_localnet for DNAT-to-loopback on dns_master (pdns-admin via NetBird)
+- name: Enable route_localnet for DNAT-to-loopback on dns_slave
+  # dns_slave: required for pdns API DNAT (wt0 → 127.0.0.1) — PowerDNS API is bound to
+  #            127.0.0.1 on ns2 (network_mode: host), accessible from NetBird peers via
+  #            nftables prerouting DNAT. dns_master no longer needs this — both pdns-admin
+  #            and the PowerDNS API are bound to 0.0.0.0 and use Docker's kernel DNAT directly.
   ansible.posix.sysctl:
     name: net.ipv4.conf.all.route_localnet
     value: '1'
     state: present
     sysctl_set: true
     reload: true
-  when: inventory_hostname in groups['dns_master']
+  when: inventory_hostname in groups['dns_slave']
 
 # --- nftables firewall ---
 

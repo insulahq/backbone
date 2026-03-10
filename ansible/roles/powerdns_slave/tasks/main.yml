@@ -160,3 +160,42 @@
     chdir: /opt/powerdns
   when: ns1_netbird_ip not in powerdns_slave_autoprimaries.stdout
   changed_when: true
+
+# ---------------------------------------------------------------------------
+# Zone reconciliation — eventual consistency for zone deletions
+# ---------------------------------------------------------------------------
+# The DNS protocol has no "delete zone" NOTIFY. When a zone is removed on ns1,
+# ns2 retains it indefinitely until explicitly told to remove it. This cron job
+# runs every 5 minutes, compares the local zone list against ns1's REST API,
+# and deletes any orphan zones (present locally but absent on ns1).
+#
+# Prerequisites:
+#   - ns1 REST API accessible from ns2 over NetBird on port {{ pdns_api_port }}
+#     (nftables DNAT + allow rule in common role for dns_master)
+#   - ns2 REST API enabled (api=yes in pdns-slave.conf, bound to 127.0.0.1)
+#     (nftables DNAT + allow rule in common role for dns_slave)
+#   - python3 available on ns2 (standard Debian 13 install; installed explicitly below)
+
+- name: Install python3 for JSON parsing in reconciliation script
+  ansible.builtin.apt:
+    name: python3
+    state: present
+
+- name: Deploy zone reconciliation script
+  ansible.builtin.template:
+    src: pdns-reconcile-zones.sh.j2
+    dest: /usr/local/bin/pdns-reconcile-zones.sh
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Install reconciliation cron job (every 5 minutes)
+  ansible.builtin.copy:
+    dest: /etc/cron.d/pdns-reconcile
+    content: |
+      # Zone reconciliation — delete zones on ns2 that no longer exist on ns1.
+      # Logs to syslog: journalctl -t pdns-reconcile
+      */5 * * * * root /usr/local/bin/pdns-reconcile-zones.sh
+    owner: root
+    group: root
+    mode: '0644'
