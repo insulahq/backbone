@@ -73,6 +73,26 @@ docker unpause powerdns-pdns-1 2>/dev/null || true
 log "PowerDNS SQLite backed up."
 
 {% endif %}
+{% if inventory_hostname in groups['management_api'] %}
+# -----------------------------------------------------------------------
+# MariaDB — management API database
+# Pipe mysqldump directly into restic; no temp file on disk.
+# MYSQL_PWD avoids the password appearing in the process list.
+# -----------------------------------------------------------------------
+log "Dumping MariaDB ({{ management_api_db_name }})..."
+docker exec \
+  -e MYSQL_PWD="{{ management_api_db_root_password }}" \
+  management-api-mariadb-1 \
+  mysqldump -u root --all-databases --single-transaction \
+  | restic backup \
+      --stdin \
+      --stdin-filename "mariadb-dumpall.sql" \
+      --tag mariadb \
+      --tag "{{ inventory_hostname }}" \
+  || fail "MariaDB dump failed"
+log "MariaDB dump done."
+
+{% endif %}
 # -----------------------------------------------------------------------
 # Config files — /opt/* directories managed by Ansible
 # Small but useful for quick reference after disaster recovery.
@@ -103,7 +123,7 @@ log "Pruning snapshots (keep-daily={{ backup_retention_days }})..."
 restic forget \
   --prune \
   --keep-daily {{ backup_retention_days }} \
-  --group-by "host" \
+  --group-by "host,paths" \
   || fail "Prune failed"
 log "Prune done."
 
