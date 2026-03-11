@@ -6,7 +6,7 @@
 # NetBird versions
 netbird_management_version: "0.28.0"
 netbird_signal_version: "0.28.0"
-netbird_dashboard_version: "2.3.0"
+netbird_dashboard_version: "latest"
 netbird_coturn_version: "4.6.2-alpine"
 netbird_litestream_version: "0.3.13"
 

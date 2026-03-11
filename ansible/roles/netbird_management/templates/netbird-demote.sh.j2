@@ -21,7 +21,7 @@ error() {
 log "Starting demotion to standby on {{ inventory_hostname }}"
 
 # Step 1: Check if NetBird Management is running
-if ! docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management; then
+if ! docker ps --filter "name=netbird-management" --filter "status=running" --format '{{ "{{" }}.Names{{ "}}" }}' | grep -q netbird-management; then
     log "NetBird Management is not running, nothing to demote"
     exit 0
 fi

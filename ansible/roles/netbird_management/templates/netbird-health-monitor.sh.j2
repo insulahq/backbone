@@ -72,7 +72,7 @@ increment_failover_count() {
 
 # Check if NetBird Management is running locally
 is_local_running() {
-    docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management
+    docker ps --filter "name=netbird-management" --filter "status=running" --format '{{ "{{" }}.Names{{ "}}" }}' | grep -q netbird-management
 }
 
 # Check if peer NetBird Management is healthy

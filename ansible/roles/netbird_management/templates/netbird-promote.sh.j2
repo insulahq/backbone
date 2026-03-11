@@ -21,7 +21,7 @@ error() {
 log "Starting promotion to primary on {{ inventory_hostname }}"
 
 # Step 1: Stop NetBird Management if running (safety)
-if docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management; then
+if docker ps --filter "name=netbird-management" --filter "status=running" --format '{{ "{{" }}.Names{{ "}}" }}' | grep -q netbird-management; then
     log "Stopping existing NetBird Management"
     docker compose -f "$INSTALL_DIR/docker-compose.yml" stop management
 fi
