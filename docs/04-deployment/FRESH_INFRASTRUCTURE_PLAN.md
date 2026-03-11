@@ -511,3 +511,20 @@ table inet filter {
 **No application changes required** — NetBird clients will automatically use the new DNS record.
 
 **See ADR-021 for detailed migration rationale and alternatives.**
+
+---
+
+## NetBird Certificate Bootstrap
+
+**IMPORTANT:** NetBird Management has a circular dependency when using self-hosted authentication. Before deploying NetBird services, you must pre-generate SSL certificates using a temporary container.
+
+**See detailed guide:** [`docs/04-deployment/NETBIRD_CERTIFICATE_BOOTSTRAP.md`](./NETBIRD_CERTIFICATE_BOOTSTRAP.md)
+
+**Quick summary:**
+1. Deploy temporary `whoami` container with Traefik labels
+2. Wait 60 seconds for Let's Encrypt DNS-01 challenge to complete
+3. Verify certificates exist in `acme.json`
+4. Remove whoami, deploy NetBird Management
+5. Traefik automatically reuses existing certificates (no new ACME challenge needed)
+
+This approach was successfully tested on 2026-03-11 and confirmed working.
