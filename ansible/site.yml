@@ -1,0 +1,39 @@
+---
+# Phoenix Host — Main Ansible Playbook
+# Aligned with docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md
+
+- name: Apply common configuration to all servers
+  hosts: all
+  roles:
+    - common
+
+# Phase 1 deployment order (to be uncommented as roles are created):
+# - name: Deploy NetBird management server
+#   hosts: netbird_management
+#   roles:
+#     - netbird_management
+
+# - name: Deploy NetBird peers
+#   hosts: netbird_peers
+#   roles:
+#     - netbird_peer
+
+# - name: Deploy PowerDNS primary
+#   hosts: powerdns_primary
+#   roles:
+#     - powerdns_master
+
+# - name: Deploy PowerDNS secondary
+#   hosts: powerdns_secondary
+#   roles:
+#     - powerdns_slave
+
+# - name: Deploy backup configuration
+#   hosts: backup_targets
+#   roles:
+#     - backup
+
+# - name: Deploy k3s cluster
+#   hosts: k8s_servers
+#   roles:
+#     - k3s

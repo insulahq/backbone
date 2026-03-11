@@ -1,0 +1,21 @@
+---
+# Common role handlers
+
+- name: restart fail2ban
+  systemd:
+    name: fail2ban
+    state: restarted
+
+- name: reload nftables
+  systemd:
+    name: nftables
+    state: reloaded
+  # CRITICAL: After nftables reload, Docker chains are wiped
+  # We must restart Docker to restore Docker's iptables/nftables rules
+  listen: reload nftables
+
+- name: restart docker after nftables
+  systemd:
+    name: docker
+    state: restarted
+  listen: reload nftables

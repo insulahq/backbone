@@ -58,15 +58,29 @@
 - ns2.phoenix-host.net: `89.167.125.29` (Hetzner Helsinki)
 - admin1.phoenix-host.net: `46.224.122.58` (Hetzner)
 
-**Next Step:** Infrastructure architecture has been designed. See `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md` for full plan. Awaiting user confirmation on open questions before proceeding with Ansible deployment.
+**Architecture Confirmed (2026-03-11):**
+- ✅ OS: Debian 13 (trixie) — Official stable
+- ✅ DNS: PowerDNS 4.9 (not BIND) — Aligned with ADR-016
+- ✅ NetBird: Fresh deployment
+- ✅ Firewall: Simple nftables only (NO advanced pre/post-routing)
+- ✅ SSH: Break-glass access (stays open on all servers)
+- ✅ Ansible: `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
+
+**Ansible scaffolding created:**
+- ✅ `ansible/ansible.cfg`, `ansible/site.yml`
+- ✅ `ansible/inventory/hosts.yml` — Server inventory
+- ✅ `ansible/group_vars/all.yml` — Global variables
+- ✅ `ansible/roles/common/` — OS hardening, simple nftables, Docker CE, fail2ban
+
+**Next Step:** Deploy common role to all servers, then create `netbird_management` role.
 
 ---
 
 ## 3. Immediate Next Task — START HERE
 
-**Infrastructure Architecture Designed — Awaiting User Confirmation**
+**Infrastructure Architecture Confirmed — Ready to Deploy**
 
-The infrastructure architecture has been designed based on user requirements and documented in `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md`.
+The infrastructure architecture has been confirmed by the user and documented in `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md`.
 
 **Architecture Summary:**
 
@@ -75,21 +89,34 @@ The infrastructure architecture has been designed based on user requirements and
 - **ns2** (`89.167.125.29`): PowerDNS Secondary + NetBird Peer (Docker Compose)
 - **admin1** (`46.224.122.58`): k3s cluster + Management API + Admin/Client Panels + Phase 1 workloads
 
-**Key Decisions:**
+**Key Decisions (Confirmed 2026-03-11):**
 - ✅ **DNS Server:** PowerDNS 4.9 (not BIND) — REST API, database-backed, aligned with ADR-016
-- ✅ **Deployment:** Ansible roles (rebuild from scratch, aligned with Phase 1 roadmap)
+- ✅ **OS:** Debian 13 (trixie) — Official Debian stable
+- ✅ **Deployment:** Ansible roles (rebuilt from scratch, aligned with Phase 1 roadmap)
 - ✅ **Firewall:** Simple nftables rules only — **NO advanced pre/post-routing** (lesson from previous deployment: complex NAT rules broke ns1 access after NetBird changes)
-- ✅ **VPN:** NetBird mesh (management on ns1, peers on ns2/admin1/workstation)
-- ✅ **Backup:** Restic → Hetzner Storagebox (same as before)
+- ✅ **VPN:** Fresh NetBird mesh (new management server on ns1)
+- ✅ **SSH:** Break-glass access (SSH stays open on all servers for emergency access)
+- ✅ **Backup:** Restic → Hetzner Storagebox `u335448-sub9@u335448.your-storagebox.de`
+- ✅ **Ansible:** `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
 
-**Open Questions for User (see `FRESH_INFRASTRUCTURE_PLAN.md` §Open Questions):**
-1. Server OS: Debian 12 (bookworm) or Debian 13 (trixie)?
-2. NetBird: Reuse existing account or fresh setup?
-3. Backup: Confirm Storagebox credentials still valid?
-4. SSH access: How to access servers during initial deployment?
-5. Ansible: Confirm SSH key path and user?
+**Ansible Infrastructure Created:**
+- ✅ `ansible/site.yml` — Main playbook
+- ✅ `ansible/inventory/hosts.yml` — Server inventory with IPs and groups
+- ✅ `ansible/group_vars/all.yml` — Global variables (aligned with confirmed decisions)
+- ✅ `ansible/roles/common/` — OS hardening, simple nftables firewall, Docker CE, fail2ban
 
-**Do not proceed with Ansible deployment until user confirms open questions.**
+**Next Deployment Steps:**
+1. Deploy `common` role to all servers (OS hardening + Docker + simple firewall)
+2. Create and deploy `netbird_management` role (ns1)
+3. Create and deploy `netbird_peer` role (ns2, admin1, workstation)
+4. Verify NetBird mesh connectivity
+5. Create and deploy `powerdns_master` role (ns1 + PostgreSQL)
+6. Create and deploy `powerdns_slave` role (ns2 + SQLite)
+7. Verify DNS replication (< 5 seconds propagation)
+8. Create and deploy `backup` role (Restic to Storagebox)
+9. Create and deploy `k3s` role (admin1 single-node cluster)
+
+**See:** `ansible/README.md` for deployment instructions.
 
 ---
 

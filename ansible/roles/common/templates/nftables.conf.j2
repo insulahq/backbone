@@ -1,0 +1,65 @@
+#!/usr/sbin/nft -f
+# Phoenix Host — Simple nftables Configuration
+# CRITICAL: NO advanced pre/post-routing or custom NAT chains
+# Lesson from previous deployment: Complex NAT rules broke ns1 access after NetBird changes
+# This configuration keeps firewall rules simple and lets Docker and NetBird manage their own NAT
+
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority filter; policy drop;
+    
+    # Allow loopback
+    iif "lo" accept
+    
+    # Allow established and related connections
+    ct state established,related accept
+    
+    # Allow ICMP (ping)
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+    
+{% if 'dns_servers' in group_names %}
+    # DNS server — allow public DNS queries
+    tcp dport 53 accept
+    udp dport 53 accept
+{% endif %}
+    
+{% if 'netbird_management' in group_names %}
+    # NetBird management server — allow HTTPS (management UI + signal server)
+    tcp dport 443 accept
+    
+    # NetBird relay TURN server
+    udp dport 10000 accept
+{% endif %}
+    
+    # WireGuard (NetBird mesh)
+    udp dport 51820 accept
+    
+{% if ssh_break_glass_enabled %}
+    # SSH break-glass access (kept open per user requirement)
+    tcp dport {{ ssh_port }} accept
+{% endif %}
+    
+    # Log and drop everything else
+    counter drop
+  }
+  
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    
+    # Allow established and related connections
+    ct state established,related accept
+    
+    # Docker will inject its own rules here
+    # DO NOT add custom DNAT or SNAT rules — let Docker manage forwarding
+  }
+  
+  chain output {
+    type filter hook output priority filter; policy accept;
+  }
+}
+
+# NO nat table, NO prerouting, NO postrouting
+# Docker and NetBird manage their own NAT via iptables/nftables

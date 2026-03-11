@@ -1,0 +1,110 @@
+---
+# Common role — OS hardening, simple nftables, Docker CE, fail2ban
+# Aligned with docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md
+# CRITICAL: Simple firewall rules only — NO advanced pre/post-routing
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install base packages
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - vim
+      - htop
+      - net-tools
+      - dnsutils
+      - fail2ban
+      - nftables
+      - python3
+      - python3-pip
+    state: present
+
+- name: Set timezone to UTC
+  timezone:
+    name: "{{ timezone }}"
+
+- name: Configure fail2ban
+  copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      [DEFAULT]
+      bantime = 3600
+      findtime = 600
+      maxretry = 5
+
+      [sshd]
+      enabled = true
+      port = {{ ssh_port }}
+      logpath = /var/log/auth.log
+    mode: '0644'
+  notify: restart fail2ban
+
+- name: Start and enable fail2ban
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+
+- name: Deploy simple nftables configuration (NO advanced pre/post-routing)
+  template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    mode: '0644'
+  notify: reload nftables
+
+- name: Enable nftables service
+  systemd:
+    name: nftables
+    state: started
+    enabled: yes
+
+# Docker CE installation (official repo)
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/debian/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+
+- name: Install Docker CE
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Start and enable Docker
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add root to docker group (for convenience)
+  user:
+    name: root
+    groups: docker
+    append: yes
+
+- name: Verify Docker installation
+  command: docker --version
+  register: docker_version_output
+  changed_when: false
+
+- name: Display Docker version
+  debug:
+    msg: "Docker installed: {{ docker_version_output.stdout }}"

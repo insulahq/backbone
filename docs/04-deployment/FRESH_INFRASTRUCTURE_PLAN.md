@@ -359,41 +359,43 @@ table inet filter {
 
 ---
 
-## Open Questions for User
+## Architecture Decisions (User Confirmed)
 
-Before proceeding with infrastructure deployment, please confirm:
+**Date Confirmed:** 2026-03-11
 
-1. ✅ **Server OS:** Debian 13 (trixie) or Debian 12 (bookworm)?
-   - Recommendation: **Debian 12 (bookworm stable)** — better package stability, Docker CE official support
+1. ✅ **Server OS:** **Debian 13 (trixie)** — Official Debian stable release
    
-2. ✅ **NetBird setup:** Reuse previous NetBird management account, or create fresh NetBird account?
-   - If reusing: Provide NetBird management URL and API key
-   - If fresh: We'll deploy new NetBird management server on ns1
+2. ✅ **NetBird setup:** **Fresh deployment** — Deploy new NetBird management server on ns1
    
-3. ✅ **Backup credentials:** Is Hetzner Storagebox `u335448-sub9@u335448.your-storagebox.de` still valid?
-   - If yes: Provide SSH key or password
-   - If no: Provide new Storagebox credentials
+3. ✅ **Backup credentials:** **`phoenix-host.key.pub`** — SSH public key for Storagebox authentication
+   - Storagebox: `u335448-sub9@u335448.your-storagebox.de`
    
-4. ✅ **SSH access:** How should we access servers during deployment?
-   - Option A: Public SSH temporarily (disable after NetBird is up)
-   - Option B: Pre-configure NetBird peers manually before Ansible runs
+4. ✅ **SSH access:** **Option A + Keep SSH open** — Public SSH during deployment, remain open as break-glass access
+   - SSH will remain available on all servers for emergency access
+   - Primary access via NetBird mesh once deployed
    
-5. ✅ **Ansible inventory:** Confirm SSH key path and user for Ansible connection
-   - Example: `ansible_user=root ansible_ssh_private_key_file=~/phoenix-host.key`
+5. ✅ **Ansible connection:** **Confirmed**
+   - `ansible_user=root`
+   - `ansible_ssh_private_key_file=~/phoenix-host.key`
 
 ---
 
-## Next Steps
+## Deployment Sequence
 
-Once user confirms the above, proceed with:
+**Status:** READY TO PROCEED — User confirmed architecture decisions above.
 
-1. **Create Ansible inventory** — `ansible/inventory/hosts.yml` with server IPs and vars
-2. **Recreate Ansible roles** — Start with `common`, then `netbird_management`, then `powerdns_master`
-3. **Deploy infrastructure** — Run Ansible playbooks in order
-4. **Verify each component** — DNS, NetBird, backups
-5. **Update AGENTS.md** — Document current state after each milestone
+### Phase 1: Ansible Infrastructure (Week 1-2)
 
-**Do not proceed until user confirms architecture and provides credentials.**
+1. ✅ **Create Ansible inventory** — `ansible/inventory/hosts.yml` with server IPs and vars
+2. ✅ **Create `common` role** — OS hardening, simple nftables (SSH + break-glass), Docker CE, fail2ban
+3. ⏳ **Create `netbird_management` role** — Deploy NetBird stack on ns1 (management + signal + relay)
+4. ⏳ **Create `netbird_peer` role** — Deploy NetBird peer on ns2, admin1, workstation
+5. ⏳ **Verify NetBird mesh** — All nodes can ping each other via NetBird IPs
+6. ⏳ **Create `powerdns_master` role** — Deploy PowerDNS + PostgreSQL on ns1
+7. ⏳ **Create `powerdns_slave` role** — Deploy PowerDNS + SQLite on ns2
+8. ⏳ **Verify DNS replication** — Create test zone on ns1, confirm it appears on ns2 within 5s
+9. ⏳ **Create `backup` role** — Deploy Restic backup on all servers
+10. ⏳ **Verify backups** — Trigger manual backup, confirm files appear on Storagebox
 
 ---
 
