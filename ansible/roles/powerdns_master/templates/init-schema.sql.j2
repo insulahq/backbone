@@ -1,0 +1,20 @@
+-- PowerDNS PostgreSQL Schema Initialization
+-- Creates necessary databases and extensions for PowerDNS and PowerDNS-Admin
+
+-- Create PowerDNS database (already created by POSTGRES_DB, but ensure it exists)
+-- PowerDNS schema will be auto-created by PowerDNS on first start
+
+-- Create PowerDNS-Admin database
+CREATE DATABASE {{ powerdns_admin_sqla_db_name }};
+
+-- Create PowerDNS-Admin user with password
+CREATE USER {{ powerdns_admin_sqla_db_user }} WITH PASSWORD '{{ powerdns_admin_sqla_db_password }}';
+
+-- Grant privileges on PowerDNS-Admin database
+GRANT ALL PRIVILEGES ON DATABASE {{ powerdns_admin_sqla_db_name }} TO {{ powerdns_admin_sqla_db_user }};
+
+-- Connect to PowerDNS-Admin database and grant schema privileges
+\c {{ powerdns_admin_sqla_db_name }}
+GRANT ALL ON SCHEMA public TO {{ powerdns_admin_sqla_db_user }};
+
+-- Note: PowerDNS-Admin will auto-create its tables on first start

@@ -1,0 +1,87 @@
+# PowerDNS Authoritative Server Configuration (Primary)
+# PowerDNS 4.9 — Docker deployment on ns1
+# Backend: PostgreSQL
+
+####################
+# Server Settings
+####################
+
+# Server identity
+server-id=ns1.{{ platform_domain }}
+local-address=0.0.0.0
+local-port={{ powerdns_dns_port }}
+
+# Primary/Secondary mode (4.9 terminology)
+primary={{ 'yes' if powerdns_primary else 'no' }}
+secondary={{ 'yes' if powerdns_secondary else 'no' }}
+
+####################
+# Zone Replication (AXFR/NOTIFY)
+####################
+
+# Allow zone transfers only from ns2
+allow-axfr-ips={{ powerdns_allow_axfr_ips | join(',') }}
+
+# Notify ns2 on zone changes
+also-notify={{ powerdns_also_notify | join(',') }}
+
+# NOTIFY settings
+primary-send-notify=yes
+notify-timeout=10
+
+####################
+# API & Web Server
+####################
+
+api={{ 'yes' if powerdns_api_enabled else 'no' }}
+api-key={{ powerdns_api_key }}
+
+webserver={{ 'yes' if powerdns_webserver_enabled else 'no' }}
+webserver-address=0.0.0.0
+webserver-port={{ powerdns_webserver_port }}
+webserver-allow-from=0.0.0.0/0
+
+####################
+# Database Backend (PostgreSQL)
+####################
+
+launch=gpgsql
+
+# PostgreSQL connection (Docker service name)
+gpgsql-host=postgres
+gpgsql-port=5432
+gpgsql-dbname={{ powerdns_db_name }}
+gpgsql-user={{ powerdns_db_user }}
+gpgsql-password={{ powerdns_db_password }}
+
+# DNSSEC support
+gpgsql-dnssec={{ 'yes' if powerdns_dnssec_enabled else 'no' }}
+
+####################
+# Security & Performance
+####################
+
+# Security
+setuid=pdns
+setgid=pdns
+security-poll-suffix=
+
+# Disable unused features
+disable-axfr=no
+disable-tcp=no
+
+# Cache settings
+cache-ttl=20
+negquery-cache-ttl=60
+query-cache-ttl=20
+
+####################
+# Logging
+####################
+
+log-dns-details={{ 'yes' if powerdns_log_level | int >= 6 else 'no' }}
+log-dns-queries={{ 'yes' if powerdns_log_level | int >= 8 else 'no' }}
+loglevel={{ powerdns_log_level }}
+
+# Disable unnecessary logging
+query-logging=no

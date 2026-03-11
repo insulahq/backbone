@@ -1,0 +1,112 @@
+---
+# PowerDNS Master — Docker Compose
+# Runs on ns1 as primary DNS server with PostgreSQL backend
+# Uses internal Docker network + nginx proxy for security
+
+version: '3.8'
+
+services:
+  # PostgreSQL — Database backend for PowerDNS and PowerDNS-Admin
+  postgres:
+    image: {{ postgres_image }}
+    container_name: powerdns-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: {{ powerdns_db_name }}
+      POSTGRES_USER: {{ powerdns_db_user }}
+      POSTGRES_PASSWORD: {{ powerdns_db_password }}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - {{ powerdns_install_dir }}/init-schema.sql:/docker-entrypoint-initdb.d/init-schema.sql:ro
+    networks:
+      - powerdns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ powerdns_db_user }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PowerDNS Authoritative Server
+  pdns:
+    image: {{ powerdns_image }}
+    container_name: powerdns-auth
+    restart: unless-stopped
+    hostname: ns1.{{ platform_domain }}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - {{ powerdns_install_dir }}/pdns.conf:/etc/powerdns/pdns.conf:ro
+    ports:
+      - "0.0.0.0:53:53/tcp"
+      - "0.0.0.0:53:53/udp"
+    networks:
+      - powerdns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pdns_control ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+{% if powerdns_admin_enabled %}
+  # PowerDNS-Admin — Web UI for managing PowerDNS
+  pdns-admin:
+    image: {{ powerdns_admin_image }}
+    container_name: powerdns-admin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pdns:
+        condition: service_started
+    environment:
+      SECRET_KEY: {{ powerdns_admin_secret_key }}
+      BIND_ADDRESS: 0.0.0.0
+      PORT: {{ powerdns_admin_port }}
+      SQLA_DB_HOST: postgres
+      SQLA_DB_PORT: 5432
+      SQLA_DB_NAME: {{ powerdns_admin_sqla_db_name }}
+      SQLA_DB_USER: {{ powerdns_admin_sqla_db_user }}
+      SQLA_DB_PASSWORD: {{ powerdns_admin_sqla_db_password }}
+      PDNS_API_KEY: {{ powerdns_api_key }}
+      PDNS_API_URL: http://pdns:{{ powerdns_webserver_port }}
+      PDNS_VERSION: {{ powerdns_version }}
+    volumes:
+      - pdns_admin_data:/data
+    networks:
+      - powerdns_internal
+{% endif %}
+
+  # Nginx Proxy — Exposes PowerDNS API + Admin UI on NetBird interface only
+  nginx:
+    image: {{ nginx_image }}
+    container_name: powerdns-nginx
+    restart: unless-stopped
+    depends_on:
+      - pdns
+{% if powerdns_admin_enabled %}
+      - pdns-admin
+{% endif %}
+    volumes:
+      - {{ powerdns_install_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}:8081"
+{% if powerdns_admin_enabled %}
+      - "{{ powerdns_bind_interface }}:{{ powerdns_nginx_admin_port }}:8080"
+{% endif %}
+    networks:
+      - powerdns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/v1/servers/localhost || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  powerdns_internal:
+    driver: bridge
+    internal: true  # No external access (isolated)
+
+volumes:
+  postgres_data:
+  pdns_admin_data:
