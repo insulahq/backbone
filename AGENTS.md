@@ -35,11 +35,11 @@
 
 **Last commits:**
 ```
+9ec36f3 feat(ansible): create backup and k3s roles for platform infrastructure
 2fa6e64 feat(ansible): create powerdns_slave role with NetBird mesh replication
 6679591 feat(ansible): create powerdns_master role with Docker internal networks and PowerDNS-Admin
 d1abfd7 feat(ansible): implement DNS-01 ACME challenge for NetBird SSL certificates
 90a02b1 feat(ansible): update netbird_management role to use SQLite + Litestream with automatic failover/failback
-8907566 feat(ansible): create netbird_peer role for mesh connectivity
 ```
 
 **What has been preserved:**
@@ -80,8 +80,10 @@ d1abfd7 feat(ansible): implement DNS-01 ACME challenge for NetBird SSL certifica
 - ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
 - ✅ `ansible/roles/powerdns_master/` — PowerDNS Primary + PostgreSQL + PowerDNS-Admin (Docker internal networks)
 - ✅ `ansible/roles/powerdns_slave/` — PowerDNS Secondary + SQLite (NetBird mesh replication)
+- ✅ `ansible/roles/backup/` — Restic backup to Hetzner Storagebox (daily, encrypted)
+- ✅ `ansible/roles/k3s/` — k3s Kubernetes for admin1 and platform servers
 
-**All Phase 1 DNS roles complete.** Ready for user confirmation and deployment.
+**All Phase 1 infrastructure roles complete.** Ready for user confirmation and deployment.
 
 ---
 
