@@ -31,14 +31,14 @@
 
 ## 2. Current State (Fresh Deployment Start)
 
-**Status:** PowerDNS Primary deployed on ns1. Next: Deploy PowerDNS Secondary on ns2.
+**Status:** PowerDNS Primary + Secondary deployed with working zone replication. Next: Deploy NetBird Management.
 
 **Last commits:**
 ```
+21b540d fix(ansible): add external network to PowerDNS auth for public DNS access
+9c14abe fix(ansible): remove invalid PowerDNS 4.9 settings and add NetBird IP fallbacks
 b4000f6 fix(ansible): resolve PowerDNS PostgreSQL schema and docker networking issues
 ed8e7c9 fix(ansible): update common role and ansible.cfg for Debian 13 compatibility
-c3c3be5 docs(agents): update AGENTS.md - all Phase 1 infrastructure roles complete
-9ec36f3 feat(ansible): create backup and k3s roles for platform infrastructure
 ```
 
 **What has been preserved:**
