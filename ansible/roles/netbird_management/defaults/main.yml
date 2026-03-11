@@ -41,6 +41,13 @@ netbird_setup_dns: true  # Create DNS records via PowerDNS API
 # Traefik reverse proxy (for HTTPS endpoints)
 netbird_traefik_enabled: true
 netbird_traefik_email: "admin@{{ platform_domain }}"
+netbird_traefik_acme_challenge: dns-01  # Options: dns-01 (recommended for redundancy), http-01
+netbird_traefik_dns_provider: pdns      # PowerDNS provider for DNS-01 challenge
+
+# PowerDNS API configuration (for DNS-01 challenge)
+# These must be set in group_vars or vault
+# powerdns_api_url: "http://ns1.phoenix-host.net:8081"
+# powerdns_api_key: "<secret-key>"
 
 # Redundancy and failover configuration (ADR-021)
 netbird_auto_failover: true       # Enable automatic failover

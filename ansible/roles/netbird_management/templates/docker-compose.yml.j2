@@ -115,16 +115,11 @@ services:
     image: traefik:v2.11
     container_name: netbird-traefik
     restart: unless-stopped
-    command:
-      - --api.insecure=false
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.file.filename=/etc/traefik/traefik-dynamic.yml
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencrypt.acme.email={{ netbird_traefik_email }}
-      - --certificatesresolvers.letsencrypt.acme.storage=/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+{% if netbird_traefik_acme_challenge == 'dns-01' %}
+    environment:
+      PDNS_API_URL: "{{ powerdns_api_url }}"
+      PDNS_API_KEY: "{{ powerdns_api_key }}"
+{% endif %}
     ports:
       - "80:80"
       - "443:443"

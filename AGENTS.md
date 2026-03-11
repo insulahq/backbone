@@ -116,15 +116,17 @@ The infrastructure architecture has been confirmed by the user and documented in
 
 **Next Deployment Steps:**
 1. Deploy `common` role to all servers (OS hardening + Docker + simple firewall)
-2. Deploy `netbird_management` role (ns1 + ns2, redundant deployment with SQLite + Litestream)
-3. Deploy `netbird_peer` role (admin1, workstation)
-4. Verify NetBird mesh connectivity
-5. Configure DNS round-robin (dual A records for `netbird.phoenix-host.net`)
-6. Create and deploy `powerdns_master` role (ns1 + PostgreSQL)
-7. Create and deploy `powerdns_slave` role (ns2 + SQLite)
-8. Verify DNS replication (< 5 seconds propagation)
+2. Create and deploy `powerdns_master` role (ns1 + PostgreSQL) **— MUST BE FIRST**
+3. Create and deploy `powerdns_slave` role (ns2 + SQLite)
+4. Verify DNS replication (< 5 seconds propagation)
+5. Configure DNS records for NetBird (dual A records for `netbird.phoenix-host.net`)
+6. Deploy `netbird_management` role (ns1 + ns2, redundant deployment with SQLite + Litestream, DNS-01 ACME challenge)
+7. Deploy `netbird_peer` role (admin1, workstation)
+8. Verify NetBird mesh connectivity
 9. Create and deploy `backup` role (Restic to Storagebox, includes NetBird SQLite database via Litestream)
 10. Create and deploy `k3s` role (admin1 single-node cluster)
+
+**CRITICAL:** PowerDNS must be deployed before NetBird because NetBird's Traefik uses DNS-01 ACME challenge for SSL certificates (required for round-robin DNS compatibility). Traefik needs PowerDNS API access to create/delete ACME challenge TXT records.
 
 **See:** `ansible/README.md` for deployment instructions.
 

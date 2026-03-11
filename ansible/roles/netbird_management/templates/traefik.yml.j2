@@ -31,8 +31,17 @@ certificatesResolvers:
     acme:
       email: {{ netbird_traefik_email }}
       storage: /acme.json
+{% if netbird_traefik_acme_challenge == 'dns-01' %}
+      dnsChallenge:
+        provider: {{ netbird_traefik_dns_provider }}
+        delayBeforeCheck: 10
+        resolvers:
+          - "{{ hostvars['ns1']['ansible_host'] }}:53"
+          - "{{ hostvars['ns2']['ansible_host'] }}:53"
+{% else %}
       httpChallenge:
         entryPoint: web
+{% endif %}
 
 log:
   level: INFO

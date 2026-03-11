@@ -83,11 +83,42 @@ Failback behavior depends on `netbird_failback_policy`:
 - ns1 fails → ns2 becomes primary
 - ns1 recovers → wait 20s → failback to ns1
 
+## SSL Certificates with Round-Robin DNS
+
+This role uses **DNS-01 ACME challenge** for Let's Encrypt certificates to work correctly with round-robin DNS.
+
+**Why DNS-01 is required:**
+
+With HTTP-01 challenge and round-robin DNS (`netbird.phoenix-host.net` → both IPs):
+- ❌ Let's Encrypt randomly picks one IP to verify
+- ❌ If ns1 requests cert but Let's Encrypt checks ns2, challenge fails
+- ❌ Certificate acquisition fails randomly ~50% of the time
+
+With DNS-01 challenge:
+- ✅ Let's Encrypt checks DNS TXT records instead of HTTP
+- ✅ Both ns1 and ns2 can independently obtain certificates
+- ✅ No race conditions or random failures
+- ✅ Works even if HTTP ports are blocked
+
+**PowerDNS API requirement:**
+
+Traefik uses the PowerDNS API to automatically create/delete TXT records for ACME challenges:
+1. Traefik requests certificate from Let's Encrypt
+2. Let's Encrypt issues DNS challenge: "Add TXT record `_acme-challenge.netbird.phoenix-host.net`"
+3. Traefik calls PowerDNS API to create the TXT record
+4. Let's Encrypt verifies the TXT record via DNS query
+5. Certificate issued, Traefik deletes the TXT record
+
+**Deployment order:** PowerDNS must be deployed and accessible before NetBird.
+
 ## Requirements
 
 - Docker CE installed (via `common` role)
 - DNS domain configured (`platform_domain` variable)
 - Ports 80, 443, 10000, 33071, 33073 available
+- **PowerDNS with API enabled** (required for DNS-01 challenge with round-robin DNS)
+  - PowerDNS API must be accessible from both ns1 and ns2
+  - API key must be configured in `group_vars/all.yml` or vault
 
 ## Role Variables
 
@@ -97,6 +128,10 @@ Set in `group_vars/all.yml`:
 
 ```yaml
 platform_domain: phoenix-host.net
+
+# PowerDNS API (required for DNS-01 ACME challenge)
+powerdns_api_url: "http://ns1.phoenix-host.net:8081"
+powerdns_api_key: "<secret-api-key>"  # Store in vault
 ```
 
 ### Default Variables
@@ -108,6 +143,8 @@ See `defaults/main.yml` for all configurable options.
 - `netbird_install_dir: /opt/netbird`
 - `netbird_database: sqlite`
 - `netbird_traefik_enabled: true`
+- `netbird_traefik_acme_challenge: dns-01` — DNS-01 challenge for round-robin DNS compatibility
+- `netbird_traefik_dns_provider: pdns` — PowerDNS provider for DNS-01 challenge
 - `netbird_dashboard_domain: netbird.{{ platform_domain }}`
 
 **Failover/failback configuration:**
@@ -133,13 +170,25 @@ If not set, the role generates random values automatically.
 
 ## Dependencies
 
-- `common` role (Docker CE, nftables firewall)
-- `community.docker.docker_compose_v2` Ansible module
+### Ansible Collections
 
-Install dependencies:
 ```bash
 ansible-galaxy collection install community.docker
 ```
+
+### Infrastructure Dependencies
+
+**Must be deployed first:**
+1. `common` role — Docker CE, nftables firewall, fail2ban
+2. `powerdns_master` role — PowerDNS with API enabled on ns1
+3. `powerdns_slave` role — PowerDNS secondary on ns2 (optional, but recommended)
+
+**Deployment order:**
+```
+common → powerdns_master → powerdns_slave → netbird_management → netbird_peer
+```
+
+**Why PowerDNS first?** NetBird's Traefik uses DNS-01 challenge for SSL certificates, which requires PowerDNS API access to create/delete ACME challenge TXT records.
 
 ## Example Playbook
 
@@ -152,6 +201,14 @@ ansible-galaxy collection install community.docker
 
 ## Deployment
 
+**Prerequisites:**
+1. ✅ PowerDNS deployed and accessible (both ns1 and ns2)
+2. ✅ PowerDNS API enabled and API key configured
+3. ✅ DNS zone `phoenix-host.net` created in PowerDNS
+4. ✅ `powerdns_api_url` and `powerdns_api_key` set in `group_vars/all.yml`
+
+**Deploy NetBird:**
+
 ```bash
 cd /config/hosting-platform/ansible
 
@@ -161,6 +218,11 @@ ansible-playbook site.yml --tags netbird_management
 # Or deploy to specific host
 ansible-playbook site.yml --limit ns1 --tags netbird_management
 ```
+
+**First deployment:**
+- ns1 starts as primary (Management + Litestream running)
+- ns2 starts as standby (Management stopped, only Signal/Dashboard/Coturn running)
+- Both servers obtain SSL certificates independently via DNS-01 challenge
 
 ## Post-Deployment
 
@@ -315,6 +377,32 @@ The following ports must be accessible:
 These are configured in the `common` role nftables template.
 
 ## Troubleshooting
+
+### SSL certificate not obtained (DNS-01 challenge fails)
+
+```bash
+# Check Traefik logs for ACME errors
+docker logs netbird-traefik
+
+# Common issues:
+# - PowerDNS API not accessible
+# - PowerDNS API key incorrect
+# - DNS zone not created in PowerDNS
+# - Firewall blocking PowerDNS API port (8081)
+
+# Test PowerDNS API manually
+curl -H "X-API-Key: YOUR_API_KEY" http://ns1.phoenix-host.net:8081/api/v1/servers/localhost/zones
+
+# Check if TXT record was created (during ACME challenge)
+dig _acme-challenge.netbird.phoenix-host.net TXT @ns1.phoenix-host.net
+
+# Check Traefik environment variables
+docker inspect netbird-traefik | jq '.[0].Config.Env'
+
+# Force certificate renewal
+docker exec netbird-traefik rm /acme.json
+docker restart netbird-traefik
+```
 
 ### Failover not happening
 
