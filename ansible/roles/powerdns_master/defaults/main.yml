@@ -29,11 +29,12 @@ powerdns_dns_port: 53
 # DNSSEC
 powerdns_dnssec_enabled: yes
 
-# Zone replication (AXFR/NOTIFY)
+# Zone replication (AXFR/NOTIFY) — NetBird mesh only
+# SECURITY: Use NetBird IPs (not public IPs) for encrypted zone replication
 powerdns_allow_axfr_ips:
-  - "{{ hostvars['ns2']['ansible_host'] }}"  # ns2 can pull zones
+  - "{{ hostvars['ns2']['netbird_ip'] }}"  # ns2 NetBird IP (encrypted mesh)
 powerdns_also_notify:
-  - "{{ hostvars['ns2']['ansible_host'] }}"  # Notify ns2 on changes
+  - "{{ hostvars['ns2']['netbird_ip'] }}"  # Notify ns2 NetBird IP (encrypted mesh)
 
 # PostgreSQL configuration
 powerdns_db_name: powerdns

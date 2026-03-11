@@ -1,0 +1,87 @@
+# PowerDNS Authoritative Server Configuration (Secondary)
+# PowerDNS 4.9 — Docker deployment on ns2
+# Backend: SQLite (lightweight for secondary)
+# AXFR/NOTIFY via NetBird mesh only (no public replication)
+
+####################
+# Server Settings
+####################
+
+# Server identity
+server-id=ns2.{{ platform_domain }}
+local-address=0.0.0.0
+local-port={{ powerdns_dns_port }}
+
+# Primary/Secondary mode (4.9 terminology)
+primary={{ 'yes' if powerdns_primary else 'no' }}
+secondary={{ 'yes' if powerdns_secondary else 'no' }}
+
+# Autosecondary — auto-create zones on first NOTIFY from primary
+# (old name was 'superslave=yes' in PowerDNS < 4.5)
+autosecondary={{ 'yes' if powerdns_autosecondary else 'no' }}
+
+####################
+# Zone Replication (AXFR/NOTIFY) — NetBird Mesh Only
+####################
+
+# Accept NOTIFY only from ns1 NetBird IP (NOT public IP)
+# This ensures zone replication happens over encrypted mesh
+allow-notify-from={{ powerdns_allow_notify_from | join(',') }}
+
+# Do not allow AXFR from public internet (secondary doesn't serve AXFR)
+allow-axfr-ips=
+
+# AXFR transfer settings
+xfr-cycle-interval={{ powerdns_xfr_cycle_interval }}
+axfr-fetch-timeout={{ powerdns_axfr_fetch_timeout }}
+
+# Automatically retrieve zones from primary
+secondary-check-signature-freshness=yes
+
+####################
+# API & Web Server (Disabled on Secondary)
+####################
+
+api=no
+webserver=no
+
+####################
+# Database Backend (SQLite)
+####################
+
+launch=gsqlite3
+
+# SQLite database path
+gsqlite3-database={{ powerdns_db_path }}
+
+# DNSSEC support
+gsqlite3-dnssec={{ 'yes' if powerdns_dnssec_enabled else 'no' }}
+
+####################
+# Security & Performance
+####################
+
+# Security
+setuid=pdns
+setgid=pdns
+security-poll-suffix=
+
+# Disable AXFR serving (secondary doesn't serve zone transfers)
+disable-axfr=yes
+disable-tcp=no
+
+# Cache settings (more aggressive caching on secondary)
+cache-ttl=60
+negquery-cache-ttl=60
+query-cache-ttl=60
+
+####################
+# Logging
+####################
+
+log-dns-details={{ 'yes' if powerdns_log_level | int >= 6 else 'no' }}
+log-dns-queries={{ 'yes' if powerdns_log_level | int >= 8 else 'no' }}
+loglevel={{ powerdns_log_level }}
+
+# Disable unnecessary logging
+query-logging=no

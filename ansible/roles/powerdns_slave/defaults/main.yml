@@ -1,0 +1,38 @@
+---
+# PowerDNS Slave Role — Default Variables
+# Deploys PowerDNS Secondary on ns2 with SQLite backend
+
+# PowerDNS versions
+powerdns_version: "4.9"
+powerdns_image: "powerdns/pdns-auth-49:latest"
+
+# Installation directory
+powerdns_install_dir: /opt/powerdns
+
+# PowerDNS configuration
+powerdns_primary: no
+powerdns_secondary: yes
+powerdns_autosecondary: yes  # Auto-create zones on first NOTIFY
+powerdns_api_enabled: no      # No API on secondary
+powerdns_webserver_enabled: no
+powerdns_dns_port: 53
+
+# DNSSEC
+powerdns_dnssec_enabled: yes
+
+# Zone replication (AXFR/NOTIFY) — ONLY via NetBird mesh
+powerdns_allow_notify_from:
+  - "{{ hostvars['ns1']['netbird_ip'] }}"  # Only accept NOTIFY from ns1 NetBird IP
+
+# AXFR source — pull zones from ns1 NetBird IP
+powerdns_primary_server: "{{ hostvars['ns1']['netbird_ip'] }}"
+
+# AXFR settings
+powerdns_xfr_cycle_interval: 60      # Check for zone updates every 60 seconds
+powerdns_axfr_fetch_timeout: 10      # Timeout for AXFR transfers
+
+# SQLite backend (lightweight for secondary)
+powerdns_db_path: /var/lib/powerdns/pdns.sqlite3
+
+# Logging
+powerdns_log_level: "4"  # 0=nothing, 9=very verbose

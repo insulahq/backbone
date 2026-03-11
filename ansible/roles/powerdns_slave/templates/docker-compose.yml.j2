@@ -1,0 +1,35 @@
+---
+# PowerDNS Slave — Docker Compose
+# Runs on ns2 as secondary DNS server with SQLite backend
+# Receives zone transfers from ns1 via NetBird mesh (AXFR/NOTIFY)
+
+version: '3.8'
+
+services:
+  # PowerDNS Authoritative Server (Secondary)
+  pdns:
+    image: {{ powerdns_image }}
+    container_name: powerdns-slave
+    restart: unless-stopped
+    hostname: ns2.{{ platform_domain }}
+    volumes:
+      - {{ powerdns_install_dir }}/pdns.conf:/etc/powerdns/pdns.conf:ro
+      - pdns_data:/var/lib/powerdns
+    ports:
+      - "0.0.0.0:53:53/tcp"
+      - "0.0.0.0:53:53/udp"
+    networks:
+      - powerdns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pdns_control ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  powerdns_internal:
+    driver: bridge
+    internal: false  # Must allow outbound to ns1 NetBird IP for AXFR
+
+volumes:
+  pdns_data:
