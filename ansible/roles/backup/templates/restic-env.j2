@@ -1,8 +1,0 @@
-# Managed by Ansible. Do not edit manually.
-# Sourced by /usr/local/bin/restic-backup.sh and can be sourced manually for
-# ad-hoc restic commands:
-#   source /etc/restic/env && restic snapshots
-
-export RESTIC_REPOSITORY="sftp:storagebox:/backups/{{ inventory_hostname }}"
-export RESTIC_PASSWORD="{{ backup_restic_password }}"
-export HOME="/root"   # Allows restic to use its metadata cache (~/.cache/restic)

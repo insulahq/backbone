@@ -1,8 +1,0 @@
----
-- name: Fix k3s kubeconfig ownership
-  ansible.builtin.file:
-    path: /root/.kube/config
-    owner: root
-    group: root
-    mode: '0600'
-    state: file
