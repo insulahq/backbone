@@ -1,0 +1,31 @@
+---
+# NetBird Peer Role — Default Variables
+# Deploys NetBird peer client for mesh connectivity
+
+# NetBird peer binary version
+netbird_peer_version: "0.28.0"
+
+# Installation method
+netbird_install_method: binary  # binary or package
+
+# NetBird binary download URL
+netbird_download_url: "https://github.com/netbirdio/netbird/releases/download/v{{ netbird_peer_version }}/netbird_{{ netbird_peer_version }}_linux_amd64.tar.gz"
+
+# Installation directory
+netbird_install_dir: /usr/local/bin
+netbird_config_dir: /etc/netbird
+
+# Management server URL (from group_vars)
+# netbird_management_url: defined in group_vars/all.yml
+
+# Setup key for initial enrollment
+# netbird_setup_key: defined in vault or group_vars
+
+# Peer hostname (defaults to inventory_hostname)
+netbird_peer_hostname: "{{ inventory_hostname }}"
+
+# Auto-start on boot
+netbird_autostart: true
+
+# Log level
+netbird_log_level: info
