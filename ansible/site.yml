@@ -18,10 +18,10 @@
   roles:
     - powerdns_slave
 
-# - name: Deploy NetBird management server
-#   hosts: netbird_management
-#   roles:
-#     - netbird_management
+- name: Deploy NetBird management server
+  hosts: netbird_management
+  roles:
+    - netbird_management
 
 # - name: Deploy NetBird peers
 #   hosts: netbird_peers
