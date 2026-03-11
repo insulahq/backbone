@@ -61,7 +61,8 @@
 **Architecture Confirmed (2026-03-11):**
 - ✅ OS: Debian 13 (trixie) — Official stable
 - ✅ DNS: PowerDNS 4.9 (not BIND) — Aligned with ADR-016
-- ✅ NetBird: Fresh deployment
+- ✅ NetBird: Fresh deployment, **redundant** (both ns1 and ns2) — Aligned with ADR-021
+- ✅ NetBird failover: DNS round-robin (now) with floating IP preparation (future)
 - ✅ Firewall: Simple nftables only (NO advanced pre/post-routing)
 - ✅ SSH: Break-glass access (stays open on all servers)
 - ✅ Ansible: `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
@@ -101,20 +102,21 @@ The infrastructure architecture has been confirmed by the user and documented in
 
 **Ansible Infrastructure Created:**
 - ✅ `ansible/site.yml` — Main playbook
-- ✅ `ansible/inventory/hosts.yml` — Server inventory with IPs and groups
-- ✅ `ansible/group_vars/all.yml` — Global variables (aligned with confirmed decisions)
+- ✅ `ansible/inventory/hosts.yml` — Server inventory with IPs and groups (ns1 + ns2 both in `netbird_management`)
+- ✅ `ansible/group_vars/all.yml` — Global variables (NetBird redundancy, DNS round-robin config)
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables firewall, Docker CE, fail2ban
 
 **Next Deployment Steps:**
 1. Deploy `common` role to all servers (OS hardening + Docker + simple firewall)
-2. Create and deploy `netbird_management` role (ns1)
-3. Create and deploy `netbird_peer` role (ns2, admin1, workstation)
+2. Create and deploy `netbird_management` role (ns1 + ns2, redundant deployment with shared PostgreSQL)
+3. Create and deploy `netbird_peer` role (admin1, workstation)
 4. Verify NetBird mesh connectivity
-5. Create and deploy `powerdns_master` role (ns1 + PostgreSQL)
-6. Create and deploy `powerdns_slave` role (ns2 + SQLite)
-7. Verify DNS replication (< 5 seconds propagation)
-8. Create and deploy `backup` role (Restic to Storagebox)
-9. Create and deploy `k3s` role (admin1 single-node cluster)
+5. Configure DNS round-robin (dual A records for `netbird.phoenix-host.net`)
+6. Create and deploy `powerdns_master` role (ns1 + PostgreSQL)
+7. Create and deploy `powerdns_slave` role (ns2 + SQLite)
+8. Verify DNS replication (< 5 seconds propagation)
+9. Create and deploy `backup` role (Restic to Storagebox, includes NetBird PostgreSQL)
+10. Create and deploy `k3s` role (admin1 single-node cluster)
 
 **See:** `ansible/README.md` for deployment instructions.
 

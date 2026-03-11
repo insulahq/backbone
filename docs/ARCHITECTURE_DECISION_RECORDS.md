@@ -1787,6 +1787,142 @@ tunnel. TSIG is not used.
 
 ---
 
+## ADR-021: NetBird Redundancy — DNS Round-Robin with Floating IP Preparation
+
+**Date:** 2026-03-11  
+**Status:** Accepted  
+**Deciders:** Platform Architect, User
+
+### Context
+
+NetBird provides critical infrastructure services: Management, Signal, and Relay servers for the WireGuard mesh. Initially planned as single-instance deployment on ns1, this created a single point of failure.
+
+**Requirements:**
+1. High availability for NetBird services (Management + Signal + Relay)
+2. If ns1 fails, NetBird services must remain accessible
+3. Solution must be simple enough for Phase 1 (3 servers, 0 customers)
+4. Must support future migration to floating IP (for faster failover)
+
+**Options evaluated:**
+1. **Single instance on ns1** — Simple but single point of failure (15-20 min RTO)
+2. **Active-Passive with DNS round-robin** — Redundant, automatic failover, 5-10 sec delay
+3. **Keepalived with floating IP** — True HA (3-10 sec failover), but ns1/ns2 in different datacenters
+4. **External DNS provider (Cloudflare)** — Automatic health checks, but not self-hosted
+
+### Decision
+
+Deploy NetBird Management + Signal + Relay on **both ns1 and ns2** in active-passive configuration, using **DNS round-robin** for failover. Prepare architecture to support **floating IP migration** in the future.
+
+**Architecture:**
+
+**Phase 1 (Now): DNS Round-Robin**
+- ns1: NetBird Management + Signal + Relay (active)
+- ns2: NetBird Management + Signal + Relay (active)
+- Shared PostgreSQL database on ns1 (both ns1 and ns2 connect to it)
+- DNS: `netbird.phoenix-host.net. IN A 23.88.111.142` (ns1)
+- DNS: `netbird.phoenix-host.net. IN A 89.167.125.29` (ns2)
+
+**Clients connect to `https://netbird.phoenix-host.net`:**
+- DNS returns both IPs
+- Client tries ns1 first (or random order)
+- If ns1 is down, client automatically retries ns2
+- Failover delay: 5-10 seconds
+
+**Phase 2+ (Future): Floating IP**
+- DNS: `netbird.phoenix-host.net. IN A 100.76.100.100` (floating IP)
+- Floating IP managed by keepalived (if ns1/ns2 migrate to same datacenter) or Hetzner Floating IP (if migrated to Hetzner Cloud)
+- Failover delay: 3-10 seconds (automatic)
+
+### Rationale
+
+**Why DNS round-robin:**
+1. ✅ Automatic failover — no manual intervention required
+2. ✅ Simple implementation — just add two A records
+3. ✅ Works with current infrastructure (ns1 in Falkenstein, ns2 in Helsinki)
+4. ✅ NetBird clients handle failover automatically
+5. ✅ Acceptable 5-10 second delay for Phase 1
+
+**Why shared PostgreSQL:**
+1. ✅ NetBird state preserved across failover (peer configs, access control)
+2. ✅ Both ns1 and ns2 can serve NetBird management API
+3. ✅ No manual state sync required
+
+**Why prepare for floating IP:**
+1. ✅ Faster failover (3-10 seconds vs 5-10 seconds)
+2. ✅ Single DNS record (simpler)
+3. ✅ Future-proof for infrastructure changes (datacenter consolidation, Hetzner Cloud migration)
+4. ✅ Migration path clear — update DNS only, no application changes
+
+### Consequences
+
+**Positive:**
+- ✅ NetBird services survive ns1 failure
+- ✅ Automatic failover (no manual DNS updates)
+- ✅ Prepared for faster failover with floating IP
+- ✅ Works with current multi-datacenter deployment
+
+**Negative:**
+- ❌ 5-10 second failover delay (vs 3-10 sec with floating IP)
+- ❌ PostgreSQL on ns1 is single point of failure (mitigated by Restic backups)
+- ❌ Additional complexity (NetBird services on both ns1 and ns2)
+
+**Mitigation:**
+- PostgreSQL backup: Restic to Storagebox 2x daily (02:00 UTC)
+- PostgreSQL recovery: Restore from backup + redeploy (RTO: 15 minutes)
+- Floating IP migration path documented in this ADR
+
+### Migration Path to Floating IP
+
+**When to migrate:**
+- ns1 and ns2 moved to same datacenter (enables keepalived)
+- Platform migrated to Hetzner Cloud (enables Hetzner Floating IPs)
+- Failover delay becomes critical (< 5 seconds required)
+
+**Migration steps:**
+1. Provision floating IP (keepalived VIP or Hetzner Floating IP)
+2. Configure keepalived on ns1 and ns2 (if using keepalived)
+3. Update DNS: `netbird.phoenix-host.net. IN A <floating-ip>`
+4. Wait for DNS TTL (typically 300 seconds)
+5. Test failover (stop NetBird on ns1, verify floating IP moves to ns2)
+
+**No application changes required** — NetBird clients will automatically use new DNS record.
+
+### PostgreSQL Redundancy (Future Consideration)
+
+**Current:** PostgreSQL on ns1 only (single point of failure)
+
+**Future options (Phase 2+):**
+1. PostgreSQL replication (primary on ns1, replica on ns2)
+2. External managed PostgreSQL (Hetzner Cloud Database, AWS RDS)
+3. PostgreSQL cluster (Patroni, Stolon)
+
+**Not implemented in Phase 1** — Restic backups sufficient for current scale.
+
+### Alternatives Considered
+
+1. **Single instance on ns1 with break-glass SSH**
+   - Rejected: 15-20 minute RTO unacceptable for VPN infrastructure
+   - Mitigation: SSH break-glass stays available as backup
+
+2. **Keepalived with floating IP (now)**
+   - Rejected: ns1 (Falkenstein) and ns2 (Helsinki) in different datacenters, no Layer 2 adjacency
+   - Deferred to Phase 2+ when infrastructure changes
+
+3. **External DNS provider (Cloudflare Load Balancer)**
+   - Rejected: Not self-hosted, conflicts with project goals
+
+4. **Health-check based DNS updates (monitoring script)**
+   - Rejected: Additional complexity, monitoring script is single point of failure
+   - DNS round-robin simpler and more reliable
+
+### Related ADRs
+
+- ADR-013: NetBird WireGuard Mesh for Admin Access
+- ADR-016: PowerDNS Runs in Docker Compose
+- ADR-020: AXFR/NOTIFY Routed Over NetBird WireGuard Tunnel
+
+---
+
 ## References
 
 - ADR Format: https://adr.github.io/
