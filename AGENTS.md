@@ -35,7 +35,7 @@
 
 **Last commits:**
 ```
-[Fresh deployment - awaiting infrastructure provisioning]
+634ecce infra(reset): remove all infrastructure config and start fresh deployment
 ```
 
 **What has been preserved:**
@@ -53,36 +53,43 @@
 
 **Servers:** ns1, ns2, and admin1 will be **re-imaged**. Fresh infrastructure deployment required.
 
-**Next Step:** Infrastructure provisioning must be designed and implemented before deploying the Management API or Admin Panel.
+**Server IPs (confirmed):**
+- ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein)
+- ns2.phoenix-host.net: `89.167.125.29` (Hetzner Helsinki)
+- admin1.phoenix-host.net: `46.224.122.58` (Hetzner)
+
+**Next Step:** Infrastructure architecture has been designed. See `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md` for full plan. Awaiting user confirmation on open questions before proceeding with Ansible deployment.
 
 ---
 
 ## 3. Immediate Next Task — START HERE
 
-**Decision Point: Infrastructure Architecture**
+**Infrastructure Architecture Designed — Awaiting User Confirmation**
 
-Before proceeding, you must confirm the deployment architecture with the user:
+The infrastructure architecture has been designed based on user requirements and documented in `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md`.
 
-1. **What infrastructure components are needed?**
-   - DNS servers (PowerDNS primary/secondary)?
-   - VPN mesh (NetBird)?
-   - Management API server?
-   - Kubernetes cluster (k3s)?
-   - Database servers (MariaDB, PostgreSQL)?
-   - Backup infrastructure?
+**Architecture Summary:**
 
-2. **What automation approach?**
-   - Ansible (like the previous deployment)?
-   - Docker Compose?
-   - Kubernetes manifests only?
-   - Terraform for server provisioning?
+**Servers:**
+- **ns1** (`23.88.111.142`): PowerDNS Primary + NetBird Management/Signal/Relay (Docker Compose)
+- **ns2** (`89.167.125.29`): PowerDNS Secondary + NetBird Peer (Docker Compose)
+- **admin1** (`46.224.122.58`): k3s cluster + Management API + Admin/Client Panels + Phase 1 workloads
 
-3. **Server layout:**
-   - How many servers?
-   - What roles per server?
-   - IP addresses and networking?
+**Key Decisions:**
+- ✅ **DNS Server:** PowerDNS 4.9 (not BIND) — REST API, database-backed, aligned with ADR-016
+- ✅ **Deployment:** Ansible roles (rebuild from scratch, aligned with Phase 1 roadmap)
+- ✅ **Firewall:** Simple nftables rules only — **NO advanced pre/post-routing** (lesson from previous deployment: complex NAT rules broke ns1 access after NetBird changes)
+- ✅ **VPN:** NetBird mesh (management on ns1, peers on ns2/admin1/workstation)
+- ✅ **Backup:** Restic → Hetzner Storagebox (same as before)
 
-**Do not proceed with infrastructure work until the user confirms the architecture.**
+**Open Questions for User (see `FRESH_INFRASTRUCTURE_PLAN.md` §Open Questions):**
+1. Server OS: Debian 12 (bookworm) or Debian 13 (trixie)?
+2. NetBird: Reuse existing account or fresh setup?
+3. Backup: Confirm Storagebox credentials still valid?
+4. SSH access: How to access servers during initial deployment?
+5. Ansible: Confirm SSH key path and user?
+
+**Do not proceed with Ansible deployment until user confirms open questions.**
 
 ---
 
@@ -333,6 +340,7 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 4 | MariaDB: no SSL for local Docker-to-Docker connections | Do not add SSL config to local database connections |
 | 5 | Restic `--group-by "host"` causes snapshot conflicts | Must use `--group-by "host,paths"` for multiple backup jobs on same host |
 | 6 | Ansible must run from `ansible/` subdirectory | `ansible.cfg` is in that directory; running from repo root fails |
+| 7 | **Advanced nftables pre/post-routing rules broke ns1 access** | **DO NOT use complex DNAT, SNAT, or custom NAT chains. Keep firewall rules simple. Let Docker and NetBird manage their own NAT. See `FRESH_INFRASTRUCTURE_PLAN.md` §Firewall for simple baseline.** |
 
 ---
 
