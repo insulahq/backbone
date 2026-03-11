@@ -35,11 +35,11 @@
 
 **Last commits:**
 ```
+6679591 feat(ansible): create powerdns_master role with Docker internal networks and PowerDNS-Admin
+d1abfd7 feat(ansible): implement DNS-01 ACME challenge for NetBird SSL certificates
 90a02b1 feat(ansible): update netbird_management role to use SQLite + Litestream with automatic failover/failback
 8907566 feat(ansible): create netbird_peer role for mesh connectivity
 36bc828 feat(ansible): create netbird_management role for redundant deployment
-13976ed feat(ansible): create infrastructure deployment scaffolding with common role
-634ecce infra(reset): remove all infrastructure config and start fresh deployment
 ```
 
 **What has been preserved:**
@@ -76,10 +76,11 @@
 - ✅ `ansible/inventory/hosts.yml` — Server inventory
 - ✅ `ansible/group_vars/all.yml` — Global variables
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables, Docker CE, fail2ban
-- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream)
+- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream, DNS-01 ACME)
 - ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
+- ✅ `ansible/roles/powerdns_master/` — PowerDNS Primary + PostgreSQL + PowerDNS-Admin (Docker internal networks)
 
-**Next Step:** User confirmation before first deployment, then deploy roles in sequence.
+**Next Step:** Create powerdns_slave role, then user confirmation before first deployment.
 
 ---
 
