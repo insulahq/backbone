@@ -42,6 +42,7 @@ services:
       - "0.0.0.0:53:53/udp"
     networks:
       - powerdns_internal
+      - powerdns_external  # Needed for public DNS port binding
     healthcheck:
       test: ["CMD-SHELL", "pdns_control ping || exit 1"]
       interval: 10s
