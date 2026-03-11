@@ -33,9 +33,6 @@ services:
       - "traefik.http.routers.whoami.entrypoints=websecure"
       - "traefik.http.routers.whoami.tls.certresolver=letsencrypt"
       - "traefik.http.services.whoami.loadbalancer.server.port=80"
-      - "traefik.http.routers.whoami-signal.rule=Host(`netbird-signal.phoenix-host.net`)"
-      - "traefik.http.routers.whoami-signal.entrypoints=websecure"
-      - "traefik.http.routers.whoami-signal.tls.certresolver=letsencrypt"
 ```
 
 ### Step 2: Ensure Traefik Can Access PowerDNS API
@@ -89,7 +86,6 @@ cat acme.json | python3 -c 'import json, sys; data=json.load(sys.stdin); [print(
 Expected output:
 ```
 ✓ netbird.phoenix-host.net
-✓ netbird-signal.phoenix-host.net
 ```
 
 ### Step 5: Extract Certificates (Optional)
@@ -158,7 +154,7 @@ docker compose up -d management
 Before removing whoami and deploying NetBird:
 
 - [ ] `acme.json` exists and is not empty
-- [ ] Certificates for both domains are in `acme.json`
+- [ ] Certificates for the domain are in `acme.json`
 - [ ] HTTPS access works: `curl -I https://netbird.phoenix-host.net` returns valid response
 - [ ] Certificate is from Let's Encrypt (not self-signed)
 - [ ] Certificate valid for 90 days
