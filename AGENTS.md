@@ -31,10 +31,14 @@
 
 ## 2. Current State (Fresh Deployment Start)
 
-**Status:** Infrastructure reset. Starting deployment from scratch.
+**Status:** Ansible roles complete and ready for deployment.
 
 **Last commits:**
 ```
+90a02b1 feat(ansible): update netbird_management role to use SQLite + Litestream with automatic failover/failback
+8907566 feat(ansible): create netbird_peer role for mesh connectivity
+36bc828 feat(ansible): create netbird_management role for redundant deployment
+13976ed feat(ansible): create infrastructure deployment scaffolding with common role
 634ecce infra(reset): remove all infrastructure config and start fresh deployment
 ```
 
@@ -67,13 +71,15 @@
 - ✅ SSH: Break-glass access (stays open on all servers)
 - ✅ Ansible: `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
 
-**Ansible scaffolding created:**
+**Ansible infrastructure created:**
 - ✅ `ansible/ansible.cfg`, `ansible/site.yml`
 - ✅ `ansible/inventory/hosts.yml` — Server inventory
 - ✅ `ansible/group_vars/all.yml` — Global variables
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables, Docker CE, fail2ban
+- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream)
+- ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
 
-**Next Step:** Deploy common role to all servers, then create `netbird_management` role.
+**Next Step:** User confirmation before first deployment, then deploy roles in sequence.
 
 ---
 
@@ -86,8 +92,8 @@ The infrastructure architecture has been confirmed by the user and documented in
 **Architecture Summary:**
 
 **Servers:**
-- **ns1** (`23.88.111.142`): PowerDNS Primary + NetBird Management/Signal/Relay (Docker Compose)
-- **ns2** (`89.167.125.29`): PowerDNS Secondary + NetBird Peer (Docker Compose)
+- **ns1** (`23.88.111.142`): PowerDNS Primary + NetBird Management/Signal/Relay (primary, Docker Compose)
+- **ns2** (`89.167.125.29`): PowerDNS Secondary + NetBird Management/Signal/Relay (standby, Docker Compose)
 - **admin1** (`46.224.122.58`): k3s cluster + Management API + Admin/Client Panels + Phase 1 workloads
 
 **Key Decisions (Confirmed 2026-03-11):**
@@ -105,17 +111,19 @@ The infrastructure architecture has been confirmed by the user and documented in
 - ✅ `ansible/inventory/hosts.yml` — Server inventory with IPs and groups (ns1 + ns2 both in `netbird_management`)
 - ✅ `ansible/group_vars/all.yml` — Global variables (NetBird redundancy, DNS round-robin config)
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables firewall, Docker CE, fail2ban
+- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream, automatic failover/failback)
+- ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
 
 **Next Deployment Steps:**
 1. Deploy `common` role to all servers (OS hardening + Docker + simple firewall)
-2. Create and deploy `netbird_management` role (ns1 + ns2, redundant deployment with shared PostgreSQL)
-3. Create and deploy `netbird_peer` role (admin1, workstation)
+2. Deploy `netbird_management` role (ns1 + ns2, redundant deployment with SQLite + Litestream)
+3. Deploy `netbird_peer` role (admin1, workstation)
 4. Verify NetBird mesh connectivity
 5. Configure DNS round-robin (dual A records for `netbird.phoenix-host.net`)
 6. Create and deploy `powerdns_master` role (ns1 + PostgreSQL)
 7. Create and deploy `powerdns_slave` role (ns2 + SQLite)
 8. Verify DNS replication (< 5 seconds propagation)
-9. Create and deploy `backup` role (Restic to Storagebox, includes NetBird PostgreSQL)
+9. Create and deploy `backup` role (Restic to Storagebox, includes NetBird SQLite database via Litestream)
 10. Create and deploy `k3s` role (admin1 single-node cluster)
 
 **See:** `ansible/README.md` for deployment instructions.
