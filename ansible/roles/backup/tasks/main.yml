@@ -1,0 +1,147 @@
+---
+# Backup Role — Main Tasks
+# Deploys Restic backup to Hetzner Storagebox
+
+- name: Install required packages
+  apt:
+    name:
+      - curl
+      - jq
+      - bzip2
+    state: present
+    update_cache: yes
+
+- name: Check if Restic is already installed
+  stat:
+    path: "{{ restic_install_dir }}/restic"
+  register: restic_binary
+
+- name: Get installed Restic version
+  command: "{{ restic_install_dir }}/restic version"
+  register: restic_installed_version
+  changed_when: false
+  failed_when: false
+  when: restic_binary.stat.exists
+
+- name: Download and install Restic
+  when: not restic_binary.stat.exists or restic_version not in restic_installed_version.stdout
+  block:
+    - name: Download Restic binary
+      get_url:
+        url: "https://github.com/restic/restic/releases/download/v{{ restic_version }}/restic_{{ restic_version }}_linux_amd64.bz2"
+        dest: "/tmp/restic_{{ restic_version }}.bz2"
+        mode: '0644'
+      register: restic_download
+
+    - name: Extract Restic binary
+      command: "bunzip2 -f /tmp/restic_{{ restic_version }}.bz2"
+      when: restic_download.changed
+
+    - name: Install Restic binary
+      copy:
+        src: "/tmp/restic_{{ restic_version }}"
+        dest: "{{ restic_install_dir }}/restic"
+        mode: '0755'
+        remote_src: yes
+      when: restic_download.changed
+
+    - name: Clean up downloaded files
+      file:
+        path: "/tmp/restic_{{ restic_version }}"
+        state: absent
+
+- name: Create Restic directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ restic_config_dir }}"
+    - "{{ restic_cache_dir }}"
+    - /var/log/restic
+
+- name: Generate Restic password if not set
+  set_fact:
+    restic_password: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+  when: restic_password is not defined or restic_password | length == 0
+  no_log: true
+
+- name: Create Restic password file
+  copy:
+    content: "{{ restic_password }}"
+    dest: "{{ restic_config_dir }}/password"
+    mode: '0600'
+  no_log: true
+
+- name: Verify SSH key exists
+  stat:
+    path: "{{ restic_ssh_key_path }}"
+  register: ssh_key_stat
+  failed_when: not ssh_key_stat.stat.exists
+
+- name: Create SSH config for Storagebox
+  copy:
+    content: |
+      Host {{ backup_storagebox_host }}
+        IdentityFile {{ restic_ssh_key_path }}
+        StrictHostKeyChecking accept-new
+        UserKnownHostsFile /root/.ssh/known_hosts
+    dest: /root/.ssh/config
+    mode: '0600'
+
+- name: Test Storagebox SSH connection
+  command: "ssh -o ConnectTimeout=10 {{ backup_storagebox_user }}@{{ backup_storagebox_host }} echo OK"
+  register: ssh_test
+  changed_when: false
+  failed_when: ssh_test.rc != 0
+  retries: 3
+  delay: 5
+
+- name: Deploy backup script
+  template:
+    src: restic-backup.sh.j2
+    dest: "{{ restic_config_dir }}/backup.sh"
+    mode: '0700'
+
+- name: Deploy systemd service
+  template:
+    src: restic-backup.service.j2
+    dest: /etc/systemd/system/restic-backup.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: Deploy systemd timer
+  template:
+    src: restic-backup.timer.j2
+    dest: /etc/systemd/system/restic-backup.timer
+    mode: '0644'
+  notify: reload systemd
+
+- name: Enable and start backup timer
+  systemd:
+    name: restic-backup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Create backup paths list for display
+  set_fact:
+    backup_paths_display: "{{ restic_backup_paths | join(', ') if restic_backup_paths | length > 0 else 'None configured' }}"
+
+- name: Display backup configuration
+  debug:
+    msg:
+      - "Restic backup configured for {{ inventory_hostname }}"
+      - "Repository: {{ restic_repository }}"
+      - "Schedule: {{ restic_backup_schedule }} at {{ restic_backup_time }}"
+      - "Retention: {{ restic_keep_daily }} daily, {{ restic_keep_weekly }} weekly, {{ restic_keep_monthly }} monthly"
+      - "Backup paths: {{ backup_paths_display }}"
+      - ""
+      - "Manual backup: systemctl start restic-backup.service"
+      - "Check status: systemctl status restic-backup.timer"
+      - "View logs: journalctl -u restic-backup.service"
+      - ""
+      - "Useful Restic commands:"
+      - "  List snapshots: restic -r {{ restic_repository }} snapshots"
+      - "  Check repository: restic -r {{ restic_repository }} check"
+      - "  Restore: restic -r {{ restic_repository }} restore latest --target /tmp/restore"

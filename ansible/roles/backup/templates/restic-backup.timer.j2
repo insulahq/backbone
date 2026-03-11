@@ -1,0 +1,10 @@
+[Unit]
+Description=Restic Backup Timer for {{ inventory_hostname }}
+
+[Timer]
+OnCalendar={{ restic_backup_time }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

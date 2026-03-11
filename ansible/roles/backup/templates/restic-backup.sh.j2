@@ -1,0 +1,115 @@
+#!/bin/bash
+# Restic Backup Script for {{ inventory_hostname }}
+# Backs up critical data to Hetzner Storagebox
+
+set -euo pipefail
+
+# Configuration
+export RESTIC_REPOSITORY="{{ restic_repository }}"
+export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
+export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
+
+# Logging
+LOG_FILE="/var/log/restic/backup-{{ inventory_hostname }}.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo "[$(date -Iseconds)] ERROR: $*" | tee -a "$LOG_FILE" >&2
+}
+
+# Health check ping (start)
+{% if restic_healthcheck_url %}
+curl -fsS --retry 3 "{{ restic_healthcheck_url }}/start" > /dev/null 2>&1 || true
+{% endif %}
+
+log "Starting backup for {{ inventory_hostname }}"
+
+# Pre-backup hook
+{% if restic_pre_backup_hook %}
+log "Running pre-backup hook"
+{{ restic_pre_backup_hook }} || {
+    error "Pre-backup hook failed"
+    exit 1
+}
+{% endif %}
+
+# Check if repository exists, initialize if not
+if ! restic snapshots > /dev/null 2>&1; then
+    log "Repository not found, initializing"
+    restic init || {
+        error "Failed to initialize repository"
+        exit 1
+    }
+fi
+
+# Create backup
+log "Creating backup snapshot"
+{% if restic_backup_paths | length > 0 %}
+restic backup \
+{% for path in restic_backup_paths %}
+    "{{ path }}" \
+{% endfor %}
+{% for pattern in restic_exclude_patterns %}
+    --exclude "{{ pattern }}" \
+{% endfor %}
+    --host "{{ inventory_hostname }}" \
+    --tag "{{ inventory_hostname }}" \
+    --tag "$(date +%Y-%m-%d)" \
+    --verbose 2>&1 | tee -a "$LOG_FILE"
+
+BACKUP_EXIT_CODE=${PIPESTATUS[0]}
+
+if [ $BACKUP_EXIT_CODE -ne 0 ]; then
+    error "Backup failed with exit code $BACKUP_EXIT_CODE"
+    {% if restic_healthcheck_url %}
+    curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
+    {% endif %}
+    exit $BACKUP_EXIT_CODE
+fi
+{% else %}
+log "No backup paths configured for {{ inventory_hostname }}"
+{% endif %}
+
+# Forget old snapshots according to retention policy
+log "Applying retention policy"
+restic forget \
+    --host "{{ inventory_hostname }}" \
+    --keep-daily {{ restic_keep_daily }} \
+    --keep-weekly {{ restic_keep_weekly }} \
+    --keep-monthly {{ restic_keep_monthly }} \
+    --keep-yearly {{ restic_keep_yearly }} \
+    --prune \
+    --verbose 2>&1 | tee -a "$LOG_FILE"
+
+# Verify repository integrity (weekly only)
+if [ "$(date +%u)" -eq 7 ]; then
+    log "Running weekly repository check"
+    restic check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"
+fi
+
+# Post-backup hook
+{% if restic_post_backup_hook %}
+log "Running post-backup hook"
+{{ restic_post_backup_hook }} || {
+    error "Post-backup hook failed (backup succeeded)"
+}
+{% endif %}
+
+# Get backup statistics
+SNAPSHOT_COUNT=$(restic snapshots --host "{{ inventory_hostname }}" --json | jq length)
+REPO_SIZE=$(restic stats --host "{{ inventory_hostname }}" --json | jq -r '.total_size')
+
+log "Backup completed successfully"
+log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"
+log "Repository size: $REPO_SIZE bytes"
+
+# Health check ping (success)
+{% if restic_healthcheck_url %}
+curl -fsS --retry 3 "{{ restic_healthcheck_url }}" > /dev/null 2>&1 || true
+{% endif %}
+
+exit 0

@@ -1,0 +1,79 @@
+---
+# k3s Role — Default Variables
+# Deploys k3s Kubernetes on admin and platform servers
+
+# k3s version
+k3s_version: "v1.29.2+k3s1"  # Stable release
+k3s_channel: stable
+
+# Installation method
+k3s_install_script_url: "https://get.k3s.io"
+
+# k3s server configuration (for admin1 and future control plane nodes)
+k3s_server_enabled: true
+k3s_server_config_dir: /etc/rancher/k3s
+k3s_server_data_dir: /var/lib/rancher/k3s
+
+# k3s agent configuration (for worker nodes, if any in future)
+k3s_agent_enabled: false
+
+# Cluster configuration
+k3s_cluster_name: "phoenix-host"
+k3s_cluster_domain: "cluster.local"
+
+# Network configuration
+k3s_cluster_cidr: "10.42.0.0/16"  # Pod network
+k3s_service_cidr: "10.43.0.0/16"  # Service network
+k3s_cluster_dns: "10.43.0.10"     # CoreDNS IP
+
+# Disable unnecessary components for platform workloads
+k3s_disable_components:
+  - traefik      # We'll deploy our own ingress controller
+  - servicelb    # Use MetalLB instead
+  - local-storage  # Use Longhorn for persistent storage
+
+# Enable necessary components
+k3s_enable_components:
+  - metrics-server
+
+# TLS SANs (additional hostnames/IPs for API server certificate)
+k3s_tls_san:
+  - "{{ ansible_default_ipv4.address }}"
+  - "{{ netbird_ip | default(ansible_default_ipv4.address) }}"
+  - "admin1.{{ platform_domain }}"
+  - "k3s.{{ platform_domain }}"
+
+# Node configuration
+k3s_node_name: "{{ inventory_hostname }}"
+k3s_node_ip: "{{ ansible_default_ipv4.address }}"
+
+# Kubelet configuration
+k3s_kubelet_args:
+  - "--max-pods=250"
+  - "--kube-reserved=cpu=500m,memory=1Gi"
+  - "--system-reserved=cpu=500m,memory=1Gi"
+
+# Security
+k3s_secrets_encryption: true
+k3s_protect_kernel_defaults: true
+
+# Container runtime
+k3s_container_runtime_endpoint: "unix:///run/k3s/containerd/containerd.sock"
+
+# Networking
+k3s_flannel_backend: "vxlan"  # or wireguard for better performance
+k3s_disable_network_policy: false
+
+# High availability (for future multi-server setup)
+k3s_ha_mode: false
+k3s_datastore_endpoint: ""  # External datastore (PostgreSQL, etcd) if HA
+
+# Token for cluster join (generated if not set)
+# k3s_token: <set in vault for multi-node clusters>
+
+# Kubeconfig
+k3s_kubeconfig_mode: "0644"  # Make kubeconfig readable by non-root users
+k3s_write_kubeconfig_mode: "0644"
+
+# SELinux (disabled on Debian)
+k3s_selinux: false

@@ -1,0 +1,25 @@
+[Unit]
+Description=Restic Backup for {{ inventory_hostname }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ restic_config_dir }}/backup.sh
+User=root
+Group=root
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{ restic_cache_dir }} /var/log/restic
+
+# Timeout (4 hours max)
+TimeoutStartSec=14400
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restic-backup
