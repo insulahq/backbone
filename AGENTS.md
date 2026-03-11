@@ -31,15 +31,14 @@
 
 ## 2. Current State (Fresh Deployment Start)
 
-**Status:** Ansible roles complete and ready for deployment.
+**Status:** PowerDNS Primary deployed on ns1. Next: Deploy PowerDNS Secondary on ns2.
 
 **Last commits:**
 ```
+b4000f6 fix(ansible): resolve PowerDNS PostgreSQL schema and docker networking issues
+ed8e7c9 fix(ansible): update common role and ansible.cfg for Debian 13 compatibility
+c3c3be5 docs(agents): update AGENTS.md - all Phase 1 infrastructure roles complete
 9ec36f3 feat(ansible): create backup and k3s roles for platform infrastructure
-2fa6e64 feat(ansible): create powerdns_slave role with NetBird mesh replication
-6679591 feat(ansible): create powerdns_master role with Docker internal networks and PowerDNS-Admin
-d1abfd7 feat(ansible): implement DNS-01 ACME challenge for NetBird SSL certificates
-90a02b1 feat(ansible): update netbird_management role to use SQLite + Litestream with automatic failover/failback
 ```
 
 **What has been preserved:**
