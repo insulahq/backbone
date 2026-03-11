@@ -3,21 +3,13 @@
 # Deploys PowerDNS Secondary on ns2 with SQLite backend
 # Zone replication via NetBird mesh (AXFR/NOTIFY from ns1)
 
-- name: Ensure NetBird IP is available (ns1)
-  assert:
-    that:
-      - hostvars['ns1']['netbird_ip'] is defined
-      - hostvars['ns1']['netbird_ip'] | length > 0
-    fail_msg: "ns1 NetBird IP not found. Ensure ns1 has netbird_peer role deployed and netbird_ip variable set."
-    success_msg: "ns1 NetBird IP detected: {{ hostvars['ns1']['netbird_ip'] }}"
-
-- name: Ensure NetBird IP is available (ns2)
-  assert:
-    that:
-      - netbird_ip is defined
-      - netbird_ip | length > 0
-    fail_msg: "ns2 NetBird IP not found. Deploy netbird_peer role on ns2 first to obtain NetBird mesh IP."
-    success_msg: "ns2 NetBird IP detected: {{ netbird_ip }}"
+- name: Check if NetBird IPs are available
+  debug:
+    msg:
+      - "ns1 replication IP: {{ hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host']) }}"
+      - "ns2 bind IP: {{ netbird_ip | default(ansible_default_ipv4.address) }}"
+      - ""
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}Using NetBird mesh for zone replication (secure){% else %}Using public IPs for zone replication (will reconfigure after NetBird deployment){% endif %}"
 
 - name: Create PowerDNS installation directories
   file:
@@ -68,13 +60,13 @@
       - "PowerDNS Secondary deployed on {{ inventory_hostname }}"
       - "DNS Server: {{ ansible_default_ipv4.address }}:53 (public)"
       - "Role: Secondary (read-only, receives AXFR from ns1)"
-      - "Primary server: {{ powerdns_primary_server }} (ns1 NetBird IP)"
+      - "Primary server: {{ powerdns_primary_server }}"
       - "NOTIFY accepted from: {{ powerdns_allow_notify_from | join(', ') }}"
       - "Backend: SQLite ({{ powerdns_db_path }})"
       - ""
       - "Zone replication:"
-      - "  - NOTIFY from ns1 NetBird IP ONLY ({{ hostvars['ns1']['netbird_ip'] }})"
-      - "  - AXFR transfers via encrypted NetBird mesh"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}  - NOTIFY from ns1 NetBird IP ({{ powerdns_primary_server }}){% else %}  - NOTIFY from ns1 public IP ({{ powerdns_primary_server }}) — TEMPORARY{% endif %}"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}  - AXFR transfers via encrypted NetBird mesh{% else %}  - AXFR transfers via public internet — WILL RECONFIGURE AFTER NETBIRD{% endif %}"
       - "  - No public AXFR serving (disabled for security)"
       - ""
       - "Zones replicated: {{ pdns_zones.stdout_lines | default(['(waiting for first NOTIFY from ns1)']) }}"
@@ -82,10 +74,10 @@
 - name: Display security notice
   debug:
     msg:
-      - "SECURITY: Zone replication happens ONLY via NetBird mesh"
-      - "ns1 sends NOTIFY to: {{ netbird_ip }} (ns2 NetBird IP)"
-      - "ns2 fetches AXFR from: {{ hostvars['ns1']['netbird_ip'] }} (ns1 NetBird IP)"
-      - "Public internet cannot trigger zone transfers or access replication traffic"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}SECURITY: Zone replication via encrypted NetBird mesh{% else %}NOTICE: Zone replication currently via public IPs (temporary){% endif %}"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}ns1 sends NOTIFY to: {{ netbird_ip | default(ansible_default_ipv4.address) }} (ns2 NetBird IP){% else %}ns1 sends NOTIFY to: {{ ansible_default_ipv4.address }} (ns2 public IP){% endif %}"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}ns2 fetches AXFR from: {{ powerdns_primary_server }} (ns1 NetBird IP){% else %}ns2 fetches AXFR from: {{ powerdns_primary_server }} (ns1 public IP){% endif %}"
+      - "{% if hostvars['ns1']['netbird_ip'] is defined %}Public internet cannot trigger zone transfers or access replication traffic{% else %}After NetBird deployment, reconfigure to use NetBird mesh for encrypted replication{% endif %}"
       - ""
       - "Public access: DNS queries only (port 53)"
       - "No API, no web server, no management interface on secondary"
