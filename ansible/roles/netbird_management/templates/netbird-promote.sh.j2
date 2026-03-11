@@ -1,0 +1,77 @@
+#!/bin/bash
+# NetBird Promotion Script — Failover to Primary
+# Restores database from Litestream and starts NetBird Management
+
+set -euo pipefail
+
+INSTALL_DIR="{{ netbird_install_dir }}"
+SQLITE_PATH="{{ netbird_sqlite_path }}"
+LOG_FILE="$INSTALL_DIR/logs/promotion.log"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo "[$(date -Iseconds)] ERROR: $*" | tee -a "$LOG_FILE" >&2
+}
+
+log "Starting promotion to primary on {{ inventory_hostname }}"
+
+# Step 1: Stop NetBird Management if running (safety)
+if docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management; then
+    log "Stopping existing NetBird Management"
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" stop management
+fi
+
+# Step 2: Restore database from latest Litestream replica
+log "Restoring database from Litestream replica"
+if [ -f "$SQLITE_PATH" ]; then
+    log "Backing up existing database to $SQLITE_PATH.backup"
+    cp "$SQLITE_PATH" "$SQLITE_PATH.backup"
+fi
+
+# Litestream restore automatically selects the most recent replica
+if docker run --rm \
+    -v "$INSTALL_DIR/data:/var/lib/netbird" \
+    -v "$INSTALL_DIR/litestream.yml:/etc/litestream.yml" \
+    litestream/litestream:{{ netbird_litestream_version }} \
+    restore -if-replica-exists /var/lib/netbird/store.db; then
+    log "Database restored successfully"
+else
+    error "Failed to restore database from Litestream"
+    # If restore fails, try to use existing database
+    if [ -f "$SQLITE_PATH.backup" ]; then
+        log "Restore failed, using existing database"
+        mv "$SQLITE_PATH.backup" "$SQLITE_PATH"
+    else
+        error "No database available, promotion failed"
+        exit 1
+    fi
+fi
+
+# Step 3: Start NetBird Management and Litestream
+log "Starting NetBird Management services"
+if docker compose -f "$INSTALL_DIR/docker-compose.yml" up -d management litestream; then
+    log "NetBird Management started successfully"
+else
+    error "Failed to start NetBird Management"
+    exit 1
+fi
+
+# Step 4: Wait for health check
+log "Waiting for NetBird Management API to be ready"
+for i in {1..30}; do
+    if curl -sf --max-time 5 "http://localhost:{{ netbird_management_port }}/api/health" > /dev/null 2>&1; then
+        log "NetBird Management API is healthy"
+        log "Promotion complete: {{ inventory_hostname }} is now primary"
+        exit 0
+    fi
+    log "Waiting for API (attempt $i/30)..."
+    sleep 2
+done
+
+error "NetBird Management API did not become healthy within 60 seconds"
+exit 1

@@ -1,48 +1,24 @@
 ---
 # NetBird Management Role — Main Tasks
 # Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
-# Both ns1 and ns2 run this role and connect to shared PostgreSQL on ns1
+# Uses SQLite + Litestream for bidirectional database replication
 
-- name: Create NetBird installation directory
+- name: Create NetBird installation directories
   file:
-    path: "{{ netbird_install_dir }}"
+    path: "{{ item }}"
     state: directory
     mode: '0755'
+  loop:
+    - "{{ netbird_install_dir }}"
+    - "{{ netbird_install_dir }}/data"
+    - "{{ netbird_install_dir }}/litestream"
+    - "{{ netbird_install_dir }}/logs"
+    - "{{ netbird_install_dir }}/state"
+    - "{{ netbird_install_dir }}/coturn"
 
-- name: Check if this is the PostgreSQL host (ns1)
+- name: Determine if this is the primary host
   set_fact:
-    is_postgres_host: "{{ inventory_hostname == 'ns1' }}"
-
-- name: Deploy PostgreSQL for NetBird (ns1 only)
-  when: is_postgres_host
-  block:
-    - name: Create PostgreSQL data directory
-      file:
-        path: "{{ netbird_install_dir }}/postgres_data"
-        state: directory
-        mode: '0700'
-
-    - name: Generate PostgreSQL password if not set
-      set_fact:
-        netbird_postgres_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-      when: netbird_postgres_password is not defined
-      no_log: true
-
-    - name: Save PostgreSQL password to file (for ns2 to read)
-      copy:
-        content: "{{ netbird_postgres_password }}"
-        dest: "{{ netbird_install_dir }}/.postgres_password"
-        mode: '0600'
-      no_log: true
-
-- name: Read PostgreSQL password from ns1 (ns2 only)
-  when: not is_postgres_host
-  block:
-    - name: Fetch PostgreSQL password from ns1
-      set_fact:
-        netbird_postgres_password: "{{ lookup('file', netbird_install_dir + '/.postgres_password') }}"
-      delegate_to: ns1
-      no_log: true
+    is_primary_host: "{{ inventory_hostname == netbird_primary_host }}"
 
 - name: Generate NetBird setup key
   set_fact:
@@ -57,6 +33,13 @@
   when: netbird_coturn_secret is not defined
   run_once: true
   no_log: true
+
+- name: Deploy Litestream configuration
+  template:
+    src: litestream.yml.j2
+    dest: "{{ netbird_install_dir }}/litestream.yml"
+    mode: '0644'
+  notify: restart netbird
 
 - name: Deploy docker-compose.yml for NetBird
   template:
@@ -95,26 +78,84 @@
     state: touch
     mode: '0600'
 
-- name: Start NetBird services
-  community.docker.docker_compose_v2:
-    project_src: "{{ netbird_install_dir }}"
-    state: present
-  register: netbird_compose_result
+- name: Deploy health monitor script
+  template:
+    src: netbird-health-monitor.sh.j2
+    dest: "{{ netbird_install_dir }}/netbird-health-monitor.sh"
+    mode: '0755'
 
-- name: Wait for NetBird Management API to be ready
-  uri:
-    url: "http://localhost:{{ netbird_management_port }}/api/health"
-    status_code: 200
-  retries: 30
-  delay: 2
-  register: result
-  until: result.status == 200
+- name: Deploy promotion script
+  template:
+    src: netbird-promote.sh.j2
+    dest: "{{ netbird_install_dir }}/netbird-promote.sh"
+    mode: '0755'
+
+- name: Deploy demotion script
+  template:
+    src: netbird-demote.sh.j2
+    dest: "{{ netbird_install_dir }}/netbird-demote.sh"
+    mode: '0755'
+
+- name: Deploy health monitor systemd service
+  template:
+    src: netbird-health-monitor.service.j2
+    dest: /etc/systemd/system/netbird-health-monitor.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: Deploy initial state file
+  template:
+    src: state.json.j2
+    dest: "{{ netbird_state_file }}"
+    mode: '0644'
+    force: no  # Do not overwrite existing state
+
+- name: Start NetBird services on primary (or both if no database exists)
+  when: is_primary_host or not (netbird_sqlite_path | ansible.builtin.stat).stat.exists
+  block:
+    - name: Start NetBird services
+      community.docker.docker_compose_v2:
+        project_src: "{{ netbird_install_dir }}"
+        state: present
+      register: netbird_compose_result
+
+    - name: Wait for NetBird Management API to be ready
+      uri:
+        url: "http://localhost:{{ netbird_management_port }}/api/health"
+        status_code: 200
+      retries: 30
+      delay: 2
+      register: result
+      until: result.status == 200
+
+- name: Start Signal, Dashboard, Coturn (non-primary servers)
+  when: not is_primary_host
+  block:
+    - name: Start Signal, Dashboard, Coturn services only
+      community.docker.docker_compose_v2:
+        project_src: "{{ netbird_install_dir }}"
+        services:
+          - signal
+          - dashboard
+          - coturn
+          - traefik
+        state: present
+
+- name: Enable and start health monitor service
+  systemd:
+    name: netbird-health-monitor
+    enabled: yes
+    state: started
+    daemon_reload: yes
 
 - name: Display NetBird deployment status
   debug:
     msg: 
       - "NetBird Management deployed on {{ inventory_hostname }}"
+      - "Role: {{ 'Primary' if is_primary_host else 'Standby' }}"
       - "Management API: http://localhost:{{ netbird_management_port }}"
       - "Dashboard: https://{{ netbird_dashboard_domain }}"
       - "Signal: {{ netbird_signal_protocol }}://{{ inventory_hostname }}:{{ netbird_signal_port }}"
-      - "PostgreSQL: {{ 'Deployed locally' if is_postgres_host else 'Connected to ns1' }}"
+      - "Database: SQLite + Litestream (bidirectional replication)"
+      - "Failover: {{ 'Enabled' if netbird_auto_failover else 'Disabled' }}"
+      - "Failback: {{ 'Enabled (' + netbird_failback_policy + ')' if netbird_auto_failback else 'Disabled' }}"

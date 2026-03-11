@@ -1,0 +1,57 @@
+#!/bin/bash
+# NetBird Demotion Script — Failback to Standby
+# Stops NetBird Management and ensures final database sync
+
+set -euo pipefail
+
+INSTALL_DIR="{{ netbird_install_dir }}"
+SQLITE_PATH="{{ netbird_sqlite_path }}"
+LOG_FILE="$INSTALL_DIR/logs/demotion.log"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo "[$(date -Iseconds)] ERROR: $*" | tee -a "$LOG_FILE" >&2
+}
+
+log "Starting demotion to standby on {{ inventory_hostname }}"
+
+# Step 1: Check if NetBird Management is running
+if ! docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management; then
+    log "NetBird Management is not running, nothing to demote"
+    exit 0
+fi
+
+# Step 2: Gracefully stop NetBird Management (allow Litestream to sync)
+log "Stopping NetBird Management gracefully"
+if docker compose -f "$INSTALL_DIR/docker-compose.yml" stop management; then
+    log "NetBird Management stopped successfully"
+else
+    error "Failed to stop NetBird Management gracefully, forcing stop"
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" kill management
+fi
+
+# Step 3: Ensure Litestream completes final sync
+log "Waiting for Litestream to complete final sync (5 seconds)"
+sleep 5
+
+# Step 4: Stop Litestream
+log "Stopping Litestream"
+if docker compose -f "$INSTALL_DIR/docker-compose.yml" stop litestream; then
+    log "Litestream stopped successfully"
+else
+    error "Failed to stop Litestream"
+fi
+
+# Step 5: Backup database for safety
+if [ -f "$SQLITE_PATH" ]; then
+    log "Backing up database to $SQLITE_PATH.demoted"
+    cp "$SQLITE_PATH" "$SQLITE_PATH.demoted"
+fi
+
+log "Demotion complete: {{ inventory_hostname }} is now standby"
+exit 0

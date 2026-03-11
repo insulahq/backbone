@@ -1,0 +1,277 @@
+#!/bin/bash
+# NetBird Health Monitor — Automatic Failover/Failback
+# Monitors peer health and promotes/demotes this server as needed
+# Implements ADR-021 redundancy with {{ netbird_failback_policy }} failback policy
+
+set -euo pipefail
+
+INSTALL_DIR="{{ netbird_install_dir }}"
+STATE_FILE="{{ netbird_state_file }}"
+HEALTH_CHECK_INTERVAL={{ netbird_health_check_interval }}
+FAILOVER_RTO={{ netbird_failover_rto }}
+FAILBACK_DELAY={{ netbird_failback_delay }}
+PRIMARY_HOST="{{ netbird_primary_host }}"
+STANDBY_HOST="{{ netbird_standby_host }}"
+THIS_HOST="{{ inventory_hostname }}"
+PEER_HOST="{{ 'ns2' if inventory_hostname == 'ns1' else 'ns1' }}"
+AUTO_FAILOVER={{ netbird_auto_failover | lower }}
+AUTO_FAILBACK={{ netbird_auto_failback | lower }}
+FAILBACK_POLICY="{{ netbird_failback_policy }}"
+SPLIT_BRAIN_CHECK={{ netbird_split_brain_check | lower }}
+
+LOG_FILE="$INSTALL_DIR/logs/health-monitor.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo "[$(date -Iseconds)] ERROR: $*" | tee -a "$LOG_FILE" >&2
+}
+
+# Initialize state file if it doesn't exist
+init_state() {
+    if [ ! -f "$STATE_FILE" ]; then
+        mkdir -p "$(dirname "$STATE_FILE")"
+        cat > "$STATE_FILE" <<EOF
+{
+  "primary": "$PRIMARY_HOST",
+  "standby": "$STANDBY_HOST",
+  "last_failover": null,
+  "last_failback": null,
+  "failover_count": 0
+}
+EOF
+        log "Initialized state file"
+    fi
+}
+
+# Read current state
+get_state() {
+    jq -r ".$1" "$STATE_FILE"
+}
+
+# Update state
+set_state() {
+    local key="$1"
+    local value="$2"
+    local tmp_file
+    tmp_file=$(mktemp)
+    jq ".$key = \"$value\"" "$STATE_FILE" > "$tmp_file"
+    mv "$tmp_file" "$STATE_FILE"
+}
+
+# Increment failover counter
+increment_failover_count() {
+    local tmp_file
+    tmp_file=$(mktemp)
+    jq '.failover_count += 1' "$STATE_FILE" > "$tmp_file"
+    mv "$tmp_file" "$STATE_FILE"
+}
+
+# Check if NetBird Management is running locally
+is_local_running() {
+    docker ps --filter "name=netbird-management" --filter "status=running" --format '{{.Names}}' | grep -q netbird-management
+}
+
+# Check if peer NetBird Management is healthy
+is_peer_healthy() {
+    local peer_ip
+    peer_ip=$(getent hosts "$PEER_HOST" | awk '{print $1}')
+    if [ -z "$peer_ip" ]; then
+        error "Cannot resolve peer host: $PEER_HOST"
+        return 1
+    fi
+    
+    # Check HTTP health endpoint
+    if curl -sf --max-time 5 "http://$peer_ip:{{ netbird_management_port }}/api/health" > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check for split-brain scenario
+check_split_brain() {
+    if [ "$SPLIT_BRAIN_CHECK" != "true" ]; then
+        return 0
+    fi
+    
+    # Both nodes think they are primary
+    local current_primary
+    current_primary=$(get_state "primary")
+    
+    if is_local_running && is_peer_healthy; then
+        error "SPLIT-BRAIN DETECTED: Both $THIS_HOST and $PEER_HOST are running NetBird Management"
+        # In split-brain, prefer the configured primary
+        if [ "$THIS_HOST" != "$PRIMARY_HOST" ]; then
+            log "Split-brain resolution: Demoting $THIS_HOST (not preferred primary)"
+            "$INSTALL_DIR"/netbird-demote.sh
+        fi
+        return 1
+    fi
+    
+    return 0
+}
+
+# Promote this server to primary
+promote() {
+    log "Promoting $THIS_HOST to primary"
+    
+    if ! check_split_brain; then
+        error "Promotion aborted due to split-brain"
+        return 1
+    fi
+    
+    if "$INSTALL_DIR"/netbird-promote.sh; then
+        set_state "primary" "$THIS_HOST"
+        set_state "standby" "$PEER_HOST"
+        set_state "last_failover" "$(date -Iseconds)"
+        increment_failover_count
+        log "Promotion successful: $THIS_HOST is now primary"
+        return 0
+    else
+        error "Promotion failed"
+        return 1
+    fi
+}
+
+# Demote this server to standby
+demote() {
+    log "Demoting $THIS_HOST to standby"
+    
+    if "$INSTALL_DIR"/netbird-demote.sh; then
+        set_state "primary" "$PEER_HOST"
+        set_state "standby" "$THIS_HOST"
+        set_state "last_failback" "$(date -Iseconds)"
+        log "Demotion successful: $THIS_HOST is now standby"
+        return 0
+    else
+        error "Demotion failed"
+        return 1
+    fi
+}
+
+# Determine if failback should occur
+should_failback() {
+    if [ "$AUTO_FAILBACK" != "true" ]; then
+        return 1
+    fi
+    
+    local current_primary
+    current_primary=$(get_state "primary")
+    
+    # We are standby, peer is healthy, and we should take over
+    case "$FAILBACK_POLICY" in
+        sticky)
+            # Do not failback; current primary stays primary
+            return 1
+            ;;
+        prefer_ns1)
+            # Failback to ns1 if it's healthy
+            if [ "$THIS_HOST" = "ns1" ] && [ "$current_primary" != "ns1" ]; then
+                log "Failback policy: prefer_ns1 — ns1 should be primary"
+                return 0
+            fi
+            return 1
+            ;;
+        time_based)
+            # Failback after delay
+            local last_failover
+            last_failover=$(get_state "last_failover")
+            if [ "$last_failover" = "null" ]; then
+                return 1
+            fi
+            
+            local failover_timestamp
+            failover_timestamp=$(date -d "$last_failover" +%s)
+            local now
+            now=$(date +%s)
+            local elapsed=$((now - failover_timestamp))
+            
+            if [ "$elapsed" -gt "$FAILBACK_DELAY" ]; then
+                log "Failback policy: time_based — $elapsed seconds elapsed, threshold is $FAILBACK_DELAY"
+                return 0
+            fi
+            return 1
+            ;;
+        *)
+            error "Unknown failback policy: $FAILBACK_POLICY"
+            return 1
+            ;;
+    esac
+}
+
+# Main monitoring loop
+monitor() {
+    init_state
+    
+    log "Starting NetBird health monitor on $THIS_HOST"
+    log "Primary: $(get_state 'primary'), Standby: $(get_state 'standby')"
+    log "Auto-failover: $AUTO_FAILOVER, Auto-failback: $AUTO_FAILBACK"
+    log "Failback policy: $FAILBACK_POLICY"
+    
+    local consecutive_failures=0
+    local failure_threshold=$((FAILOVER_RTO / HEALTH_CHECK_INTERVAL))
+    
+    while true; do
+        local current_primary
+        current_primary=$(get_state "primary")
+        
+        local is_primary=false
+        [ "$current_primary" = "$THIS_HOST" ] && is_primary=true
+        
+        # Scenario 1: We are standby, peer is down → failover
+        if [ "$is_primary" = "false" ]; then
+            if ! is_peer_healthy; then
+                consecutive_failures=$((consecutive_failures + 1))
+                log "Peer $PEER_HOST unhealthy ($consecutive_failures/$failure_threshold)"
+                
+                if [ "$AUTO_FAILOVER" = "true" ] && [ "$consecutive_failures" -ge "$failure_threshold" ]; then
+                    log "Peer down for $FAILOVER_RTO seconds — initiating failover"
+                    promote
+                    consecutive_failures=0
+                fi
+            else
+                # Peer is healthy
+                if [ "$consecutive_failures" -gt 0 ]; then
+                    log "Peer $PEER_HOST recovered"
+                    consecutive_failures=0
+                fi
+                
+                # Scenario 2: We are standby, peer is up, should we failback?
+                if should_failback; then
+                    log "Failback condition met — taking over as primary"
+                    sleep "$FAILBACK_DELAY"  # Grace period
+                    if is_peer_healthy; then
+                        # Peer still healthy, coordinate failback
+                        promote
+                    fi
+                fi
+            fi
+        fi
+        
+        # Scenario 3: We are primary, ensure we're still running
+        if [ "$is_primary" = "true" ]; then
+            if ! is_local_running; then
+                error "We are marked as primary but NetBird Management is not running!"
+                # Attempt to restart
+                log "Attempting to restart NetBird Management"
+                docker compose -f "$INSTALL_DIR/docker-compose.yml" up -d management
+                sleep 5
+                if ! is_local_running; then
+                    error "Failed to restart NetBird Management — demoting"
+                    demote
+                fi
+            fi
+        fi
+        
+        sleep "$HEALTH_CHECK_INTERVAL"
+    done
+}
+
+# Handle signals
+trap 'log "Health monitor stopped"; exit 0' SIGTERM SIGINT
+
+monitor

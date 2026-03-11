@@ -1,42 +1,35 @@
 ---
 # NetBird Management — Docker Compose
 # Redundant deployment (ADR-021): Both ns1 and ns2 run this stack
-# PostgreSQL runs only on ns1, both servers connect to it
+# SQLite + Litestream for bidirectional database replication
 
 version: '3.8'
 
 services:
-{% if is_postgres_host %}
-  # PostgreSQL (ns1 only — shared database for NetBird state)
-  postgres:
-    image: postgres:{{ netbird_postgres_version }}
-    container_name: netbird-postgres
+  # Litestream — Continuous SQLite replication
+  litestream:
+    image: litestream/litestream:{{ netbird_litestream_version }}
+    container_name: netbird-litestream
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: {{ netbird_postgres_db }}
-      POSTGRES_USER: {{ netbird_postgres_user }}
-      POSTGRES_PASSWORD: {{ netbird_postgres_password }}
+    command: replicate
     volumes:
-      - {{ netbird_install_dir }}/postgres_data:/var/lib/postgresql/data
-    ports:
-      - "{{ ansible_default_ipv4.address }}:{{ netbird_postgres_port }}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U {{ netbird_postgres_user }}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - {{ netbird_install_dir }}/data:/var/lib/netbird
+      - {{ netbird_install_dir }}/litestream.yml:/etc/litestream.yml:ro
+      - {{ netbird_install_dir }}/litestream:/var/lib/netbird/litestream
+      - /root/.ssh:/root/.ssh:ro  # For SFTP replication to Storagebox
     networks:
       - netbird
+    depends_on:
+      - management
 
-{% endif %}
   # NetBird Management Server
   management:
     image: netbirdio/management:{{ netbird_management_version }}
     container_name: netbird-management
     restart: unless-stopped
     environment:
-      NETBIRD_STORE_ENGINE: postgres
-      NETBIRD_STORE_ENGINE_POSTGRES_DSN: "postgres://{{ netbird_postgres_user }}:{{ netbird_postgres_password }}@{{ netbird_db_host }}:{{ netbird_postgres_port }}/{{ netbird_postgres_db }}?sslmode=disable"
+      NETBIRD_STORE_ENGINE: sqlite
+      NETBIRD_DATADIR: /var/lib/netbird
       NETBIRD_MGMT_API_PORT: {{ netbird_management_port }}
       NETBIRD_MGMT_GRPC_PORT: {{ netbird_management_grpc_port }}
       NETBIRD_DOMAIN: {{ netbird_dashboard_domain }}
@@ -47,15 +40,11 @@ services:
       NETBIRD_TURN_PORT: {{ netbird_signal_port }}
       NETBIRD_TURN_SECRET: {{ netbird_coturn_secret }}
     volumes:
+      - {{ netbird_install_dir }}/data:/var/lib/netbird
       - {{ netbird_install_dir }}/management.json:/etc/netbird/management.json:ro
     ports:
       - "{{ netbird_management_port }}:{{ netbird_management_port }}"
       - "{{ netbird_management_grpc_port }}:{{ netbird_management_grpc_port }}"
-{% if is_postgres_host %}
-    depends_on:
-      postgres:
-        condition: service_healthy
-{% endif %}
     networks:
       - netbird
     labels:
@@ -153,7 +142,6 @@ networks:
     driver: bridge
 
 volumes:
-{% if is_postgres_host %}
-  postgres_data:
-{% endif %}
+  netbird_data:
+  litestream_data:
   coturn_data:

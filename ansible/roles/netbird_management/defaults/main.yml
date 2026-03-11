@@ -1,22 +1,22 @@
 ---
 # NetBird Management Role — Default Variables
 # Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
+# Uses SQLite + Litestream for bidirectional database replication
 
 # NetBird versions
 netbird_management_version: "0.28.0"
 netbird_signal_version: "0.28.0"
 netbird_dashboard_version: "2.3.0"
 netbird_coturn_version: "4.6.2-alpine"
+netbird_litestream_version: "0.3.13"
 
 # Deployment directory
 netbird_install_dir: /opt/netbird
 
-# PostgreSQL configuration (shared between ns1 and ns2)
-netbird_postgres_version: "16-alpine"
-netbird_postgres_port: 5432
-netbird_postgres_db: "{{ netbird_db_name }}"
-netbird_postgres_user: "{{ netbird_db_user }}"
-# netbird_postgres_password: <set in vault or group_vars>
+# Database configuration (SQLite + Litestream)
+netbird_database: sqlite
+netbird_sqlite_path: "{{ netbird_install_dir }}/data/store.db"
+netbird_litestream_replica_path: "{{ netbird_install_dir }}/data/litestream"
 
 # NetBird Management API
 netbird_management_port: 33073
@@ -41,3 +41,20 @@ netbird_setup_dns: true  # Create DNS records via PowerDNS API
 # Traefik reverse proxy (for HTTPS endpoints)
 netbird_traefik_enabled: true
 netbird_traefik_email: "admin@{{ platform_domain }}"
+
+# Redundancy and failover configuration (ADR-021)
+netbird_auto_failover: true       # Enable automatic failover
+netbird_auto_failback: true       # Enable automatic failback
+netbird_failback_policy: sticky   # Options: sticky, prefer_ns1, time_based
+netbird_split_brain_check: true   # Check for split-brain before promotion
+netbird_health_check_interval: 10 # Seconds between health checks
+netbird_failover_rto: 30          # Recovery Time Objective (seconds)
+netbird_failback_delay: 20        # Delay before failback (seconds)
+
+# Primary/standby configuration
+netbird_primary_host: ns1         # Preferred primary server
+netbird_standby_host: ns2         # Standby server
+
+# State management
+netbird_state_file: "{{ netbird_install_dir }}/state/netbird-state.json"
+netbird_fencing: false            # STONITH/fencing disabled (no IPMI/power control)
