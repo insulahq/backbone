@@ -96,6 +96,7 @@ services:
 {% endif %}
     networks:
       - powerdns_internal
+      - powerdns_external  # Needed for host port mapping
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/v1/servers/localhost || exit 1"]
       interval: 10s
@@ -105,7 +106,9 @@ services:
 networks:
   powerdns_internal:
     driver: bridge
-    internal: true  # No external access (isolated)
+    internal: true  # No external access (isolated backend network)
+  powerdns_external:
+    driver: bridge  # Non-internal network for nginx host port binding
 
 volumes:
   postgres_data:

@@ -1,0 +1,5 @@
+---
+# admin1 Host Variables
+
+# Backup paths
+restic_backup_paths: "{{ admin1_backup_paths }}"

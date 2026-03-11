@@ -25,10 +25,6 @@ allow-axfr-ips={{ powerdns_allow_axfr_ips | join(',') }}
 # Notify ns2 on zone changes
 also-notify={{ powerdns_also_notify | join(',') }}
 
-# NOTIFY settings
-primary-send-notify=yes
-notify-timeout=10
-
 ####################
 # API & Web Server
 ####################
@@ -65,10 +61,6 @@ gpgsql-dnssec={{ 'yes' if powerdns_dnssec_enabled else 'no' }}
 setuid=pdns
 setgid=pdns
 security-poll-suffix=
-
-# Disable unused features
-disable-axfr=no
-disable-tcp=no
 
 # Cache settings
 cache-ttl=20

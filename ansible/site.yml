@@ -7,7 +7,17 @@
   roles:
     - common
 
-# Phase 1 deployment order (to be uncommented as roles are created):
+# Phase 1 deployment order
+- name: Deploy PowerDNS primary
+  hosts: powerdns_primary
+  roles:
+    - powerdns_master
+
+- name: Deploy PowerDNS secondary
+  hosts: powerdns_secondary
+  roles:
+    - powerdns_slave
+
 # - name: Deploy NetBird management server
 #   hosts: netbird_management
 #   roles:
@@ -17,16 +27,6 @@
 #   hosts: netbird_peers
 #   roles:
 #     - netbird_peer
-
-# - name: Deploy PowerDNS primary
-#   hosts: powerdns_primary
-#   roles:
-#     - powerdns_master
-
-# - name: Deploy PowerDNS secondary
-#   hosts: powerdns_secondary
-#   roles:
-#     - powerdns_slave
 
 # - name: Deploy backup configuration
 #   hosts: backup_targets

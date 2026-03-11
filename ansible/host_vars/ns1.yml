@@ -1,0 +1,5 @@
+---
+# ns1 Host Variables
+
+# Backup paths
+restic_backup_paths: "{{ ns1_backup_paths }}"

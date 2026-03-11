@@ -3,13 +3,14 @@
 # Deploys PowerDNS Primary on ns1 with PostgreSQL backend
 # Uses Docker internal network + nginx proxy for security
 
-- name: Ensure NetBird IP is available
-  assert:
-    that:
-      - netbird_ip is defined
-      - netbird_ip | length > 0
-    fail_msg: "NetBird IP not found. Deploy netbird_peer role first to obtain NetBird mesh IP."
-    success_msg: "NetBird IP detected: {{ netbird_ip }}"
+- name: Check if NetBird IP is available
+  set_fact:
+    has_netbird_ip: "{{ netbird_ip is defined and netbird_ip | length > 0 }}"
+    powerdns_bind_interface_actual: "{{ netbird_ip | default('127.0.0.1') }}"
+
+- name: Display binding interface
+  debug:
+    msg: "PowerDNS will bind to: {{ powerdns_bind_interface_actual }} ({{ 'NetBird mesh' if has_netbird_ip else 'localhost - will reconfigure after NetBird deployment' }})"
 
 - name: Create PowerDNS installation directories
   file:
