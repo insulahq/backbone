@@ -1,0 +1,21 @@
+# Traefik Dynamic Configuration for NetBird
+
+http:
+  middlewares:
+    security-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+  routers:
+    netbird-redirect:
+      rule: "Host(`{{ netbird_dashboard_domain }}`)"
+      entryPoints:
+        - web
+      middlewares:
+        - security-headers
+      service: netbird-dashboard

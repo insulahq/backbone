@@ -1,0 +1,45 @@
+{
+  "Stuns": [
+    {
+      "Proto": "udp",
+      "URI": "stun:{{ ansible_default_ipv4.address }}:3478"
+    }
+  ],
+  "TURNConfig": {
+    "Turns": [
+      {
+        "Proto": "udp",
+        "URI": "turn:{{ ansible_default_ipv4.address }}:{{ netbird_signal_port }}",
+        "Username": "netbird",
+        "Password": "{{ netbird_coturn_secret }}"
+      }
+    ],
+    "CredentialsTTL": "12h",
+    "Secret": "{{ netbird_coturn_secret }}",
+    "TimeBasedCredentials": false
+  },
+  "Signal": {
+    "Proto": "{{ netbird_signal_protocol }}",
+    "URI": "{{ netbird_signal_url }}",
+    "Username": "",
+    "Password": ""
+  },
+  "Datadir": "/var/lib/netbird",
+  "HttpConfig": {
+    "AuthIssuer": "https://{{ netbird_dashboard_domain }}",
+    "AuthAudience": "{{ netbird_dashboard_domain }}",
+    "AuthKeysLocation": "https://{{ netbird_dashboard_domain }}/.well-known/jwks.json"
+  },
+  "IdpManagerConfig": {
+    "ManagerType": "none"
+  },
+  "DeviceAuthorizationFlow": {
+    "Provider": "hosted",
+    "ProviderConfig": {
+      "ClientID": "netbird-client",
+      "ClientSecret": "",
+      "Domain": "{{ netbird_dashboard_domain }}",
+      "Audience": "{{ netbird_dashboard_domain }}"
+    }
+  }
+}

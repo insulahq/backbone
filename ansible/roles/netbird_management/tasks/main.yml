@@ -1,0 +1,120 @@
+---
+# NetBird Management Role — Main Tasks
+# Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
+# Both ns1 and ns2 run this role and connect to shared PostgreSQL on ns1
+
+- name: Create NetBird installation directory
+  file:
+    path: "{{ netbird_install_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Check if this is the PostgreSQL host (ns1)
+  set_fact:
+    is_postgres_host: "{{ inventory_hostname == 'ns1' }}"
+
+- name: Deploy PostgreSQL for NetBird (ns1 only)
+  when: is_postgres_host
+  block:
+    - name: Create PostgreSQL data directory
+      file:
+        path: "{{ netbird_install_dir }}/postgres_data"
+        state: directory
+        mode: '0700'
+
+    - name: Generate PostgreSQL password if not set
+      set_fact:
+        netbird_postgres_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+      when: netbird_postgres_password is not defined
+      no_log: true
+
+    - name: Save PostgreSQL password to file (for ns2 to read)
+      copy:
+        content: "{{ netbird_postgres_password }}"
+        dest: "{{ netbird_install_dir }}/.postgres_password"
+        mode: '0600'
+      no_log: true
+
+- name: Read PostgreSQL password from ns1 (ns2 only)
+  when: not is_postgres_host
+  block:
+    - name: Fetch PostgreSQL password from ns1
+      set_fact:
+        netbird_postgres_password: "{{ lookup('file', netbird_install_dir + '/.postgres_password') }}"
+      delegate_to: ns1
+      no_log: true
+
+- name: Generate NetBird setup key
+  set_fact:
+    netbird_setup_key: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+  when: netbird_setup_key is not defined
+  run_once: true
+  no_log: true
+
+- name: Generate Coturn secret
+  set_fact:
+    netbird_coturn_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: netbird_coturn_secret is not defined
+  run_once: true
+  no_log: true
+
+- name: Deploy docker-compose.yml for NetBird
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ netbird_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart netbird
+
+- name: Deploy NetBird management.json configuration
+  template:
+    src: management.json.j2
+    dest: "{{ netbird_install_dir }}/management.json"
+    mode: '0644'
+  notify: restart netbird
+
+- name: Deploy Traefik configuration (if enabled)
+  when: netbird_traefik_enabled
+  template:
+    src: traefik.yml.j2
+    dest: "{{ netbird_install_dir }}/traefik.yml"
+    mode: '0644'
+  notify: restart netbird
+
+- name: Deploy Traefik dynamic configuration
+  when: netbird_traefik_enabled
+  template:
+    src: traefik-dynamic.yml.j2
+    dest: "{{ netbird_install_dir }}/traefik-dynamic.yml"
+    mode: '0644'
+  notify: restart netbird
+
+- name: Create acme.json for Let's Encrypt certificates
+  when: netbird_traefik_enabled
+  file:
+    path: "{{ netbird_install_dir }}/acme.json"
+    state: touch
+    mode: '0600'
+
+- name: Start NetBird services
+  community.docker.docker_compose_v2:
+    project_src: "{{ netbird_install_dir }}"
+    state: present
+  register: netbird_compose_result
+
+- name: Wait for NetBird Management API to be ready
+  uri:
+    url: "http://localhost:{{ netbird_management_port }}/api/health"
+    status_code: 200
+  retries: 30
+  delay: 2
+  register: result
+  until: result.status == 200
+
+- name: Display NetBird deployment status
+  debug:
+    msg: 
+      - "NetBird Management deployed on {{ inventory_hostname }}"
+      - "Management API: http://localhost:{{ netbird_management_port }}"
+      - "Dashboard: https://{{ netbird_dashboard_domain }}"
+      - "Signal: {{ netbird_signal_protocol }}://{{ inventory_hostname }}:{{ netbird_signal_port }}"
+      - "PostgreSQL: {{ 'Deployed locally' if is_postgres_host else 'Connected to ns1' }}"

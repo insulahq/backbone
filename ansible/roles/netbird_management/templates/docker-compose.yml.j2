@@ -1,0 +1,159 @@
+---
+# NetBird Management — Docker Compose
+# Redundant deployment (ADR-021): Both ns1 and ns2 run this stack
+# PostgreSQL runs only on ns1, both servers connect to it
+
+version: '3.8'
+
+services:
+{% if is_postgres_host %}
+  # PostgreSQL (ns1 only — shared database for NetBird state)
+  postgres:
+    image: postgres:{{ netbird_postgres_version }}
+    container_name: netbird-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: {{ netbird_postgres_db }}
+      POSTGRES_USER: {{ netbird_postgres_user }}
+      POSTGRES_PASSWORD: {{ netbird_postgres_password }}
+    volumes:
+      - {{ netbird_install_dir }}/postgres_data:/var/lib/postgresql/data
+    ports:
+      - "{{ ansible_default_ipv4.address }}:{{ netbird_postgres_port }}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ netbird_postgres_user }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - netbird
+
+{% endif %}
+  # NetBird Management Server
+  management:
+    image: netbirdio/management:{{ netbird_management_version }}
+    container_name: netbird-management
+    restart: unless-stopped
+    environment:
+      NETBIRD_STORE_ENGINE: postgres
+      NETBIRD_STORE_ENGINE_POSTGRES_DSN: "postgres://{{ netbird_postgres_user }}:{{ netbird_postgres_password }}@{{ netbird_db_host }}:{{ netbird_postgres_port }}/{{ netbird_postgres_db }}?sslmode=disable"
+      NETBIRD_MGMT_API_PORT: {{ netbird_management_port }}
+      NETBIRD_MGMT_GRPC_PORT: {{ netbird_management_grpc_port }}
+      NETBIRD_DOMAIN: {{ netbird_dashboard_domain }}
+      NETBIRD_SIGNAL_PROTOCOL: {{ netbird_signal_protocol }}
+      NETBIRD_SIGNAL_ENDPOINT: {{ netbird_signal_url }}
+      NETBIRD_TURN_ENABLED: "true"
+      NETBIRD_TURN_HOST: {{ ansible_default_ipv4.address }}
+      NETBIRD_TURN_PORT: {{ netbird_signal_port }}
+      NETBIRD_TURN_SECRET: {{ netbird_coturn_secret }}
+    volumes:
+      - {{ netbird_install_dir }}/management.json:/etc/netbird/management.json:ro
+    ports:
+      - "{{ netbird_management_port }}:{{ netbird_management_port }}"
+      - "{{ netbird_management_grpc_port }}:{{ netbird_management_grpc_port }}"
+{% if is_postgres_host %}
+    depends_on:
+      postgres:
+        condition: service_healthy
+{% endif %}
+    networks:
+      - netbird
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-management.rule=Host(`{{ netbird_dashboard_domain }}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.netbird-management.entrypoints=websecure"
+      - "traefik.http.routers.netbird-management.tls.certresolver=letsencrypt"
+      - "traefik.http.services.netbird-management.loadbalancer.server.port={{ netbird_management_port }}"
+
+  # NetBird Signal Server
+  signal:
+    image: netbirdio/signal:{{ netbird_signal_version }}
+    container_name: netbird-signal
+    restart: unless-stopped
+    environment:
+      NETBIRD_SIGNAL_PORT: {{ netbird_signal_port }}
+      NETBIRD_SIGNAL_PROTOCOL: {{ netbird_signal_protocol }}
+    ports:
+      - "{{ netbird_signal_port }}:{{ netbird_signal_port }}"
+    networks:
+      - netbird
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-signal.rule=Host(`{{ netbird_signal_url | regex_replace(':.*$', '') }}`)"
+      - "traefik.http.routers.netbird-signal.entrypoints=websecure"
+      - "traefik.http.routers.netbird-signal.tls.certresolver=letsencrypt"
+      - "traefik.http.services.netbird-signal.loadbalancer.server.port={{ netbird_signal_port }}"
+
+  # NetBird Dashboard (Web UI)
+  dashboard:
+    image: netbirdio/dashboard:{{ netbird_dashboard_version }}
+    container_name: netbird-dashboard
+    restart: unless-stopped
+    environment:
+      NETBIRD_MGMT_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
+      NETBIRD_MGMT_GRPC_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
+    networks:
+      - netbird
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-dashboard.rule=Host(`{{ netbird_dashboard_domain }}`)"
+      - "traefik.http.routers.netbird-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.netbird-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.netbird-dashboard.loadbalancer.server.port={{ netbird_dashboard_port }}"
+
+  # Coturn (TURN/STUN relay for NAT traversal)
+  coturn:
+    image: coturn/coturn:{{ netbird_coturn_version }}
+    container_name: netbird-coturn
+    restart: unless-stopped
+    command:
+      - -n
+      - --log-file=stdout
+      - --external-ip={{ netbird_coturn_external_ip }}
+      - --listening-port={{ netbird_signal_port }}
+      - --min-port={{ netbird_coturn_min_port }}
+      - --max-port={{ netbird_coturn_max_port }}
+      - --realm={{ netbird_dashboard_domain }}
+      - --use-auth-secret
+      - --static-auth-secret={{ netbird_coturn_secret }}
+    network_mode: host
+    volumes:
+      - {{ netbird_install_dir }}/coturn:/var/lib/coturn
+
+{% if netbird_traefik_enabled %}
+  # Traefik (reverse proxy for HTTPS)
+  traefik:
+    image: traefik:v2.11
+    container_name: netbird-traefik
+    restart: unless-stopped
+    command:
+      - --api.insecure=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.filename=/etc/traefik/traefik-dynamic.yml
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email={{ netbird_traefik_email }}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - {{ netbird_install_dir }}/traefik.yml:/etc/traefik/traefik.yml:ro
+      - {{ netbird_install_dir }}/traefik-dynamic.yml:/etc/traefik/traefik-dynamic.yml:ro
+      - {{ netbird_install_dir }}/acme.json:/acme.json
+    networks:
+      - netbird
+{% endif %}
+
+networks:
+  netbird:
+    driver: bridge
+
+volumes:
+{% if is_postgres_host %}
+  postgres_data:
+{% endif %}
+  coturn_data:
