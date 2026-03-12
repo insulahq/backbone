@@ -7,41 +7,48 @@ services:
       - '0.0.0.0:{{ postgresql_port }}:{{ postgresql_port }}'
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
-    environment:
-      # PostgreSQL superuser
-      POSTGRESQL_POSTGRES_PASSWORD: "{{ postgresql_superuser_password }}"
-
-      # Repmgr replication user
-      REPMGR_PASSWORD: "{{ postgresql_repmgr_password }}"
-
-      # Application user + databases created on primary
+      - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
+    # Each node maps its own short hostname to 127.0.0.1 so repmgr self-registration
+    # uses localhost (avoids Docker hairpin NAT issue). The peer's hostname maps to
+    # the real NetBird IP for cross-node streaming replication.
+    extra_hosts:
 {% if postgresql_is_primary %}
-      POSTGRESQL_USERNAME: "{{ postgresql_databases[0].user }}"
-      POSTGRESQL_PASSWORD: "{{ postgresql_databases[0].password }}"
-      POSTGRESQL_DATABASE: "{{ postgresql_databases[0].name }}"
+      - "ns1:127.0.0.1"
+      - "ns2:{{ postgresql_ns2_netbird_ip }}"
+{% else %}
+      - "ns1:{{ postgresql_ns1_netbird_ip }}"
+      - "ns2:127.0.0.1"
+{% endif %}
+    environment:
+      # PostgreSQL superuser credentials (used by initdb on first run)
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "{{ postgresql_superuser_password }}"
+
+      # repmgr replication user and database
+      REPMGR_USER: "repmgr"
+      REPMGR_PASSWORD: "{{ postgresql_repmgr_password }}"
+      REPMGR_DB: "repmgr"
+
+      # NODE_NAME is used as both the repmgr node label and conninfo host=.
+      # With the extra_hosts mapping above, this resolves to 127.0.0.1 locally
+      # (self-registration works), and to the real NetBird IP on the peer server.
+      REPMGR_ROLE: "{{ 'primary' if postgresql_is_primary else 'standby' }}"
+      NODE_ID: "{{ postgresql_node_id }}"
+      NODE_NAME: "{{ inventory_hostname }}"
+
+      # Standby only: primary hostname to clone from (resolves to NetBird IP via extra_hosts)
+{% if not postgresql_is_primary %}
+      REPMGR_UPSTREAM_NAME: "ns1"
 {% endif %}
 
-      # repmgr cluster configuration
-      REPMGR_PRIMARY_HOST: "{{ postgresql_primary_netbird_ip }}"
-      REPMGR_PRIMARY_PORT: "{{ postgresql_port }}"
-      REPMGR_PARTNER_NODES: "{{ postgresql_ns1_netbird_ip }}:{{ postgresql_port }},{{ postgresql_ns2_netbird_ip }}:{{ postgresql_port }}"
-      REPMGR_NODE_NAME: "{{ inventory_hostname }}"
-      REPMGR_NODE_NETWORK_NAME: "{{ netbird_ip }}"
-      REPMGR_PORT_NUMBER: "{{ postgresql_port }}"
-      REPMGR_LOG_LEVEL: "INFO"
-      REPMGR_RECONNECT_ATTEMPTS: "3"
-      REPMGR_RECONNECT_INTERVAL: "5"
-      # Enable automatic failover
-      REPMGR_FAILOVER: "automatic"
-      REPMGR_PROMOTE_COMMAND: "repmgr standby promote --log-to-file"
-      REPMGR_FOLLOW_COMMAND: "repmgr standby follow --log-to-file --upstream-node-id=%n"
-
+    entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
+    command: []
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     logging:
       driver: "json-file"
       options:

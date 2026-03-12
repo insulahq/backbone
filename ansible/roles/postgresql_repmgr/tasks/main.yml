@@ -16,6 +16,13 @@
   debug:
     msg: "PostgreSQL role on {{ inventory_hostname }}: {{ 'PRIMARY' if postgresql_is_primary else 'STANDBY' }} (node {{ postgresql_node_id }})"
 
+- name: Deploy entrypoint wrapper script
+  template:
+    src: entrypoint-wrapper.sh.j2
+    dest: "{{ postgresql_install_dir }}/entrypoint-wrapper.sh"
+    mode: '0755'
+  notify: restart postgresql
+
 - name: Deploy docker-compose.yml
   template:
     src: docker-compose.yml.j2
@@ -35,20 +42,54 @@
     command: >
       pg_isready -U postgres -h localhost
   register: pg_ready
-  retries: 30
-  delay: 3
+  retries: 40
+  delay: 5
   until: pg_ready.rc == 0
+  changed_when: false
+
+# Create application databases on primary only (replicated to standby via streaming)
+- name: Create application user and database on primary
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -tc
+      "SELECT 1 FROM pg_roles WHERE rolname='{{ item.user }}'"
+  register: pg_user_check
+  changed_when: false
+  loop: "{{ postgresql_databases }}"
+  when: postgresql_is_primary
+
+- name: Create database user if not exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -c
+      "CREATE USER {{ item.item.user }} WITH PASSWORD '{{ item.item.password }}'"
+  when:
+    - postgresql_is_primary
+    - item.stdout is defined
+    - item.stdout | trim == ""
+  loop: "{{ pg_user_check.results }}"
+  no_log: true
+
+- name: Create application database if not exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      bash -c "psql -U postgres -tc \"SELECT 1 FROM pg_database WHERE datname='{{ item.name }}'\" | grep -q 1 || createdb -U postgres -O {{ item.user }} {{ item.name }}"
+  loop: "{{ postgresql_databases }}"
+  when: postgresql_is_primary
   changed_when: false
 
 - name: Wait extra time for standby to complete initial sync
   pause:
-    seconds: 10
+    seconds: 15
   when: not postgresql_is_primary
 
 - name: Display PostgreSQL deployment status
   debug:
     msg:
-      - "PostgreSQL {{ postgresql_version }} deployed on {{ inventory_hostname }}"
+      - "PostgreSQL deployed on {{ inventory_hostname }}"
       - "Role: {{ 'PRIMARY (node ' + postgresql_node_id | string + ')' if postgresql_is_primary else 'STANDBY (node ' + postgresql_node_id | string + ')' }}"
-      - "Replication: streaming from {{ postgresql_primary_netbird_ip }} (ns1)"
-      - "Access: port {{ postgresql_port }} (protected by nftables to NetBird mesh only)"
+      - "Listening: 0.0.0.0:{{ postgresql_port }} (NetBird mesh access only)"
+      - "Application DBs: {{ postgresql_databases | map(attribute='name') | list | join(', ') }}"

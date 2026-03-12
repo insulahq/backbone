@@ -1,0 +1,114 @@
+#!/bin/bash
+# Wrapper around sourcemation/postgres-repmgr entrypoint.sh
+# Patches repmgr registration to be idempotent (handles 'already registered' gracefully)
+# and runs repmgrd directly when postgres is already initialized.
+
+set -e
+
+export REPMGR_CONFIG_FILE=${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}
+export PGPASSWORD="${REPMGR_PASSWORD}"
+
+generate_repmgr_config() {
+  mkdir -p "$(dirname "$REPMGR_CONFIG_FILE")"
+  cat > "${REPMGR_CONFIG_FILE}" <<EOF
+# Repmgr configuration
+node_id=${NODE_ID}
+node_name=${NODE_NAME}
+conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=2'
+data_directory='${PGDATA}'
+failover=automatic
+promote_command='/usr/bin/repmgr standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
+follow_command='/usr/bin/repmgr standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
+log_level=INFO
+EOF
+}
+
+if [ "$REPMGR_ROLE" = 'primary' ]; then
+
+  # First run: initialize the cluster
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    echo "--- Initializing primary node ---"
+
+    initdb -U "$POSTGRES_USER" -D "$PGDATA"
+
+    echo "shared_preload_libraries = 'repmgr'" >> "$PGDATA/postgresql.conf"
+    echo "wal_level = replica" >> "$PGDATA/postgresql.conf"
+    echo "max_wal_senders = 10" >> "$PGDATA/postgresql.conf"
+    echo "max_replication_slots = 10" >> "$PGDATA/postgresql.conf"
+    echo "hot_standby = on" >> "$PGDATA/postgresql.conf"
+    echo "archive_mode = on" >> "$PGDATA/postgresql.conf"
+    echo "archive_command = '/bin/true'" >> "$PGDATA/postgresql.conf"
+
+    echo "host replication ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
+    echo "host ${REPMGR_DB} ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
+
+    pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
+    createuser --superuser "$REPMGR_USER"
+    createdb --owner="$REPMGR_USER" "$REPMGR_DB"
+    pg_ctl -D "$PGDATA" -m fast -w stop
+
+    echo "--- Primary initialized ---"
+  fi
+
+  echo "--- Generating repmgr.conf ---"
+  generate_repmgr_config
+
+  echo "--- Starting PostgreSQL ---"
+  postgres -D "$PGDATA" &
+  PG_PID=$!
+
+  until pg_isready -q; do
+    echo "Waiting for PostgreSQL..." >&2
+    sleep 1
+  done
+
+  # Register primary — idempotent with --force
+  echo "--- Registering primary node ---"
+  repmgr -f "$REPMGR_CONFIG_FILE" primary register --force || {
+    echo "Primary register failed but continuing (may already be registered)" >&2
+  }
+
+  echo "--- Starting repmgrd ---"
+  exec repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false
+
+else
+
+  if [ -z "$REPMGR_UPSTREAM_NAME" ]; then
+    echo "ERROR: REPMGR_UPSTREAM_NAME is not set" >&2
+    exit 1
+  fi
+
+  echo "--- Generating repmgr.conf ---"
+  generate_repmgr_config
+
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    echo "--- Waiting for primary ($REPMGR_UPSTREAM_NAME) ---"
+    until pg_isready -h "$REPMGR_UPSTREAM_NAME" -p 5432 -U "$REPMGR_USER"; do
+      echo "Primary unavailable - sleeping" >&2
+      sleep 5
+    done
+
+    echo "--- Cloning from primary ---"
+    repmgr -h "$REPMGR_UPSTREAM_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+           -f "$REPMGR_CONFIG_FILE" standby clone
+    echo "--- Clone complete ---"
+  fi
+
+  echo "--- Starting PostgreSQL (standby) ---"
+  postgres -D "$PGDATA" &
+  PG_PID=$!
+
+  until pg_isready -q; do
+    echo "Waiting for local PostgreSQL..." >&2
+    sleep 1
+  done
+
+  # Register standby — idempotent with --force
+  echo "--- Registering standby node ---"
+  repmgr -f "$REPMGR_CONFIG_FILE" standby register --force || {
+    echo "Standby register failed but continuing" >&2
+  }
+
+  echo "--- Starting repmgrd ---"
+  exec repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false
+fi
