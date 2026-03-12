@@ -31,7 +31,7 @@
 
 ## 2. Current State
 
-**Status:** All Phase 1 infrastructure deployed. k3s v1.34.5 running on admin1. Backups working on all servers. Next: Deploy NetBird management on ns2 + Litestream replication.
+**Status:** NetBird HA architecture deployed (standalone Traefik + PostgreSQL repmgr + NetBird on both ns1 and ns2). BLOCKER: NetBird mesh peers have expired sessions — need re-enrollment. PostgreSQL standby (ns2) can't reach primary (ns1) because NetBird mesh is down. User action required: log in to dashboard and generate new setup key.
 
 **Server IPs (confirmed):**
 - ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein) — NetBird IP: `100.83.100.184`
@@ -44,11 +44,13 @@
 | OS hardening (Debian 13, nftables, fail2ban, Docker) | ✅ DONE | all |
 | PowerDNS 4.9.13 Primary + PostgreSQL | ✅ DONE | ns1 |
 | PowerDNS 4.9.13 Secondary + SQLite | ✅ DONE | ns2 |
-| NetBird v0.66.4 Management + Signal + Relay | ✅ DONE | ns1 only |
-| NetBird peer (all servers in mesh) | ✅ DONE | ns1, ns2, admin1 |
-| Restic backup to Hetzner Storagebox | ✅ DONE | all (first backup taken 2026-03-12) |
+| Standalone Traefik v3.6 (traefik_public network, DNS-01 ACME) | ✅ DONE | ns1, ns2 |
+| PostgreSQL 18 + repmgr 5.5 (primary) | ✅ DONE | ns1 |
+| PostgreSQL 18 + repmgr 5.5 (standby — NOT replicating, needs NetBird mesh) | ⚠️ PARTIAL | ns2 |
+| NetBird v0.66.4 Management (PostgreSQL backend, fresh empty DB) | ✅ DONE | ns1, ns2 |
+| NetBird peer — ALL SESSIONS EXPIRED, needs re-enrollment | ❌ BROKEN | ns1, ns2, admin1 |
+| Restic backup to Hetzner Storagebox | ✅ DONE | all |
 | k3s v1.34.5+k3s1 single-node cluster | ✅ DONE | admin1 |
-| NetBird Management on ns2 + Litestream | ❌ TODO | ns2 |
 | Management API (Fastify + MariaDB) | ❌ TODO | admin1 (k3s) |
 | Admin Panel (React/Vite/shadcn) | ❌ TODO | admin1 (k3s) |
 | Client Panel | ❌ TODO | admin1 (k3s) |
@@ -57,10 +59,20 @@
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables, Docker CE, fail2ban
 - ✅ `ansible/roles/powerdns_master/` — PowerDNS Primary + PostgreSQL
 - ✅ `ansible/roles/powerdns_slave/` — PowerDNS Secondary + SQLite
-- ✅ `ansible/roles/netbird_management/` — NetBird v0.66.4 combined server
+- ✅ `ansible/roles/traefik/` — Standalone Traefik v3.6, shared traefik_public Docker network
+- ✅ `ansible/roles/postgresql_repmgr/` — PostgreSQL 18 + repmgr HA, sourcemation image
+- ✅ `ansible/roles/netbird_management/` — NetBird v0.66.4 combined server (PostgreSQL backend)
 - ✅ `ansible/roles/netbird_peer/` — NetBird peer client
 - ✅ `ansible/roles/backup/` — Restic backup to Hetzner Storagebox
 - ✅ `ansible/roles/k3s/` — k3s single-node cluster
+
+**Architecture changes this session:**
+- NetBird migrated from SQLite+Litestream to PostgreSQL (sourcemation/postgres-repmgr)
+- Traefik moved from embedded in NetBird compose to standalone role with shared `traefik_public` network (172.31.0.0/24, Traefik fixed IP 172.31.0.254)
+- PowerDNS nginx now binds to NetBird IP `100.83.100.184:8081` (was `127.0.0.1:8081`)
+- NetBird config.yaml: trustedHTTPProxies updated to `172.31.0.254/32` (was `172.30.0.254/32`)
+- NetBird PostgreSQL DSN: single-host (`100.83.100.184:5432`) until ns2 PG standby is replicating
+- IMPORTANT: NetBird management DB is EMPTY (fresh PostgreSQL). Old SQLite data NOT migrated.
 
 **k3s cluster details (admin1):**
 - Version: v1.34.5+k3s1
@@ -79,19 +91,38 @@
 
 ### Next Steps (in order)
 
-1. **Deploy NetBird Management on ns2 + Litestream replication** ← START HERE
-   - Deploy `netbird_management` role to ns2
-   - Configure Litestream replication of NetBird SQLite DB: ns1 ↔ ns2
-   - Add ns2 IP (`89.167.125.29`) back to `netbird.phoenix-host.net` DNS (round-robin)
-   - Verify both ns1 and ns2 serve NetBird correctly
+1. **Re-enroll NetBird peers (USER ACTION REQUIRED)** ← START HERE
+   - Visit https://netbird.phoenix-host.net in browser and log in (embedded IdP, fresh DB)
+   - Create admin account (new credentials — old ones no longer work)
+   - Generate a **reusable setup key** with no expiry (or long expiry)
+   - Update `ansible/group_vars/all.yml`:
+     - `netbird_setup_key`: new key value
+     - `netbird_admin_pat`: new PAT (create in Settings → Personal Access Tokens)
+   - Run: `ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml`
+   - Verify NetBird mesh: all 3 peers connected (ns1 `100.83.100.184`, ns2 `100.83.42.33`, admin1 `100.83.156.131`)
 
-2. **Deploy Management API on admin1 (k3s)**
+2. **Enable PostgreSQL standby replication (ns2)**
+   - After NetBird mesh is restored, ns2's PostgreSQL container will be able to reach ns1 via `100.83.100.184:5432`
+   - The standby container will auto-start replication on its next start — or restart it:
+     `ssh root@89.167.125.29 "cd /opt/postgresql && docker compose restart"`
+   - Verify replication: `docker exec postgresql psql -U postgres -d repmgr -c 'SELECT * FROM repmgr.nodes;'` on ns1
+
+3. **Switch NetBird to multi-host PostgreSQL DSN**
+   - After ns2 PG is replicating, update `group_vars/all.yml`:
+     `netbird_postgres_dsn: "host=100.83.100.184,100.83.42.33 port=5432 user=netbird password=... dbname=netbird sslmode=disable target_session_attrs=read-write"`
+   - Redeploy NetBird: `ansible-playbook -i inventory/hosts.yml deploy-netbird.yml`
+
+4. **Add ns2 to netbird.phoenix-host.net DNS round-robin**
+   - Uncomment ns2 IP in `group_vars/all.yml` under `netbird_dns_records`
+   - Redeploy NetBird to trigger DNS update
+
+5. **Deploy Management API on admin1 (k3s)**
    - MariaDB deployment on k3s
    - Fastify API deployment (from `backend/`)
    - Configure environment variables, secrets via k3s secrets
    - Verify `POST /api/v1/auth/token` and `GET /api/v1/admin/status`
 
-3. **Deploy Admin Panel on admin1 (k3s)**
+6. **Deploy Admin Panel on admin1 (k3s)**
    - Build React/Vite/shadcn/ui app (from `frontend/admin-panel/`)
    - See `docs/08-admin-panel-mockups/` for UI reference
 
@@ -101,8 +132,11 @@
 cd /config/hosting-platform/ansible
 ansible-playbook -i inventory/hosts.yml deploy-k3s.yml          # k3s only
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # backup only
-ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
+ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management (ns1+ns2)
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers (re-enrollment)
+ansible-playbook -i inventory/hosts.yml deploy-traefik.yml       # Traefik only
+ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml    # PostgreSQL HA only
+ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + NetBird (full HA stack)
 ansible-playbook -i inventory/hosts.yml site.yml                 # Everything
 ```
 
@@ -359,6 +393,12 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 8 | k3s fails with `protect-kernel-defaults: true` if kernel sysctl not set | k3s role sets `vm.overcommit_memory=1`, `kernel.panic=10`, `kernel.panic_on_oops=1` via `/etc/sysctl.d/99-k3s.conf` before starting k3s |
 | 9 | NetBird SSH config intercepts ALL SSH connections (not just NetBird peers) | Restic backup script uses `-F /dev/null` in SFTP args to bypass `/etc/ssh/ssh_config.d/99-netbird.conf` |
 | 10 | Restic repos on Storagebox corrupted by runs with wrong password | Must wipe ALL files (including data/ subdirs) before re-init. Use `wipe-restic-repos.py` pattern with SFTP batch -rm/-rmdir commands |
+| 11 | `bitnami/postgresql-repmgr` image removed from all public registries | Use `sourcemation/postgres-repmgr:latest` instead (PG18 + repmgr 5.5, different env var API) |
+| 12 | sourcemation/postgres-repmgr entrypoint crashes on container restart ("already registered") | Mount custom `entrypoint-wrapper.sh` using `--force` flag on repmgr register commands |
+| 13 | Docker hairpin NAT: container can't reach its own Docker-forwarded port via host IP | Use `extra_hosts` to map node's own hostname to `127.0.0.1`, peer hostname to real NetBird IP |
+| 14 | PostgreSQL pg_hba.conf doesn't allow Docker bridge networks by default | Add `host all all 172.0.0.0/8 scram-sha-256` and `host all all 100.83.0.0/16 scram-sha-256` to pg_hba.conf |
+| 15 | NetBird multi-host PostgreSQL DSN fails if any listed host is unreachable | Use single-host DSN until all PG nodes are up and replicating; then switch to multi-host |
+| 16 | NetBird management DB is EMPTY after switching to PostgreSQL — old SQLite data not migrated | All peers need re-enrollment with new setup key after switching to PostgreSQL backend |
 
 ---
 
