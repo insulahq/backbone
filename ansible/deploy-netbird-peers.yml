@@ -1,0 +1,8 @@
+---
+# Deploy NetBird peer client to all mesh nodes
+# Usage: ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
+
+- name: Deploy NetBird peers
+  hosts: netbird_peers
+  roles:
+    - netbird_peer

@@ -23,10 +23,10 @@
   roles:
     - netbird_management
 
-# - name: Deploy NetBird peers
-#   hosts: netbird_peers
-#   roles:
-#     - netbird_peer
+- name: Deploy NetBird peers
+  hosts: netbird_peers
+  roles:
+    - netbird_peer
 
 # - name: Deploy backup configuration
 #   hosts: backup_targets

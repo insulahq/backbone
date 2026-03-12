@@ -1,113 +1,97 @@
 ---
 # NetBird Peer Role — Main Tasks
-# Deploys NetBird peer client for mesh connectivity
+# Installs NetBird peer client via official apt repository and enrolls with management server.
+# Compatible with NetBird v0.66+ combined server architecture.
 
-- name: Create NetBird config directory
+- name: Install apt dependencies for NetBird repo
+  apt:
+    name:
+      - curl
+      - gnupg
+      - apt-transport-https
+    state: present
+    update_cache: yes
+
+- name: Create apt keyrings directory
   file:
-    path: "{{ netbird_config_dir }}"
+    path: /usr/share/keyrings
     state: directory
     mode: '0755'
 
-- name: Check if NetBird is already installed
-  stat:
-    path: "{{ netbird_install_dir }}/netbird"
-  register: netbird_binary
-
-- name: Download and install NetBird binary
-  when: not netbird_binary.stat.exists or netbird_force_reinstall | default(false)
-  block:
-    - name: Create temporary download directory
-      tempfile:
-        state: directory
-        suffix: netbird
-      register: netbird_temp_dir
-
-    - name: Download NetBird tarball
-      get_url:
-        url: "{{ netbird_download_url }}"
-        dest: "{{ netbird_temp_dir.path }}/netbird.tar.gz"
-        mode: '0644'
-
-    - name: Extract NetBird binary
-      unarchive:
-        src: "{{ netbird_temp_dir.path }}/netbird.tar.gz"
-        dest: "{{ netbird_temp_dir.path }}"
-        remote_src: yes
-
-    - name: Install NetBird binary
-      copy:
-        src: "{{ netbird_temp_dir.path }}/netbird"
-        dest: "{{ netbird_install_dir }}/netbird"
-        mode: '0755'
-        remote_src: yes
-
-    - name: Remove temporary directory
-      file:
-        path: "{{ netbird_temp_dir.path }}"
-        state: absent
-
-- name: Verify NetBird binary
-  command: "{{ netbird_install_dir }}/netbird version"
-  register: netbird_version_output
-  changed_when: false
-
-- name: Display NetBird version
-  debug:
-    msg: "NetBird installed: {{ netbird_version_output.stdout }}"
-
-- name: Deploy netbird systemd service
-  template:
-    src: netbird.service.j2
-    dest: /etc/systemd/system/netbird.service
+- name: Download NetBird GPG key (armored)
+  get_url:
+    url: https://pkgs.netbird.io/debian/public.key
+    dest: /tmp/netbird.asc
     mode: '0644'
-  notify:
-    - reload systemd
-    - restart netbird
+    force: yes
+
+- name: Dearmor NetBird GPG key
+  command: gpg --dearmor -o /usr/share/keyrings/netbird.gpg /tmp/netbird.asc
+  args:
+    creates: /usr/share/keyrings/netbird.gpg
+
+- name: Add NetBird apt repository
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/netbird.gpg] https://pkgs.netbird.io/debian/ stable main"
+    state: present
+    filename: netbird
+    update_cache: yes
+
+- name: Install NetBird client
+  apt:
+    name: netbird
+    state: present
+    update_cache: yes
+
+- name: Enable and start NetBird daemon
+  systemd:
+    name: netbird
+    enabled: "{{ netbird_autostart }}"
+    state: started
+    daemon_reload: yes
+
+- name: Wait for NetBird daemon to be ready
+  wait_for:
+    path: /var/run/netbird.sock
+    state: present
+    timeout: 30
+  ignore_errors: yes
 
 - name: Check if NetBird is already enrolled
   stat:
     path: "{{ netbird_config_dir }}/config.json"
   register: netbird_config
 
-- name: Enroll NetBird peer (if not already enrolled)
+- name: Enroll NetBird peer with management server
   when: not netbird_config.stat.exists
   block:
-    - name: Check if setup key is defined
+    - name: Assert setup key is defined
       assert:
         that:
           - netbird_setup_key is defined
           - netbird_setup_key | length > 0
-        fail_msg: "netbird_setup_key must be defined for initial enrollment"
+        fail_msg: "netbird_setup_key must be defined in group_vars/all.yml"
 
-    - name: Enroll NetBird peer with management server
+    - name: Run netbird up to enroll peer
       command: >
-        {{ netbird_install_dir }}/netbird up
+        netbird up
         --setup-key {{ netbird_setup_key }}
         --management-url {{ netbird_management_url }}
         --hostname {{ netbird_peer_hostname }}
         --log-level {{ netbird_log_level }}
-        --daemon-addr unix:///var/run/netbird.sock
       register: netbird_enroll_result
       changed_when: true
       no_log: true
 
-    - name: Display enrollment result
+    - name: Show enrollment result
       debug:
-        msg: "NetBird peer enrolled successfully as {{ netbird_peer_hostname }}"
+        msg: "NetBird peer enrolled as {{ netbird_peer_hostname }}"
 
-- name: Enable and start netbird service
-  when: netbird_autostart
-  systemd:
-    name: netbird
-    enabled: yes
-    state: started
-    daemon_reload: yes
-
-- name: Wait for NetBird to be connected
-  command: "{{ netbird_install_dir }}/netbird status"
+- name: Wait for NetBird to reach Connected state
+  command: netbird status
   register: netbird_status
-  until: "'Connected' in netbird_status.stdout or 'Disconnected' not in netbird_status.stdout"
-  retries: 10
+  until: "'Connected' in netbird_status.stdout"
+  retries: 15
   delay: 3
   changed_when: false
   failed_when: false
