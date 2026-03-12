@@ -31,10 +31,13 @@
 
 ## 2. Current State
 
-**Status:** Full HA stack operational and hardened. All post-reboot boot issues diagnosed and fixed in Ansible templates. Ready for Management API + Admin Panel deployment.
+**Status:** Full HA stack operational and hardened. All post-reboot boot issues diagnosed and fixed in Ansible templates. NS2 zone replication fully verified (both A records for netbird.phoenix-host.net present). Ready for Management API + Admin Panel deployment.
 
 **Post-reboot incident (2026-03-12) — resolved:**
 NS1 reboot exposed several circular boot dependencies that have now been fixed in the Ansible templates and are documented in §8 (gotchas 22–29). NS1 manual recovery steps: force-recreate pdns, patch netbird DSN to use `postgresql` hostname, force-recreate nginx, restart NS2 Traefik for cert renewal.
+
+**NS2 zone replication fix (2026-03-13):**
+NS2 only had one A record for `netbird.phoenix-host.net` because `pdnsutil add-record` does not auto-increment the SOA serial — the second record was added without bumping serial, so NS2 never re-transferred. Fixed by: bumping serial, forcing `pdns_control retrieve` on NS2, and running `pdnsutil change-secondary-zone-primary phoenix-host.net 23.88.111.142 100.75.10.178` to accept NOTIFYs from both NS1 public and NetBird IPs. Ansible template updated with this fix (gotcha 30).
 
 **Server IPs (confirmed):**
 - ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein) — NetBird IP: `100.75.10.178`
@@ -394,6 +397,7 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 27 | **NS2 `allow-notify-from` has only public IP** — NOTIFY from NS1's NetBird IP `100.75.10.178` refused | Fixed in slave template: `powerdns_allow_notify_from` now includes both public IP AND NetBird IP of NS1 |
 | 28 | **NS2 Traefik loses Let's Encrypt cert on restart** if PowerDNS API unreachable (DNS-01 challenge fails, falls back to self-signed) | After fixing PowerDNS API accessibility, restart NS2 Traefik: `docker restart traefik`. Cert auto-renews via DNS-01 in ~60-90s |
 | 29 | `pdns_control ping` is not a valid command in PowerDNS 4.9 — health check always fails, all pdns containers show `(unhealthy)` | Fixed in templates: use `pdns_control uptime > /dev/null 2>&1` instead. Existing live containers will show unhealthy until redeployed via Ansible |
+| 30 | **`pdnsutil add-record` does NOT auto-increment the SOA serial** — second record added to zone without bumping serial means NS2 never re-transfers (both show same serial but different records) | Always run `pdnsutil increase-serial <zone>` after any `pdnsutil add-record` or direct DB change, then `pdns_control notify <zone>`. If NS2 still has stale data: `docker exec powerdns-slave pdns_control retrieve phoenix-host.net`. Also: `autosecondary` creates the zone with only the notifying IP as primary — run `pdnsutil change-secondary-zone-primary <zone> <public-ip> <netbird-ip>` on NS2 so NOTIFYs from either IP are accepted. Ansible `powerdns_slave` role now does this automatically. |
 
 ---
 

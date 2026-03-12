@@ -41,7 +41,7 @@
   register: powerdns_compose_result
 
 - name: Wait for PowerDNS to be ready
-  command: docker exec powerdns-slave pdns_control ping
+  command: docker exec powerdns-slave pdns_control uptime
   register: pdns_ping
   retries: 30
   delay: 2
@@ -52,6 +52,22 @@
   command: docker exec powerdns-slave pdns_control list-zones
   register: pdns_zones
   changed_when: false
+  ignore_errors: yes
+
+- name: Fix zone primaries — ensure both NS1 public and NetBird IPs are accepted
+  # Without this, NOTIFYs from NS1's NetBird IP (100.75.10.178) are rejected as
+  # "not a primary" because autosecondary only records the IP the first NOTIFY
+  # arrived from. We set both IPs so either path works after a reboot.
+  command: >
+    docker exec powerdns-slave pdnsutil change-secondary-zone-primary
+    {{ platform_domain }}
+    {{ hostvars['ns1']['ansible_host'] }}
+    {{ hostvars['ns1']['netbird_ip'] }}
+  when:
+    - pdns_zones.rc == 0
+    - platform_domain in pdns_zones.stdout
+    - hostvars['ns1']['netbird_ip'] is defined
+  changed_when: true
   ignore_errors: yes
 
 - name: Display PowerDNS deployment status
