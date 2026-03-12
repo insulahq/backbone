@@ -41,6 +41,9 @@ if [ "$REPMGR_ROLE" = 'primary' ]; then
 
     echo "host replication ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
     echo "host ${REPMGR_DB} ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
+    # Allow app connections from Docker bridge networks and NetBird mesh
+    echo "host all all 172.0.0.0/8 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+    echo "host all all 100.83.0.0/16 scram-sha-256" >> "$PGDATA/pg_hba.conf"
 
     pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
     createuser --superuser "$REPMGR_USER"

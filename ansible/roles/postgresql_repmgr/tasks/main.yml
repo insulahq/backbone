@@ -47,6 +47,20 @@
   until: pg_ready.rc == 0
   changed_when: false
 
+# Ensure pg_hba.conf allows connections from Docker bridge networks and NetBird mesh
+# This is set during initdb by the entrypoint-wrapper, but added here for idempotency
+# on existing deployments where the data volume was initialized before this rule existed
+- name: Ensure pg_hba.conf allows Docker bridge and NetBird mesh connections
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      bash -c "grep -q '172.0.0.0/8' /var/lib/postgresql/data/pg_hba.conf ||
+               (echo 'host all all 172.0.0.0/8 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
+                echo 'host all all 100.83.0.0/16 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
+                pg_ctl -D /var/lib/postgresql/data reload)"
+  when: postgresql_is_primary
+  changed_when: false
+
 # Create application databases on primary only (replicated to standby via streaming)
 - name: Create application user and database on primary
   community.docker.docker_container_exec:
