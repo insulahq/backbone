@@ -1,0 +1,54 @@
+---
+# PostgreSQL + repmgr Role — Main Tasks
+
+- name: Create PostgreSQL installation directory
+  file:
+    path: "{{ postgresql_install_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Determine if this node is the primary or standby
+  set_fact:
+    postgresql_is_primary: "{{ netbird_ip == postgresql_primary_netbird_ip }}"
+    postgresql_node_id: "{{ 1 if netbird_ip == postgresql_ns1_netbird_ip else 2 }}"
+
+- name: Show PostgreSQL node role
+  debug:
+    msg: "PostgreSQL role on {{ inventory_hostname }}: {{ 'PRIMARY' if postgresql_is_primary else 'STANDBY' }} (node {{ postgresql_node_id }})"
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ postgresql_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart postgresql
+
+- name: Start PostgreSQL stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ postgresql_install_dir }}"
+    pull: always
+    state: present
+
+- name: Wait for PostgreSQL to accept connections
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      pg_isready -U postgres -h localhost
+  register: pg_ready
+  retries: 30
+  delay: 3
+  until: pg_ready.rc == 0
+  changed_when: false
+
+- name: Wait extra time for standby to complete initial sync
+  pause:
+    seconds: 10
+  when: not postgresql_is_primary
+
+- name: Display PostgreSQL deployment status
+  debug:
+    msg:
+      - "PostgreSQL {{ postgresql_version }} deployed on {{ inventory_hostname }}"
+      - "Role: {{ 'PRIMARY (node ' + postgresql_node_id | string + ')' if postgresql_is_primary else 'STANDBY (node ' + postgresql_node_id | string + ')' }}"
+      - "Replication: streaming from {{ postgresql_primary_netbird_ip }} (ns1)"
+      - "Access: port {{ postgresql_port }} (protected by nftables to NetBird mesh only)"

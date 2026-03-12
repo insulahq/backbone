@@ -1,0 +1,44 @@
+---
+# PostgreSQL + repmgr Role — Default Variables
+# Deploys PostgreSQL 16 with repmgr for primary/standby HA.
+# Uses the Bitnami postgresql-repmgr image which bundles repmgr and handles
+# automatic primary detection and streaming replication setup.
+#
+# Primary:  ns1 (100.83.100.184) — determined by REPMGR_PRIMARY_HOST == this node's NetBird IP
+# Standby:  ns2 (100.83.42.33)  — replicates from ns1
+# Failover: repmgrd on ns2 auto-promotes if ns1 is unreachable
+# Rejoin:   repmgr node rejoin + pg_rewind when ns1 comes back online
+
+# Version
+postgresql_version: "16"
+postgresql_image: "bitnami/postgresql-repmgr:16"
+
+# Installation directory
+postgresql_install_dir: /opt/postgresql
+
+# Network — binds on 0.0.0.0:5432, protected by nftables to NetBird mesh only
+postgresql_port: 5432
+
+# Cluster identification
+postgresql_repmgr_cluster: "phoenix-host"
+
+# Primary server NetBird IP — ns1 is always the preferred primary
+postgresql_primary_netbird_ip: "100.83.100.184"  # ns1
+
+# Node network names (NetBird mesh IPs) — used by repmgr for cluster communication
+postgresql_ns1_netbird_ip: "100.83.100.184"
+postgresql_ns2_netbird_ip: "100.83.42.33"
+
+# Database credentials — set in group_vars/all.yml (not here)
+# postgresql_superuser_password: ""    # postgres superuser
+# postgresql_repmgr_password: ""       # repmgr replication user
+# postgresql_netbird_password: ""      # netbird app user
+
+# Application databases to create on primary
+postgresql_databases:
+  - name: netbird
+    user: netbird
+    password: "{{ postgresql_netbird_password }}"
+
+# Data directory inside container
+postgresql_data_dir: /bitnami/postgresql

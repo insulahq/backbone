@@ -25,8 +25,8 @@ server:
 
   reverseProxy:
     trustedHTTPProxies:
-      - "172.30.0.254/32"
+      - "172.31.0.254/32"
 
   store:
-    engine: "sqlite"
+    engine: "postgres"
     encryptionKey: "{{ netbird_datastore_encryption_key }}"

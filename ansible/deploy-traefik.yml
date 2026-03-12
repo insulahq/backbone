@@ -1,0 +1,13 @@
+---
+# Phoenix Host — Deploy Standalone Traefik
+# Deploys shared Traefik reverse proxy with traefik_public Docker network
+# Run BEFORE deploying netbird_management or any service that needs TLS termination
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
+#   ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit ns2
+
+- name: Deploy standalone Traefik reverse proxy
+  hosts: netbird_management
+  roles:
+    - traefik

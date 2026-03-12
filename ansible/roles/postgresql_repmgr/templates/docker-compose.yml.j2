@@ -1,0 +1,52 @@
+services:
+  postgresql:
+    image: {{ postgresql_image }}
+    container_name: postgresql
+    restart: unless-stopped
+    ports:
+      - '0.0.0.0:{{ postgresql_port }}:{{ postgresql_port }}'
+    volumes:
+      - postgresql_data:{{ postgresql_data_dir }}
+    environment:
+      # PostgreSQL superuser
+      POSTGRESQL_POSTGRES_PASSWORD: "{{ postgresql_superuser_password }}"
+
+      # Repmgr replication user
+      REPMGR_PASSWORD: "{{ postgresql_repmgr_password }}"
+
+      # Application user + databases created on primary
+{% if postgresql_is_primary %}
+      POSTGRESQL_USERNAME: "{{ postgresql_databases[0].user }}"
+      POSTGRESQL_PASSWORD: "{{ postgresql_databases[0].password }}"
+      POSTGRESQL_DATABASE: "{{ postgresql_databases[0].name }}"
+{% endif %}
+
+      # repmgr cluster configuration
+      REPMGR_PRIMARY_HOST: "{{ postgresql_primary_netbird_ip }}"
+      REPMGR_PRIMARY_PORT: "{{ postgresql_port }}"
+      REPMGR_PARTNER_NODES: "{{ postgresql_ns1_netbird_ip }}:{{ postgresql_port }},{{ postgresql_ns2_netbird_ip }}:{{ postgresql_port }}"
+      REPMGR_NODE_NAME: "{{ inventory_hostname }}"
+      REPMGR_NODE_NETWORK_NAME: "{{ netbird_ip }}"
+      REPMGR_PORT_NUMBER: "{{ postgresql_port }}"
+      REPMGR_LOG_LEVEL: "INFO"
+      REPMGR_RECONNECT_ATTEMPTS: "3"
+      REPMGR_RECONNECT_INTERVAL: "5"
+      # Enable automatic failover
+      REPMGR_FAILOVER: "automatic"
+      REPMGR_PROMOTE_COMMAND: "repmgr standby promote --log-to-file"
+      REPMGR_FOLLOW_COMMAND: "repmgr standby follow --log-to-file --upstream-node-id=%n"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "2"
+
+volumes:
+  postgresql_data:

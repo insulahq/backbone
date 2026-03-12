@@ -18,6 +18,17 @@
   roles:
     - powerdns_slave
 
+- name: Deploy standalone Traefik reverse proxy
+  hosts: netbird_management
+  roles:
+    - traefik
+
+- name: Deploy PostgreSQL primary/standby with repmgr
+  hosts: netbird_management
+  serial: 1
+  roles:
+    - postgresql_repmgr
+
 - name: Deploy NetBird management server
   hosts: netbird_management
   roles:
