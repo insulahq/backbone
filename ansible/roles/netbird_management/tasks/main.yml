@@ -1,166 +1,69 @@
 ---
 # NetBird Management Role — Main Tasks
-# Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
-# Uses SQLite + Litestream for bidirectional database replication
+# Deploys combined netbird-server (management + signal + relay + STUN)
+# New architecture from NetBird 0.66+: single container with config.yaml
 
-- name: Create NetBird installation directories
+- name: Create NetBird installation directory
   file:
-    path: "{{ item }}"
+    path: "{{ netbird_install_dir }}"
     state: directory
     mode: '0755'
-  loop:
-    - "{{ netbird_install_dir }}"
-    - "{{ netbird_install_dir }}/data"
-    - "{{ netbird_install_dir }}/litestream"
-    - "{{ netbird_install_dir }}/logs"
-    - "{{ netbird_install_dir }}/state"
-    - "{{ netbird_install_dir }}/coturn"
 
-- name: Determine if this is the primary host
+- name: Generate relay auth secret (once per play)
   set_fact:
-    is_primary_host: "{{ inventory_hostname == netbird_primary_host }}"
-
-- name: Generate NetBird setup key
-  set_fact:
-    netbird_setup_key: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
-  when: netbird_setup_key is not defined
+    netbird_relay_auth_secret: "{{ lookup('password', '/dev/null length=64 chars=hexdigits') }}"
+  when: netbird_relay_auth_secret is not defined
   run_once: true
   no_log: true
 
-- name: Generate Coturn secret
-  set_fact:
-    netbird_coturn_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  when: netbird_coturn_secret is not defined
-  run_once: true
-  no_log: true
-
-- name: Deploy Litestream configuration
-  template:
-    src: litestream.yml.j2
-    dest: "{{ netbird_install_dir }}/litestream.yml"
-    mode: '0644'
-  notify: restart netbird
-
-- name: Deploy docker-compose.yml for NetBird
+- name: Deploy docker-compose.yml
   template:
     src: docker-compose.yml.j2
     dest: "{{ netbird_install_dir }}/docker-compose.yml"
     mode: '0644'
   notify: restart netbird
 
-- name: Deploy NetBird management.json configuration
+- name: Deploy config.yaml (combined server configuration)
   template:
-    src: management.json.j2
-    dest: "{{ netbird_install_dir }}/management.json"
-    mode: '0644'
+    src: config.yaml.j2
+    dest: "{{ netbird_install_dir }}/config.yaml"
+    mode: '0600'
   notify: restart netbird
 
-- name: Deploy Traefik configuration (if enabled)
-  when: netbird_traefik_enabled
+- name: Deploy dashboard.env
   template:
-    src: traefik.yml.j2
-    dest: "{{ netbird_install_dir }}/traefik.yml"
-    mode: '0644'
-  notify: restart netbird
-
-- name: Deploy Traefik dynamic configuration
-  when: netbird_traefik_enabled
-  template:
-    src: traefik-dynamic.yml.j2
-    dest: "{{ netbird_install_dir }}/traefik-dynamic.yml"
-    mode: '0644'
+    src: dashboard.env.j2
+    dest: "{{ netbird_install_dir }}/dashboard.env"
+    mode: '0600'
   notify: restart netbird
 
 - name: Create acme.json for Let's Encrypt certificates
-  when: netbird_traefik_enabled
   file:
     path: "{{ netbird_install_dir }}/acme.json"
     state: touch
     mode: '0600'
+    modification_time: preserve
+    access_time: preserve
 
-- name: Deploy health monitor script
-  template:
-    src: netbird-health-monitor.sh.j2
-    dest: "{{ netbird_install_dir }}/netbird-health-monitor.sh"
-    mode: '0755'
+- name: Pull latest NetBird images
+  community.docker.docker_compose_v2:
+    project_src: "{{ netbird_install_dir }}"
+    pull: always
+    state: present
 
-- name: Deploy promotion script
-  template:
-    src: netbird-promote.sh.j2
-    dest: "{{ netbird_install_dir }}/netbird-promote.sh"
-    mode: '0755'
-
-- name: Deploy demotion script
-  template:
-    src: netbird-demote.sh.j2
-    dest: "{{ netbird_install_dir }}/netbird-demote.sh"
-    mode: '0755'
-
-- name: Deploy health monitor systemd service
-  template:
-    src: netbird-health-monitor.service.j2
-    dest: /etc/systemd/system/netbird-health-monitor.service
-    mode: '0644'
-  notify: reload systemd
-
-- name: Deploy initial state file
-  template:
-    src: state.json.j2
-    dest: "{{ netbird_state_file }}"
-    mode: '0644'
-    force: no  # Do not overwrite existing state
-
-- name: Check if SQLite database exists
-  stat:
-    path: "{{ netbird_sqlite_path }}"
-  register: sqlite_db_stat
-
-- name: Start NetBird services on primary (or both if no database exists)
-  when: is_primary_host or not sqlite_db_stat.stat.exists
-  block:
-    - name: Start NetBird services
-      community.docker.docker_compose_v2:
-        project_src: "{{ netbird_install_dir }}"
-        state: present
-      register: netbird_compose_result
-
-    - name: Wait for NetBird Management API to be ready
-      uri:
-        url: "http://localhost:{{ netbird_management_port }}/api/health"
-        status_code: 200
-      retries: 30
-      delay: 2
-      register: result
-      until: result.status == 200
-
-- name: Start Signal, Dashboard, Coturn (non-primary servers)
-  when: not is_primary_host
-  block:
-    - name: Start Signal, Dashboard, Coturn services only
-      community.docker.docker_compose_v2:
-        project_src: "{{ netbird_install_dir }}"
-        services:
-          - signal
-          - dashboard
-          - coturn
-          - traefik
-        state: present
-
-- name: Enable and start health monitor service
-  systemd:
-    name: netbird-health-monitor
-    enabled: yes
-    state: started
-    daemon_reload: yes
+- name: Wait for NetBird API to be ready
+  uri:
+    url: "https://{{ netbird_dashboard_domain }}/api/instance"
+    status_code: 200
+    validate_certs: no
+  retries: 30
+  delay: 3
+  register: result
+  until: result.status == 200
 
 - name: Display NetBird deployment status
   debug:
-    msg: 
-      - "NetBird Management deployed on {{ inventory_hostname }}"
-      - "Role: {{ 'Primary' if is_primary_host else 'Standby' }}"
-      - "Management API: http://localhost:{{ netbird_management_port }}"
+    msg:
+      - "NetBird deployed on {{ inventory_hostname }}"
       - "Dashboard: https://{{ netbird_dashboard_domain }}"
-      - "Signal: {{ netbird_signal_protocol }}://{{ inventory_hostname }}:{{ netbird_signal_port }}"
-      - "Database: SQLite + Litestream (bidirectional replication)"
-      - "Failover: {{ 'Enabled' if netbird_auto_failover else 'Disabled' }}"
-      - "Failback: {{ 'Enabled (' + netbird_failback_policy + ')' if netbird_auto_failback else 'Disabled' }}"
+      - "Setup required: {{ (result.json.setup_required | default(false)) }}"

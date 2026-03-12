@@ -3,12 +3,9 @@
 # Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
 # Uses SQLite + Litestream for bidirectional database replication
 
-# NetBird versions (0.62+ required for embedded IdP support)
-netbird_management_version: "latest"
-netbird_signal_version: "latest"
-netbird_dashboard_version: "latest"
-netbird_coturn_version: "4.6.2-alpine"
-netbird_litestream_version: "0.3.13"
+# NetBird versions — combined server architecture (0.66+)
+netbird_server_version: "latest"      # netbirdio/netbird-server (combined)
+netbird_dashboard_version: "latest"   # netbirdio/dashboard
 
 # Deployment directory
 netbird_install_dir: /opt/netbird
@@ -18,22 +15,11 @@ netbird_database: sqlite
 netbird_sqlite_path: "{{ netbird_install_dir }}/data/store.db"
 netbird_litestream_replica_path: "{{ netbird_install_dir }}/data/litestream"
 
-# NetBird Management API
-netbird_management_port: 33073
-netbird_management_grpc_port: 33071
-
-# NetBird Signal Server
-netbird_signal_port: 10000
-netbird_signal_protocol: https
+# NetBird combined server ports
+netbird_stun_port: 3478            # UDP — embedded STUN (public)
 
 # NetBird Dashboard (Web UI)
-netbird_dashboard_port: 8080
 netbird_dashboard_domain: "netbird.{{ platform_domain }}"
-
-# Coturn (TURN/STUN relay)
-netbird_coturn_min_port: 49152
-netbird_coturn_max_port: 65535
-netbird_coturn_external_ip: "{{ ansible_default_ipv4.address }}"
 
 # DNS configuration (for round-robin setup)
 netbird_setup_dns: true  # Create DNS records via PowerDNS API
@@ -66,6 +52,6 @@ netbird_standby_host: ns2         # Standby server
 netbird_state_file: "{{ netbird_install_dir }}/state/netbird-state.json"
 netbird_fencing: false            # STONITH/fencing disabled (no IPMI/power control)
 
-# Security: Encryption keys (generated if not provided)
-# These should be set in group_vars/vault for production
+# Security: Encryption keys and secrets (generate once, store in vault)
 netbird_datastore_encryption_key: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"
+netbird_relay_auth_secret: "{{ lookup('password', '/dev/null length=64 chars=hexdigits') }}"
