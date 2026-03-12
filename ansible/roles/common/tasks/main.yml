@@ -115,3 +115,18 @@
 - name: Display Docker version
   debug:
     msg: "Docker installed: {{ docker_version_output.stdout }}"
+
+# SSH hardening
+- name: Harden SSH configuration
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: 'sshd -t -f %s'
+  loop:
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin without-password' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+    - { regexp: '^#?AuthenticationMethods', line: 'AuthenticationMethods publickey' }
+  notify: restart sshd
