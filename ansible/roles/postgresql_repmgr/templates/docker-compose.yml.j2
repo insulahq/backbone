@@ -14,9 +14,9 @@ services:
     extra_hosts:
 {% if postgresql_is_primary %}
       - "ns1:127.0.0.1"
-      - "ns2:{{ postgresql_ns2_netbird_ip }}"
+      - "ns2:{{ hostvars['ns2']['netbird_ip'] }}"
 {% else %}
-      - "ns1:{{ postgresql_ns1_netbird_ip }}"
+      - "ns1:{{ hostvars['ns1']['netbird_ip'] }}"
       - "ns2:127.0.0.1"
 {% endif %}
     environment:

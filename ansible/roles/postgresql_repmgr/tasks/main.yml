@@ -9,8 +9,8 @@
 
 - name: Determine if this node is the primary or standby
   set_fact:
-    postgresql_is_primary: "{{ netbird_ip == postgresql_primary_netbird_ip }}"
-    postgresql_node_id: "{{ 1 if netbird_ip == postgresql_ns1_netbird_ip else 2 }}"
+    postgresql_is_primary: "{{ inventory_hostname == postgresql_primary_node }}"
+    postgresql_node_id: "{{ 1 if inventory_hostname == 'ns1' else 2 }}"
 
 - name: Show PostgreSQL node role
   debug:
@@ -56,7 +56,7 @@
     command: >
       bash -c "grep -q '172.0.0.0/8' /var/lib/postgresql/data/pg_hba.conf ||
                (echo 'host all all 172.0.0.0/8 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
-                echo 'host all all 100.83.0.0/16 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
+                 echo 'host all all 100.75.0.0/16 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
                 pg_ctl -D /var/lib/postgresql/data reload)"
   when: postgresql_is_primary
   changed_when: false

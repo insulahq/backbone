@@ -4,8 +4,8 @@
 # Uses sourcemation/postgres-repmgr image which bundles PostgreSQL + repmgr 5.5
 # and handles automatic primary detection and streaming replication setup.
 #
-# Primary:  ns1 (100.83.100.184) — node 1, REPMGR_ROLE=primary
-# Standby:  ns2 (100.83.42.33)  — node 2, REPMGR_ROLE=standby, clones from ns1
+# Primary:  ns1 — node 1, REPMGR_ROLE=primary
+# Standby:  ns2 — node 2, REPMGR_ROLE=standby, clones from ns1
 # Failover: repmgrd on ns2 auto-promotes if ns1 is unreachable
 # Rejoin:   repmgr node rejoin + pg_rewind when ns1 comes back online
 
@@ -21,12 +21,9 @@ postgresql_port: 5432
 # Cluster identification
 postgresql_repmgr_cluster: "phoenix-host"
 
-# Primary server NetBird IP — ns1 is always the preferred primary
-postgresql_primary_netbird_ip: "100.83.100.184"  # ns1
-
-# Node network names (NetBird mesh IPs) — used by repmgr for inter-node communication
-postgresql_ns1_netbird_ip: "100.83.100.184"
-postgresql_ns2_netbird_ip: "100.83.42.33"
+# Primary server — ns1 is always the preferred primary
+# Detection uses inventory_hostname, not IP (avoids breakage when NetBird IPs change on re-enrollment)
+postgresql_primary_node: "ns1"
 
 # repmgr cluster credentials — set in group_vars/all.yml
 # postgresql_superuser_password: ""    # postgres superuser (POSTGRES_PASSWORD)
