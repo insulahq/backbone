@@ -21,7 +21,7 @@ services:
     networks:
       - powerdns_internal
     healthcheck:
-      test: ["CMD-SHELL", "pdns_control ping || exit 1"]
+      test: ["CMD-SHELL", "pdns_control uptime > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

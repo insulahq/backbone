@@ -31,7 +31,10 @@
 
 ## 2. Current State
 
-**Status:** Full HA stack operational. NetBird mesh active (all 3 peers connected). PostgreSQL HA replicating (ns1 primary → ns2 standby). NetBird management running multi-host PostgreSQL DSN. ns2 added to DNS round-robin for netbird.phoenix-host.net. Ready for Management API + Admin Panel deployment.
+**Status:** Full HA stack operational and hardened. All post-reboot boot issues diagnosed and fixed in Ansible templates. Ready for Management API + Admin Panel deployment.
+
+**Post-reboot incident (2026-03-12) — resolved:**
+NS1 reboot exposed several circular boot dependencies that have now been fixed in the Ansible templates and are documented in §8 (gotchas 22–29). NS1 manual recovery steps: force-recreate pdns, patch netbird DSN to use `postgresql` hostname, force-recreate nginx, restart NS2 Traefik for cert renewal.
 
 **Server IPs (confirmed):**
 - ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein) — NetBird IP: `100.75.10.178`
@@ -383,6 +386,14 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 19 | postgresql_repmgr role must detect primary/standby by `inventory_hostname`, not by NetBird IP | Using IP-based detection breaks when IPs change on re-enrollment. Use `inventory_hostname == 'ns1'` |
 | 20 | PostgreSQL `postmaster.pid` left behind after unclean container restart causes startup loop | Remove stale PID: `docker run --rm -v postgresql_postgresql_data:/data alpine rm -f /data/postmaster.pid` |
 | 21 | PowerDNS postgres `POSTGRES_PASSWORD` env only takes effect on first volume init | If volume exists with old password, must `ALTER USER pdns WITH PASSWORD '...'` inside container to re-sync |
+| 22 | Docker port binding silently skipped when container restarts in partial network state | Container only on `internal: true` network loses port forwarding. Fix: `docker compose up -d --force-recreate <service>` to fully reconnect all networks |
+| 23 | **powerdns-auth port 53 DNAT rules missing after reboot** — crash-restart loop during startup (PG not ready) leaves container only on `powerdns_internal` network | Fix: `cd /opt/powerdns && docker compose up -d --force-recreate pdns`. The force-recreate connects container to both internal+external networks and restores DNAT rules |
+| 24 | **netbird-server circular boot dependency**: needs PostgreSQL via NetBird IPs, but WireGuard needs management server running first — deadlock on NS1 reboot | Fix: On NS1, connect `netbird-server` to `postgresql_default` Docker network and use `host=postgresql` in DSN. Template updated to do this automatically via `inventory_hostname == 'ns1'` condition |
+| 25 | **powerdns-nginx fails to bind `100.75.10.178:8081` on reboot** because NetBird WireGuard interface isn't up yet when Docker starts | Same circular dependency cascade. After fixing gotcha 24, WireGuard comes up, then restart nginx: `docker compose up -d --force-recreate nginx` |
+| 26 | **`allow-axfr-ips` uses only NetBird IP** — AXFR from NS2 fails when WireGuard is down (traffic comes from public IP `89.167.125.29`, not NetBird IP) | Fixed in master template: `powerdns_allow_axfr_ips` now includes both NetBird IP AND public IP of NS2 |
+| 27 | **NS2 `allow-notify-from` has only public IP** — NOTIFY from NS1's NetBird IP `100.75.10.178` refused | Fixed in slave template: `powerdns_allow_notify_from` now includes both public IP AND NetBird IP of NS1 |
+| 28 | **NS2 Traefik loses Let's Encrypt cert on restart** if PowerDNS API unreachable (DNS-01 challenge fails, falls back to self-signed) | After fixing PowerDNS API accessibility, restart NS2 Traefik: `docker restart traefik`. Cert auto-renews via DNS-01 in ~60-90s |
+| 29 | `pdns_control ping` is not a valid command in PowerDNS 4.9 — health check always fails, all pdns containers show `(unhealthy)` | Fixed in templates: use `pdns_control uptime > /dev/null 2>&1` instead. Existing live containers will show unhealthy until redeployed via Ansible |
 
 ---
 

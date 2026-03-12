@@ -44,7 +44,7 @@ services:
       - powerdns_internal
       - powerdns_external  # Needed for public DNS port binding
     healthcheck:
-      test: ["CMD-SHELL", "pdns_control ping || exit 1"]
+      test: ["CMD-SHELL", "pdns_control uptime > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -29,13 +29,16 @@ powerdns_dns_port: 53
 # DNSSEC
 powerdns_dnssec_enabled: yes
 
-# Zone replication (AXFR/NOTIFY) — NetBird mesh only
-# SECURITY: Use NetBird IPs (not public IPs) for encrypted zone replication
-# Fallback to public IPs for initial deployment, will be updated after NetBird deployment
+# Zone replication (AXFR/NOTIFY)
+# Include BOTH NetBird IP AND public IP for resilience.
+# When WireGuard is down (e.g. after reboot), AXFR/NOTIFY must still work over
+# the public internet so that zone transfers don't fail during recovery.
 powerdns_allow_axfr_ips:
   - "{{ hostvars['ns2']['netbird_ip'] | default(hostvars['ns2']['ansible_host']) }}"
+  - "{{ hostvars['ns2']['ansible_host'] }}"
 powerdns_also_notify:
   - "{{ hostvars['ns2']['netbird_ip'] | default(hostvars['ns2']['ansible_host']) }}"
+  - "{{ hostvars['ns2']['ansible_host'] }}"
 
 # PostgreSQL configuration
 powerdns_db_name: powerdns

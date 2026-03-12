@@ -32,8 +32,21 @@ services:
     networks:
       - netbird
       - traefik_public
+{% if inventory_hostname == 'ns1' %}
+      # On NS1 (PostgreSQL primary host): connect directly to postgresql container
+      # so the management server can start WITHOUT the WireGuard tunnel being up.
+      # This breaks the boot-time circular dependency:
+      #   netbird-server needs PG → PG needs WireGuard IP → WireGuard needs netbird-server
+      - postgresql_default
+{% endif %}
     environment:
+{% if inventory_hostname == 'ns1' %}
+      # NS1: use Docker container hostname for local PostgreSQL, then NetBird IP for NS2 standby.
+      # The 'postgresql' hostname resolves via Docker DNS on the shared postgresql_default network.
+      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'], 'host=postgresql') }}"
+{% else %}
       NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn }}"
+{% endif %}
     ports:
       - '{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
     volumes:
@@ -78,3 +91,7 @@ networks:
           gateway: 172.30.0.1
   traefik_public:
     external: true
+{% if inventory_hostname == 'ns1' %}
+  postgresql_default:
+    external: true
+{% endif %}

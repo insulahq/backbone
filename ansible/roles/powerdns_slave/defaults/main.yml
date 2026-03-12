@@ -20,10 +20,12 @@ powerdns_dns_port: 53
 # DNSSEC
 powerdns_dnssec_enabled: yes
 
-# Zone replication (AXFR/NOTIFY) — NetBird mesh preferred, fallback to public IPs
-# SECURITY: Will be reconfigured to use NetBird IPs after NetBird deployment
+# Zone replication (AXFR/NOTIFY)
+# Include BOTH NetBird IP AND public IP for resilience.
+# When NS1's WireGuard is down after reboot, NOTIFY arrives from public IP.
 powerdns_allow_notify_from:
   - "{{ hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host']) }}"
+  - "{{ hostvars['ns1']['ansible_host'] }}"
 
 # AXFR source — pull zones from ns1 (NetBird IP preferred)
 powerdns_primary_server: "{{ hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host']) }}"
