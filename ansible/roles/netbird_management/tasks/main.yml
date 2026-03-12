@@ -110,8 +110,13 @@
     mode: '0644'
     force: no  # Do not overwrite existing state
 
+- name: Check if SQLite database exists
+  stat:
+    path: "{{ netbird_sqlite_path }}"
+  register: sqlite_db_stat
+
 - name: Start NetBird services on primary (or both if no database exists)
-  when: is_primary_host or not (netbird_sqlite_path | ansible.builtin.stat).stat.exists
+  when: is_primary_host or not sqlite_db_stat.stat.exists
   block:
     - name: Start NetBird services
       community.docker.docker_compose_v2:

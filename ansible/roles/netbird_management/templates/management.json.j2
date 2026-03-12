@@ -2,14 +2,16 @@
   "Stuns": [
     {
       "Proto": "udp",
-      "URI": "stun:{{ ansible_default_ipv4.address }}:3478"
+      "URI": "stun:{{ ansible_default_ipv4.address }}:3478",
+      "Username": "",
+      "Password": null
     }
   ],
   "TURNConfig": {
     "Turns": [
       {
         "Proto": "udp",
-        "URI": "turn:{{ ansible_default_ipv4.address }}:{{ netbird_signal_port }}",
+        "URI": "turn:{{ ansible_default_ipv4.address }}:3478",
         "Username": "netbird",
         "Password": "{{ netbird_coturn_secret }}"
       }
@@ -19,19 +21,23 @@
     "TimeBasedCredentials": false
   },
   "Signal": {
-    "Proto": "{{ netbird_signal_protocol }}",
-    "URI": "{{ netbird_signal_url }}",
+    "Proto": "http",
+    "URI": "{{ ansible_default_ipv4.address }}:{{ netbird_signal_port }}",
     "Username": "",
-    "Password": ""
+    "Password": null
   },
-  "Datadir": "/var/lib/netbird",
-  "HttpConfig": {
-    "AuthIssuer": "https://{{ netbird_dashboard_domain }}",
-    "AuthAudience": "{{ netbird_dashboard_domain }}",
-    "AuthKeysLocation": "https://{{ netbird_dashboard_domain }}/.well-known/jwks.json"
+  "Datadir": "",
+  "DataStoreEncryptionKey": "{{ netbird_datastore_encryption_key }}",
+  "StoreConfig": {
+    "Engine": "sqlite"
   },
   "IdpManagerConfig": {
     "ManagerType": "none"
+  },
+  "EmbeddedIdP": {
+    "Enabled": true,
+    "Issuer": "https://{{ netbird_dashboard_domain }}/oauth2",
+    "DataDir": "/var/lib/netbird/idp"
   },
   "DeviceAuthorizationFlow": {
     "Provider": "hosted",

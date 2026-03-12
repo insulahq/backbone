@@ -3,9 +3,9 @@
 # Deploys NetBird Management + Signal + Relay in redundant configuration (ADR-021)
 # Uses SQLite + Litestream for bidirectional database replication
 
-# NetBird versions
-netbird_management_version: "0.28.0"
-netbird_signal_version: "0.28.0"
+# NetBird versions (0.62+ required for embedded IdP support)
+netbird_management_version: "latest"
+netbird_signal_version: "latest"
 netbird_dashboard_version: "latest"
 netbird_coturn_version: "4.6.2-alpine"
 netbird_litestream_version: "0.3.13"
@@ -65,3 +65,7 @@ netbird_standby_host: ns2         # Standby server
 # State management
 netbird_state_file: "{{ netbird_install_dir }}/state/netbird-state.json"
 netbird_fencing: false            # STONITH/fencing disabled (no IPMI/power control)
+
+# Security: Encryption keys (generated if not provided)
+# These should be set in group_vars/vault for production
+netbird_datastore_encryption_key: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"

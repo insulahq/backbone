@@ -1,28 +1,49 @@
----
-# NetBird Management — Docker Compose
-# Redundant deployment (ADR-021): Both ns1 and ns2 run this stack
-# SQLite + Litestream for bidirectional database replication
-
 version: '3.8'
 
+networks:
+  netbird:
+    driver: bridge
+{% if 'powerdns_master' in group_names or 'powerdns_slave' in group_names %}
+  powerdns_external:
+    external: true
+    name: powerdns_powerdns_external
+{% endif %}
+
 services:
-  # Litestream — Continuous SQLite replication
-  litestream:
-    image: litestream/litestream:{{ netbird_litestream_version }}
-    container_name: netbird-litestream
+  # Traefik reverse proxy (HTTPS termination + Let's Encrypt)
+  traefik:
+    image: traefik:v2.11
+    container_name: netbird-traefik
     restart: unless-stopped
-    command: replicate
+    command:
+      - "--api.insecure=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=pdns"
+      - "--certificatesresolvers.letsencrypt.acme.email={{ netbird_traefik_email }}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
-      - {{ netbird_install_dir }}/data:/var/lib/netbird
-      - {{ netbird_install_dir }}/litestream.yml:/etc/litestream.yml:ro
-      - {{ netbird_install_dir }}/litestream:/var/lib/netbird/litestream
-      - /root/.ssh:/root/.ssh:ro  # For SFTP replication to Storagebox
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - {{ netbird_install_dir }}/acme.json:/letsencrypt/acme.json
+      - {{ netbird_install_dir }}/traefik.yml:/etc/traefik/traefik.yml:ro
+      - {{ netbird_install_dir }}/traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    environment:
+      PDNS_API_URL: "{{ powerdns_api_url }}"
+      PDNS_API_KEY: "{{ powerdns_api_key }}"
     networks:
       - netbird
-    depends_on:
-      - management
+{% if 'powerdns_master' in group_names or 'powerdns_slave' in group_names %}
+      - powerdns_external
+{% endif %}
 
-  # NetBird Management Server
+  # NetBird Management (API, gRPC, embedded IdP)
+  # New architecture (0.66+): Management serves on port 80 internally
   management:
     image: netbirdio/management:{{ netbird_management_version }}
     container_name: netbird-management
@@ -30,50 +51,30 @@ services:
     environment:
       NETBIRD_STORE_ENGINE: sqlite
       NETBIRD_DATADIR: /var/lib/netbird
-      NETBIRD_MGMT_API_PORT: {{ netbird_management_port }}
-      NETBIRD_MGMT_GRPC_PORT: {{ netbird_management_grpc_port }}
       NETBIRD_DOMAIN: {{ netbird_dashboard_domain }}
-      NETBIRD_SIGNAL_PROTOCOL: {{ netbird_signal_protocol }}
-      NETBIRD_SIGNAL_ENDPOINT: {{ netbird_signal_url }}
       NETBIRD_TURN_ENABLED: "true"
       NETBIRD_TURN_HOST: {{ ansible_default_ipv4.address }}
-      NETBIRD_TURN_PORT: {{ netbird_signal_port }}
+      NETBIRD_TURN_PORT: 3478
       NETBIRD_TURN_SECRET: {{ netbird_coturn_secret }}
     volumes:
       - {{ netbird_install_dir }}/data:/var/lib/netbird
       - {{ netbird_install_dir }}/management.json:/etc/netbird/management.json:ro
     ports:
-      - "{{ netbird_management_port }}:{{ netbird_management_port }}"
-      - "{{ netbird_management_grpc_port }}:{{ netbird_management_grpc_port }}"
+      - "33073:33073"  # Backward compatibility gRPC port
     networks:
       - netbird
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.netbird-management.rule=Host(`{{ netbird_dashboard_domain }}`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.netbird-management.entrypoints=websecure"
-      - "traefik.http.routers.netbird-management.tls.certresolver=letsencrypt"
-      - "traefik.http.services.netbird-management.loadbalancer.server.port={{ netbird_management_port }}"
-
-  # NetBird Signal Server
-  signal:
-    image: netbirdio/signal:{{ netbird_signal_version }}
-    container_name: netbird-signal
-    restart: unless-stopped
-    environment:
-      NETBIRD_SIGNAL_PORT: {{ netbird_signal_port }}
-      NETBIRD_SIGNAL_PROTOCOL: {{ netbird_signal_protocol }}
-    ports:
-      - "{{ netbird_signal_port }}:{{ netbird_signal_port }}"
-    networks:
-      - netbird
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.netbird-signal.rule=Host(`{{ netbird_signal_url | regex_replace(':.*$', '') }}`)"
-      - "traefik.http.routers.netbird-signal.entrypoints=websecure"
-      - "traefik.http.routers.netbird-signal.tls.certresolver=letsencrypt"
-      - "traefik.http.services.netbird-signal.loadbalancer.server.port={{ netbird_signal_port }}"
+      # Route API and OAuth2 traffic to management (higher priority)
+      - "traefik.http.routers.netbird-api.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/management.ManagementService`))"
+      - "traefik.http.routers.netbird-api.entrypoints=websecure"
+      - "traefik.http.routers.netbird-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.netbird-api.priority=10"
+      - "traefik.http.services.netbird-api.loadbalancer.server.port=80"
+      - "traefik.http.services.netbird-api.loadbalancer.server.scheme=http"
 
   # NetBird Dashboard (Web UI)
+  # Separate container serving static dashboard files
   dashboard:
     image: netbirdio/dashboard:{{ netbird_dashboard_version }}
     container_name: netbird-dashboard
@@ -81,14 +82,36 @@ services:
     environment:
       NETBIRD_MGMT_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
       NETBIRD_MGMT_GRPC_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
+      AUTH_AUTHORITY: https://{{ netbird_dashboard_domain }}/oauth2
+      AUTH_CLIENT_ID: netbird-client
+      AUTH_AUDIENCE: {{ netbird_dashboard_domain }}
+      USE_AUTH0: "false"
+      AUTH_SUPPORTED_SCOPES: "openid profile email"
+      AUTH_REDIRECT_URI: "https://{{ netbird_dashboard_domain }}/nb-auth"
+      AUTH_SILENT_REDIRECT_URI: "https://{{ netbird_dashboard_domain }}/nb-silent-auth"
     networks:
       - netbird
     labels:
       - "traefik.enable=true"
+      # Route dashboard UI traffic (everything else, lower priority)
       - "traefik.http.routers.netbird-dashboard.rule=Host(`{{ netbird_dashboard_domain }}`)"
       - "traefik.http.routers.netbird-dashboard.entrypoints=websecure"
       - "traefik.http.routers.netbird-dashboard.tls.certresolver=letsencrypt"
-      - "traefik.http.services.netbird-dashboard.loadbalancer.server.port={{ netbird_dashboard_port }}"
+      - "traefik.http.routers.netbird-dashboard.priority=1"
+      - "traefik.http.services.netbird-dashboard.loadbalancer.server.port=80"
+
+  # NetBird Signal Server (direct access on port 10000, no Traefik)
+  signal:
+    image: netbirdio/signal:{{ netbird_signal_version }}
+    container_name: netbird-signal
+    restart: unless-stopped
+    environment:
+      NETBIRD_SIGNAL_PORT: {{ netbird_signal_port }}
+      NETBIRD_SIGNAL_PROTOCOL: http
+    ports:
+      - "{{ netbird_signal_port }}:{{ netbird_signal_port }}"
+    networks:
+      - netbird
 
   # Coturn (TURN/STUN relay for NAT traversal)
   coturn:
@@ -98,45 +121,28 @@ services:
     command:
       - -n
       - --log-file=stdout
-      - --external-ip={{ netbird_coturn_external_ip }}
+      - --external-ip={{ ansible_default_ipv4.address }}
       - --listening-port={{ netbird_signal_port }}
       - --min-port={{ netbird_coturn_min_port }}
       - --max-port={{ netbird_coturn_max_port }}
-      - --realm={{ netbird_dashboard_domain }}
-      - --use-auth-secret
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=netbird:{{ netbird_coturn_secret }}
       - --static-auth-secret={{ netbird_coturn_secret }}
+      - --realm={{ netbird_dashboard_domain }}
     network_mode: host
     volumes:
       - {{ netbird_install_dir }}/coturn:/var/lib/coturn
 
-{% if netbird_traefik_enabled %}
-  # Traefik (reverse proxy for HTTPS)
-  traefik:
-    image: traefik:v2.11
-    container_name: netbird-traefik
+  # Litestream (SQLite database replication)
+  litestream:
+    image: litestream/litestream:{{ netbird_litestream_version }}
+    container_name: netbird-litestream
     restart: unless-stopped
-{% if netbird_traefik_acme_challenge == 'dns-01' %}
-    environment:
-      PDNS_API_URL: "{{ powerdns_api_url }}"
-      PDNS_API_KEY: "{{ powerdns_api_key }}"
-{% endif %}
-    ports:
-      - "80:80"
-      - "443:443"
+    command: replicate
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - {{ netbird_install_dir }}/traefik.yml:/etc/traefik/traefik.yml:ro
-      - {{ netbird_install_dir }}/traefik-dynamic.yml:/etc/traefik/traefik-dynamic.yml:ro
-      - {{ netbird_install_dir }}/acme.json:/acme.json
+      - {{ netbird_install_dir }}/data:/var/lib/netbird
+      - {{ netbird_install_dir }}/litestream:/var/lib/litestream
+      - {{ netbird_install_dir }}/litestream.yml:/etc/litestream.yml:ro
     networks:
       - netbird
-{% endif %}
-
-networks:
-  netbird:
-    driver: bridge
-
-volumes:
-  netbird_data:
-  litestream_data:
-  coturn_data:
