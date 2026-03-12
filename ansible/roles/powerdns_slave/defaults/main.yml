@@ -13,9 +13,14 @@ powerdns_install_dir: /opt/powerdns
 powerdns_primary: no
 powerdns_secondary: yes
 powerdns_autosecondary: yes  # Auto-create zones on first NOTIFY
-powerdns_api_enabled: no      # No API on secondary
-powerdns_webserver_enabled: no
+powerdns_api_enabled: yes     # API enabled — proxied via nginx on NetBird IP only
+powerdns_webserver_enabled: yes
+powerdns_webserver_port: 8081  # Internal port (Docker only, never exposed publicly)
 powerdns_dns_port: 53
+
+# Nginx proxy — exposes API on NetBird interface only (mirrors NS1 pattern)
+powerdns_nginx_api_port: 8081
+powerdns_bind_interface: "{{ netbird_ip | default('127.0.0.1') }}"  # NS2 NetBird IP
 
 # DNSSEC
 powerdns_dnssec_enabled: yes

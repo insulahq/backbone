@@ -39,11 +39,19 @@ axfr-fetch-timeout={{ powerdns_axfr_fetch_timeout }}
 secondary-check-signature-freshness=yes
 
 ####################
-# API & Web Server (Disabled on Secondary)
+# API & Web Server (proxied via nginx on NetBird IP)
 ####################
 
-api=no
-webserver=no
+# API is enabled so the Management API can delete zones on NS2.
+# The webserver binds to 0.0.0.0 inside Docker but is NEVER exposed publicly —
+# nginx proxies it on {{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}
+# (NetBird IP only). Public internet cannot reach this port.
+api={{ 'yes' if powerdns_api_enabled else 'no' }}
+api-key={{ powerdns_api_key }}
+webserver={{ 'yes' if powerdns_webserver_enabled else 'no' }}
+webserver-address=0.0.0.0
+webserver-port={{ powerdns_webserver_port }}
+webserver-allow-from=0.0.0.0/0
 
 ####################
 # Database Backend (SQLite)

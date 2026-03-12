@@ -59,6 +59,7 @@ The previous IPs (`100.83.x.x`) are no longer valid. All configs now use `100.75
 | NetBird v0.66.4 Management (PostgreSQL multi-host DSN, all peers enrolled) | ✅ DONE | ns1, ns2 |
 | NetBird peer mesh (all 3 peers connected, round-robin DNS) | ✅ DONE | ns1, ns2, admin1 |
 | PowerDNS nginx API (bound to 100.75.10.178:8081) | ✅ DONE | ns1 |
+| PowerDNS nginx API (bound to 100.75.120.47:8081) | ✅ DONE | ns2 |
 | Restic backup to Hetzner Storagebox | ✅ DONE | all |
 | k3s v1.34.5+k3s1 single-node cluster | ✅ DONE | admin1 |
 | Management API (Fastify + MariaDB) | ❌ TODO | admin1 (k3s) |
@@ -75,6 +76,9 @@ The previous IPs (`100.83.x.x`) are no longer valid. All configs now use `100.75
 - ✅ `ansible/roles/netbird_peer/` — NetBird peer client
 - ✅ `ansible/roles/backup/` — Restic backup to Hetzner Storagebox
 - ✅ `ansible/roles/k3s/` — k3s single-node cluster
+
+**NS2 PowerDNS API enabled (2026-03-13):**
+NS2 now has PowerDNS API exposed on `100.75.120.47:8081` via nginx proxy (NetBird only), mirroring NS1. Required for Management API to delete zones on NS2 when clients are removed. Public IP `89.167.125.29:8081` confirmed unreachable.
 
 **Architecture / config (current):**
 - NetBird PostgreSQL backend: multi-host DSN `host=100.75.10.178,100.75.120.47 port=5432 ... target_session_attrs=read-write`
