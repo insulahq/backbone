@@ -16,6 +16,16 @@ primary={{ 'yes' if powerdns_primary else 'no' }}
 secondary={{ 'yes' if powerdns_secondary else 'no' }}
 
 ####################
+# Zone Defaults
+####################
+
+# Default SOA content for new zones created via the API.
+# Without this, PowerDNS uses 'a.misconfigured.dns.server.invalid' as primary NS.
+# Format: <primary-ns> <hostmaster-email> <serial> <refresh> <retry> <expire> <minimum-ttl>
+# Serial 0 triggers INCEPTION-INCREMENT on first edit when soa_edit_api is set.
+default-soa-content=ns1.{{ platform_domain }}. hostmaster.{{ platform_domain }}. 0 10800 3600 604800 3600
+
+####################
 # Zone Replication (AXFR/NOTIFY)
 ####################
 

@@ -54,6 +54,30 @@
   changed_when: false
   ignore_errors: yes
 
+- name: Ensure NS1 public IP is registered as autoprimary
+  # autosecondary uses the autoprimaries table to decide which IPs may trigger
+  # automatic zone creation on first NOTIFY.  Must include NS1's public IP.
+  command: >
+    docker exec powerdns-slave pdnsutil add-autoprimary
+    {{ hostvars['ns1']['ansible_host'] }}
+    ns1.{{ platform_domain }}
+    default
+  register: autoprimary_public
+  changed_when: "'already exists' not in autoprimary_public.stderr"
+  failed_when: false
+
+- name: Ensure NS1 NetBird IP is registered as autoprimary
+  # Also register NS1's NetBird IP so NOTIFYs via the mesh trigger autosecondary.
+  command: >
+    docker exec powerdns-slave pdnsutil add-autoprimary
+    {{ hostvars['ns1']['netbird_ip'] }}
+    ns1.{{ platform_domain }}
+    default
+  register: autoprimary_netbird
+  when: hostvars['ns1']['netbird_ip'] is defined
+  changed_when: "'already exists' not in autoprimary_netbird.stderr"
+  failed_when: false
+
 - name: Fix zone primaries — ensure both NS1 public and NetBird IPs are accepted
   # Without this, NOTIFYs from NS1's NetBird IP (100.75.10.178) are rejected as
   # "not a primary" because autosecondary only records the IP the first NOTIFY
