@@ -83,8 +83,8 @@ services:
       NETBIRD_MGMT_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
       NETBIRD_MGMT_GRPC_API_ENDPOINT: https://{{ netbird_dashboard_domain }}
       AUTH_AUTHORITY: https://{{ netbird_dashboard_domain }}/oauth2
-      AUTH_CLIENT_ID: netbird-client
-      AUTH_AUDIENCE: {{ netbird_dashboard_domain }}
+      AUTH_CLIENT_ID: netbird-dashboard
+      AUTH_AUDIENCE: netbird-dashboard
       USE_AUTH0: "false"
       AUTH_SUPPORTED_SCOPES: "openid profile email"
       AUTH_REDIRECT_URI: "https://{{ netbird_dashboard_domain }}/nb-auth"
