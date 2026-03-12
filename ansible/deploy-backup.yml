@@ -1,0 +1,15 @@
+---
+# Deploy Restic backup to Hetzner Storagebox on all servers
+# Usage: ansible-playbook -i inventory/hosts.yml deploy-backup.yml
+#
+# BEFORE RUNNING:
+#   1. Set restic_password in ansible/group_vars/all.yml
+#   2. Run with --tags generate_keys first to get SSH public keys
+#   3. Add the displayed public keys to Storagebox via Hetzner Robot:
+#      https://robot.hetzner.com → Storage Box → SSH keys
+#   4. Run without tags to complete deployment
+
+- name: Deploy backup configuration
+  hosts: backup_targets
+  roles:
+    - backup

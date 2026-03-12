@@ -3,7 +3,9 @@
 # Deploys k3s Kubernetes on admin and platform servers
 
 # k3s version
-k3s_version: "v1.29.2+k3s1"  # Stable release
+# Use channel "stable" to always get the latest stable release
+# Pin k3s_version to a specific version (e.g. "v1.32.2+k3s1") if reproducibility is needed
+k3s_version: ""  # Empty = use channel
 k3s_channel: stable
 
 # Installation method
@@ -27,10 +29,10 @@ k3s_service_cidr: "10.43.0.0/16"  # Service network
 k3s_cluster_dns: "10.43.0.10"     # CoreDNS IP
 
 # Disable unnecessary components for platform workloads
+# Note: local-storage kept enabled for Phase 1 (Longhorn deployed in Phase 2+)
 k3s_disable_components:
-  - traefik      # We'll deploy our own ingress controller
-  - servicelb    # Use MetalLB instead
-  - local-storage  # Use Longhorn for persistent storage
+  - traefik      # We'll deploy our own ingress controller (nginx or Traefik with our config)
+  - servicelb    # Use MetalLB instead (Phase 2+); NodePort used for Phase 1
 
 # Enable necessary components
 k3s_enable_components:
@@ -48,10 +50,11 @@ k3s_node_name: "{{ inventory_hostname }}"
 k3s_node_ip: "{{ ansible_default_ipv4.address }}"
 
 # Kubelet configuration
+# Note: k3s kubelet-arg format uses flag=value without leading '--'
 k3s_kubelet_args:
-  - "--max-pods=250"
-  - "--kube-reserved=cpu=500m,memory=1Gi"
-  - "--system-reserved=cpu=500m,memory=1Gi"
+  - "max-pods=250"
+  - "kube-reserved=cpu=200m,memory=512Mi"
+  - "system-reserved=cpu=200m,memory=512Mi"
 
 # Security
 k3s_secrets_encryption: true

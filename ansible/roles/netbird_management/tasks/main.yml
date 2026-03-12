@@ -61,6 +61,39 @@
   register: result
   until: result.status == 200
 
+- name: Configure internal peer DNS domain (requires netbird_admin_pat)
+  when:
+    - netbird_admin_pat is defined
+    - netbird_admin_pat != 'REPLACE_WITH_YOUR_PAT'
+    - not (result.json.setup_required | default(false))
+  block:
+    - name: Fetch NetBird account ID
+      uri:
+        url: "https://{{ netbird_dashboard_domain }}/api/accounts"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbird_admin_pat }}"
+        status_code: 200
+      register: nb_accounts
+
+    - name: Set peer DNS domain to {{ netbird_peer_dns_domain }}
+      uri:
+        url: "https://{{ netbird_dashboard_domain }}/api/accounts/{{ nb_accounts.json[0].id }}"
+        method: PUT
+        headers:
+          Authorization: "Token {{ netbird_admin_pat }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          settings: "{{ nb_accounts.json[0].settings | combine({'dns_domain': netbird_peer_dns_domain}) }}"
+        status_code: 200
+      register: nb_account_update
+      no_log: true
+
+    - name: Confirm DNS domain configured
+      debug:
+        msg: "NetBird peer DNS domain set to: {{ nb_account_update.json.settings.dns_domain }}"
+
 - name: Display NetBird deployment status
   debug:
     msg:

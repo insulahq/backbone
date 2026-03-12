@@ -14,7 +14,7 @@ PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ restic_cache_dir }} /var/log/restic
+ReadWritePaths={{ restic_config_dir }} {{ restic_cache_dir }} /var/log/restic
 
 # Timeout (4 hours max)
 TimeoutStartSec=14400

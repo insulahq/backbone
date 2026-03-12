@@ -73,27 +73,44 @@
     mode: '0600'
   no_log: true
 
-- name: Verify SSH key exists
-  stat:
-    path: "{{ restic_ssh_key_path }}"
-  register: ssh_key_stat
-  failed_when: not ssh_key_stat.stat.exists
+- name: Ensure .ssh directory exists
+  file:
+    path: /root/.ssh
+    state: directory
+    mode: '0700'
+
+- name: Deploy Storagebox SSH private key from control machine
+  copy:
+    src: "{{ restic_ssh_key_src }}"
+    dest: "{{ restic_ssh_key_path }}"
+    mode: '0600'
+  no_log: true
 
 - name: Create SSH config for Storagebox
   copy:
     content: |
       Host {{ backup_storagebox_host }}
         IdentityFile {{ restic_ssh_key_path }}
-        StrictHostKeyChecking accept-new
+        StrictHostKeyChecking yes
         UserKnownHostsFile /root/.ssh/known_hosts
     dest: /root/.ssh/config
     mode: '0600'
 
-- name: Test Storagebox SSH connection
-  command: "ssh -o ConnectTimeout=10 {{ backup_storagebox_user }}@{{ backup_storagebox_host }} echo OK"
-  register: ssh_test
+- name: Scan and trust Storagebox host keys (restic-specific known_hosts)
+  # Restic bypasses system SSH config (due to NetBird ProxyCommand interception).
+  # Seed a dedicated known_hosts file in restic config dir used by the backup script.
+  shell: |
+    ssh-keyscan -H {{ backup_storagebox_host }} 2>/dev/null | grep -v "^#" > {{ restic_config_dir }}/known_hosts.tmp
+    mv {{ restic_config_dir }}/known_hosts.tmp {{ restic_config_dir }}/known_hosts
+    chmod 600 {{ restic_config_dir }}/known_hosts
+  changed_when: true
+
+- name: Test Storagebox SFTP connection
+  # Hetzner Storagebox only supports SFTP, not shell commands
+  shell: "echo quit | sftp -o ConnectTimeout=10 -i {{ restic_ssh_key_path }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }}"
+  register: sftp_test
   changed_when: false
-  failed_when: ssh_test.rc != 0
+  failed_when: sftp_test.rc != 0
   retries: 3
   delay: 5
 

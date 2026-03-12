@@ -29,109 +29,82 @@
 
 ---
 
-## 2. Current State (Fresh Deployment Start)
+## 2. Current State
 
-**Status:** PowerDNS Primary + Secondary deployed with working zone replication. Next: Deploy NetBird Management.
-
-**Last commits:**
-```
-21b540d fix(ansible): add external network to PowerDNS auth for public DNS access
-9c14abe fix(ansible): remove invalid PowerDNS 4.9 settings and add NetBird IP fallbacks
-b4000f6 fix(ansible): resolve PowerDNS PostgreSQL schema and docker networking issues
-ed8e7c9 fix(ansible): update common role and ansible.cfg for Debian 13 compatibility
-```
-
-**What has been preserved:**
-- ✅ Management API source code (`backend/src/`)
-- ✅ Admin panel source code placeholders (`frontend/admin-panel/`, `frontend/client-panel/`)
-- ✅ Complete project documentation (`docs/`)
-- ✅ Configuration templates (`.env.example`, `package.json`, `tsconfig.json`)
-
-**What has been removed:**
-- ❌ All Ansible roles and playbooks
-- ❌ All infrastructure configuration (k8s, helm, terraform, ops, scripts)
-- ❌ Docker files and build configurations
-- ❌ node_modules and build artifacts
-- ❌ Catalog images and migration service scaffolds
-
-**Servers:** ns1, ns2, and admin1 will be **re-imaged**. Fresh infrastructure deployment required.
+**Status:** All Phase 1 infrastructure deployed. k3s v1.34.5 running on admin1. Backups working on all servers. Next: Deploy NetBird management on ns2 + Litestream replication.
 
 **Server IPs (confirmed):**
-- ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein)
-- ns2.phoenix-host.net: `89.167.125.29` (Hetzner Helsinki)
-- admin1.phoenix-host.net: `46.224.122.58` (Hetzner)
+- ns1.phoenix-host.net: `23.88.111.142` (Hetzner Falkenstein) — NetBird IP: `100.83.100.184`
+- ns2.phoenix-host.net: `89.167.125.29` (Hetzner Helsinki) — NetBird IP: `100.83.42.33`
+- admin1.phoenix-host.net: `46.224.122.58` (Hetzner) — NetBird IP: `100.83.156.131`
 
-**Architecture Confirmed (2026-03-11):**
-- ✅ OS: Debian 13 (trixie) — Official stable
-- ✅ DNS: PowerDNS 4.9 (not BIND) — Aligned with ADR-016
-- ✅ NetBird: Fresh deployment, **redundant** (both ns1 and ns2) — Aligned with ADR-021
-- ✅ NetBird failover: DNS round-robin (now) with floating IP preparation (future)
-- ✅ Firewall: Simple nftables only (NO advanced pre/post-routing)
-- ✅ SSH: Break-glass access (stays open on all servers)
-- ✅ Ansible: `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
+**Deployed infrastructure:**
+| Component | Status | Server(s) |
+|-----------|--------|-----------|
+| OS hardening (Debian 13, nftables, fail2ban, Docker) | ✅ DONE | all |
+| PowerDNS 4.9.13 Primary + PostgreSQL | ✅ DONE | ns1 |
+| PowerDNS 4.9.13 Secondary + SQLite | ✅ DONE | ns2 |
+| NetBird v0.66.4 Management + Signal + Relay | ✅ DONE | ns1 only |
+| NetBird peer (all servers in mesh) | ✅ DONE | ns1, ns2, admin1 |
+| Restic backup to Hetzner Storagebox | ✅ DONE | all (first backup taken 2026-03-12) |
+| k3s v1.34.5+k3s1 single-node cluster | ✅ DONE | admin1 |
+| NetBird Management on ns2 + Litestream | ❌ TODO | ns2 |
+| Management API (Fastify + MariaDB) | ❌ TODO | admin1 (k3s) |
+| Admin Panel (React/Vite/shadcn) | ❌ TODO | admin1 (k3s) |
+| Client Panel | ❌ TODO | admin1 (k3s) |
 
-**Ansible infrastructure created:**
-- ✅ `ansible/ansible.cfg`, `ansible/site.yml`
-- ✅ `ansible/inventory/hosts.yml` — Server inventory
-- ✅ `ansible/group_vars/all.yml` — Global variables
+**Ansible roles:**
 - ✅ `ansible/roles/common/` — OS hardening, simple nftables, Docker CE, fail2ban
-- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream, DNS-01 ACME)
-- ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
-- ✅ `ansible/roles/powerdns_master/` — PowerDNS Primary + PostgreSQL + PowerDNS-Admin (Docker internal networks)
-- ✅ `ansible/roles/powerdns_slave/` — PowerDNS Secondary + SQLite (NetBird mesh replication)
-- ✅ `ansible/roles/backup/` — Restic backup to Hetzner Storagebox (daily, encrypted)
-- ✅ `ansible/roles/k3s/` — k3s Kubernetes for admin1 and platform servers
+- ✅ `ansible/roles/powerdns_master/` — PowerDNS Primary + PostgreSQL
+- ✅ `ansible/roles/powerdns_slave/` — PowerDNS Secondary + SQLite
+- ✅ `ansible/roles/netbird_management/` — NetBird v0.66.4 combined server
+- ✅ `ansible/roles/netbird_peer/` — NetBird peer client
+- ✅ `ansible/roles/backup/` — Restic backup to Hetzner Storagebox
+- ✅ `ansible/roles/k3s/` — k3s single-node cluster
 
-**All Phase 1 infrastructure roles complete.** Ready for user confirmation and deployment.
+**k3s cluster details (admin1):**
+- Version: v1.34.5+k3s1
+- Node IP: `46.224.122.58`
+- Kubeconfig local: `/etc/rancher/k3s/k3s.yaml`
+- Kubeconfig remote: `/etc/rancher/k3s/k3s-remote.yaml`
+- Disabled: traefik, servicelb (local-path-provisioner kept for Phase 1)
+- Secrets encryption: enabled
+- kubectl alias: `k3s kubectl` (via `/etc/profile.d/k3s.sh`)
 
 ---
 
 ## 3. Immediate Next Task — START HERE
 
-**Infrastructure Architecture Confirmed — Ready to Deploy**
+**Infrastructure mostly deployed. Next: NetBird on ns2 + Litestream, then Management API.**
 
-The infrastructure architecture has been confirmed by the user and documented in `docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md`.
+### Next Steps (in order)
 
-**Architecture Summary:**
+1. **Deploy NetBird Management on ns2 + Litestream replication** ← START HERE
+   - Deploy `netbird_management` role to ns2
+   - Configure Litestream replication of NetBird SQLite DB: ns1 ↔ ns2
+   - Add ns2 IP (`89.167.125.29`) back to `netbird.phoenix-host.net` DNS (round-robin)
+   - Verify both ns1 and ns2 serve NetBird correctly
 
-**Servers:**
-- **ns1** (`23.88.111.142`): PowerDNS Primary + NetBird Management/Signal/Relay (primary, Docker Compose)
-- **ns2** (`89.167.125.29`): PowerDNS Secondary + NetBird Management/Signal/Relay (standby, Docker Compose)
-- **admin1** (`46.224.122.58`): k3s cluster + Management API + Admin/Client Panels + Phase 1 workloads
+2. **Deploy Management API on admin1 (k3s)**
+   - MariaDB deployment on k3s
+   - Fastify API deployment (from `backend/`)
+   - Configure environment variables, secrets via k3s secrets
+   - Verify `POST /api/v1/auth/token` and `GET /api/v1/admin/status`
 
-**Key Decisions (Confirmed 2026-03-11):**
-- ✅ **DNS Server:** PowerDNS 4.9 (not BIND) — REST API, database-backed, aligned with ADR-016
-- ✅ **OS:** Debian 13 (trixie) — Official Debian stable
-- ✅ **Deployment:** Ansible roles (rebuilt from scratch, aligned with Phase 1 roadmap)
-- ✅ **Firewall:** Simple nftables rules only — **NO advanced pre/post-routing** (lesson from previous deployment: complex NAT rules broke ns1 access after NetBird changes)
-- ✅ **VPN:** Fresh NetBird mesh (new management server on ns1)
-- ✅ **SSH:** Break-glass access (SSH stays open on all servers for emergency access)
-- ✅ **Backup:** Restic → Hetzner Storagebox `u335448-sub9@u335448.your-storagebox.de`
-- ✅ **Ansible:** `ansible_user=root`, `ansible_ssh_private_key_file=~/phoenix-host.key`
+3. **Deploy Admin Panel on admin1 (k3s)**
+   - Build React/Vite/shadcn/ui app (from `frontend/admin-panel/`)
+   - See `docs/08-admin-panel-mockups/` for UI reference
 
-**Ansible Infrastructure Created:**
-- ✅ `ansible/site.yml` — Main playbook
-- ✅ `ansible/inventory/hosts.yml` — Server inventory with IPs and groups (ns1 + ns2 both in `netbird_management`)
-- ✅ `ansible/group_vars/all.yml` — Global variables (NetBird redundancy, DNS round-robin config)
-- ✅ `ansible/roles/common/` — OS hardening, simple nftables firewall, Docker CE, fail2ban
-- ✅ `ansible/roles/netbird_management/` — NetBird Management + Signal + Relay (SQLite + Litestream, automatic failover/failback)
-- ✅ `ansible/roles/netbird_peer/` — NetBird peer client for mesh connectivity
+### How to run Ansible
 
-**Next Deployment Steps:**
-1. Deploy `common` role to all servers (OS hardening + Docker + simple firewall)
-2. Create and deploy `powerdns_master` role (ns1 + PostgreSQL) **— MUST BE FIRST**
-3. Create and deploy `powerdns_slave` role (ns2 + SQLite)
-4. Verify DNS replication (< 5 seconds propagation)
-5. Configure DNS records for NetBird (dual A records for `netbird.phoenix-host.net`)
-6. Deploy `netbird_management` role (ns1 + ns2, redundant deployment with SQLite + Litestream, DNS-01 ACME challenge)
-7. Deploy `netbird_peer` role (admin1, workstation)
-8. Verify NetBird mesh connectivity
-9. Create and deploy `backup` role (Restic to Storagebox, includes NetBird SQLite database via Litestream)
-10. Create and deploy `k3s` role (admin1 single-node cluster)
-
-**CRITICAL:** PowerDNS must be deployed before NetBird because NetBird's Traefik uses DNS-01 ACME challenge for SSL certificates (required for round-robin DNS compatibility). Traefik needs PowerDNS API access to create/delete ACME challenge TXT records.
-
-**See:** `ansible/README.md` for deployment instructions.
+```bash
+cd /config/hosting-platform/ansible
+ansible-playbook -i inventory/hosts.yml deploy-k3s.yml          # k3s only
+ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # backup only
+ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
+ansible-playbook -i inventory/hosts.yml site.yml                 # Everything
+```
 
 ---
 
@@ -383,6 +356,9 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 5 | Restic `--group-by "host"` causes snapshot conflicts | Must use `--group-by "host,paths"` for multiple backup jobs on same host |
 | 6 | Ansible must run from `ansible/` subdirectory | `ansible.cfg` is in that directory; running from repo root fails |
 | 7 | **Advanced nftables pre/post-routing rules broke ns1 access** | **DO NOT use complex DNAT, SNAT, or custom NAT chains. Keep firewall rules simple. Let Docker and NetBird manage their own NAT. See `FRESH_INFRASTRUCTURE_PLAN.md` §Firewall for simple baseline.** |
+| 8 | k3s fails with `protect-kernel-defaults: true` if kernel sysctl not set | k3s role sets `vm.overcommit_memory=1`, `kernel.panic=10`, `kernel.panic_on_oops=1` via `/etc/sysctl.d/99-k3s.conf` before starting k3s |
+| 9 | NetBird SSH config intercepts ALL SSH connections (not just NetBird peers) | Restic backup script uses `-F /dev/null` in SFTP args to bypass `/etc/ssh/ssh_config.d/99-netbird.conf` |
+| 10 | Restic repos on Storagebox corrupted by runs with wrong password | Must wipe ALL files (including data/ subdirs) before re-init. Use `wipe-restic-repos.py` pattern with SFTP batch -rm/-rmdir commands |
 
 ---
 

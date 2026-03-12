@@ -9,6 +9,13 @@ export RESTIC_REPOSITORY="{{ restic_repository }}"
 export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
 export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
 
+# SFTP options: bypass system SSH config to avoid NetBird ProxyCommand interception.
+# NetBird installs a global Match exec rule that intercepts ALL SSH connections.
+# We use -F /dev/null to skip SSH config and specify all options explicitly.
+# Using a bash array ensures the multi-word sftp.args value is passed as a single argument.
+SFTP_ARGS="-F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }}"
+RESTIC_OPTS=("-o" "sftp.args=${SFTP_ARGS}")
+
 # Logging
 LOG_FILE="/var/log/restic/backup-{{ inventory_hostname }}.log"
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -38,9 +45,9 @@ log "Running pre-backup hook"
 {% endif %}
 
 # Check if repository exists, initialize if not
-if ! restic snapshots > /dev/null 2>&1; then
+if ! restic "${RESTIC_OPTS[@]}" snapshots > /dev/null 2>&1; then
     log "Repository not found, initializing"
-    restic init || {
+    restic "${RESTIC_OPTS[@]}" init || {
         error "Failed to initialize repository"
         exit 1
     }
@@ -49,7 +56,7 @@ fi
 # Create backup
 log "Creating backup snapshot"
 {% if restic_backup_paths | length > 0 %}
-restic backup \
+restic "${RESTIC_OPTS[@]}" backup \
 {% for path in restic_backup_paths %}
     "{{ path }}" \
 {% endfor %}
@@ -76,7 +83,7 @@ log "No backup paths configured for {{ inventory_hostname }}"
 
 # Forget old snapshots according to retention policy
 log "Applying retention policy"
-restic forget \
+restic "${RESTIC_OPTS[@]}" forget \
     --host "{{ inventory_hostname }}" \
     --keep-daily {{ restic_keep_daily }} \
     --keep-weekly {{ restic_keep_weekly }} \
@@ -88,7 +95,7 @@ restic forget \
 # Verify repository integrity (weekly only)
 if [ "$(date +%u)" -eq 7 ]; then
     log "Running weekly repository check"
-    restic check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"
+    restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"
 fi
 
 # Post-backup hook
@@ -100,8 +107,8 @@ log "Running post-backup hook"
 {% endif %}
 
 # Get backup statistics
-SNAPSHOT_COUNT=$(restic snapshots --host "{{ inventory_hostname }}" --json | jq length)
-REPO_SIZE=$(restic stats --host "{{ inventory_hostname }}" --json | jq -r '.total_size')
+SNAPSHOT_COUNT=$(restic "${RESTIC_OPTS[@]}" snapshots --host "{{ inventory_hostname }}" --json | jq length)
+REPO_SIZE=$(restic "${RESTIC_OPTS[@]}" stats --host "{{ inventory_hostname }}" --json | jq -r '.total_size')
 
 log "Backup completed successfully"
 log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"

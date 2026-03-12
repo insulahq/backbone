@@ -28,12 +28,12 @@
   roles:
     - netbird_peer
 
-# - name: Deploy backup configuration
-#   hosts: backup_targets
-#   roles:
-#     - backup
+- name: Deploy backup configuration
+  hosts: backup_targets
+  roles:
+    - backup
 
-# - name: Deploy k3s cluster
-#   hosts: k8s_servers
-#   roles:
-#     - k3s
+- name: Deploy k3s cluster
+  hosts: k8s_servers
+  roles:
+    - k3s

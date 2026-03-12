@@ -24,6 +24,10 @@ netbird_dashboard_domain: "netbird.{{ platform_domain }}"
 # DNS configuration (for round-robin setup)
 netbird_setup_dns: true  # Create DNS records via PowerDNS API
 
+# Internal peer DNS domain — peers are named <hostname>.<netbird_peer_dns_domain>
+# Set via management API after first-user setup (requires netbird_admin_pat)
+netbird_peer_dns_domain: "netbird.internal"
+
 # Traefik reverse proxy (for HTTPS endpoints)
 netbird_traefik_enabled: true
 netbird_traefik_email: "admin@{{ platform_domain }}"

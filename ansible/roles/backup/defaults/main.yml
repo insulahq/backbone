@@ -15,7 +15,10 @@ restic_repository: "sftp:{{ backup_storagebox_user }}@{{ backup_storagebox_host 
 # backup_storagebox_path: /backups
 
 # SSH key for Storagebox access
-restic_ssh_key_path: /root/.ssh/phoenix-host.key
+# The private key is copied from the control machine to each server.
+# Stored in restic config dir (not /root/.ssh) so the hardened systemd service can read it.
+restic_ssh_key_src: "~/phoenix-host.key"      # path on control machine
+restic_ssh_key_path: /etc/restic/phoenix-host.key  # deployed path on servers
 
 # Restic repository password (for encryption)
 # restic_password: <set in vault or group_vars>
@@ -30,8 +33,9 @@ restic_keep_weekly: 4
 restic_keep_monthly: 12
 restic_keep_yearly: 2
 
-# Backup paths per server role
-restic_backup_paths: []  # Defined per server in host_vars or group_vars
+# Backup paths per server — resolved from group_vars using inventory_hostname
+# e.g. ns1_backup_paths, ns2_backup_paths, admin1_backup_paths in group_vars/all.yml
+restic_backup_paths: "{{ lookup('vars', inventory_hostname + '_backup_paths', default=[]) }}"
 
 # Common backup exclusions
 restic_exclude_patterns:
