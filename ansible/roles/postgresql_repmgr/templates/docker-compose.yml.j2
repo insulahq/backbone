@@ -8,17 +8,14 @@ services:
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
-    # Each node maps its own short hostname to 127.0.0.1 so repmgr self-registration
-    # uses localhost (avoids Docker hairpin NAT issue). The peer's hostname maps to
-    # the real NetBird IP for cross-node streaming replication.
+    # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
+    # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
+    # Peer hostname → real NetBird IP: WAL streaming replication + cross-wire repmgrd
+    # monitoring use this to reach the other node.
+    # Written role-agnostically so either ns1 or ns2 can be primary after a failover.
     extra_hosts:
-{% if postgresql_is_primary %}
-      - "ns1:127.0.0.1"
-      - "ns2:{{ hostvars['ns2']['netbird_ip'] }}"
-{% else %}
-      - "ns1:{{ hostvars['ns1']['netbird_ip'] }}"
-      - "ns2:127.0.0.1"
-{% endif %}
+      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] }}"
+      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] }}"
     environment:
       # PostgreSQL superuser credentials (used by initdb on first run)
       POSTGRES_USER: "postgres"
@@ -35,7 +32,7 @@ services:
 
       # Standby only: primary hostname to clone from (resolves to NetBird IP via extra_hosts)
 {% if not postgresql_is_primary %}
-      REPMGR_UPSTREAM_NAME: "ns1"
+      REPMGR_UPSTREAM_NAME: "{{ postgresql_primary_node }}"
 {% endif %}
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]

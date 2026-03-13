@@ -23,7 +23,7 @@ postgresql_repmgr_cluster: "phoenix-host"
 
 # Primary server — ns1 is always the preferred primary
 # Detection uses inventory_hostname, not IP (avoids breakage when NetBird IPs change on re-enrollment)
-postgresql_primary_node: "ns1"
+postgresql_primary_node: "ns2"
 
 # repmgr cluster credentials — set in group_vars/all.yml
 # postgresql_superuser_password: ""    # postgres superuser (POSTGRES_PASSWORD)

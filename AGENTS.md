@@ -33,6 +33,12 @@
 
 **Status:** Full HA stack operational and hardened. repmgrd auto-failover now functional (reconnect_attempts=6/reconnect_interval=10/promote_delay=10; stale file cleanup on startup). NS2 netbird-server DSN reversed to prefer local PostgreSQL. Ready for Management API + Admin Panel deployment.
 
+**PostgreSQL primary/standby swapped (2026-03-13):**
+NS1 went down; repmgrd detected failure and attempted auto-promote but the promote_command failed at the connection transition (gotcha 40). Manual promotion of NS2 succeeded. NS1 rejoined as standby under NS2. Current roles: **NS2=primary (node 2), NS1=standby (node 1)**. `postgresql_primary_node` updated to `ns2` in Ansible defaults. Extra_hosts template made role-agnostic (either node can be primary after failover).
+
+**idp.db sync automated (2026-03-13):**
+NS2's Dex credential store (`idp.db`) was empty — dashboard login failed with "Invalid Email Address or password". Fixed by copying NS1's `idp.db` to NS2. Ansible `netbird_management` role now syncs `idp.db` NS1→NS2 on every deploy so this never recurs.
+
 **Post-reboot incident (2026-03-12) — resolved:**
 NS1 reboot exposed several circular boot dependencies that have now been fixed in the Ansible templates and are documented in §8 (gotchas 22–29). NS1 manual recovery steps: force-recreate pdns, patch netbird DSN to use `postgresql` hostname, force-recreate nginx, restart NS2 Traefik for cert renewal.
 
@@ -82,6 +88,7 @@ NS2 now has PowerDNS API exposed on `100.75.120.47:8081` via nginx proxy (NetBir
 
 **Architecture / config (current):**
 - NetBird PostgreSQL backend: multi-host DSN `host=100.75.10.178,100.75.120.47 port=5432 ... target_session_attrs=read-write` (NS1-first for NS1; NS2-first for NS2 — see gotcha 38)
+- **Current PostgreSQL roles: NS2=primary (node 2), NS1=standby (node 1)** — swapped after NS1 failure on 2026-03-13
 - NetBird setup key: reusable, no expiry (`ansible-reusable` key in dashboard), stored in `group_vars/all.yml`
 - Traefik: shared `traefik_public` network (172.31.0.0/24), Traefik fixed IP 172.31.0.254
 - PowerDNS nginx API: `100.75.10.178:8081` (ns1 NetBird IP), `100.75.120.47:8081` (ns2 NetBird IP)
