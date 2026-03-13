@@ -1,8 +1,0 @@
----
-# Phoenix Host — Deploy k3s on admin1
-# Run: ansible-playbook -i inventory/hosts.yml deploy-k3s.yml
-
-- name: Deploy k3s single-node cluster on admin1
-  hosts: k8s_servers
-  roles:
-    - k3s

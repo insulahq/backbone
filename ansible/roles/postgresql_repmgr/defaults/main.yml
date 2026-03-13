@@ -1,40 +1,38 @@
 ---
-# PostgreSQL + repmgr Role — Default Variables
-# Deploys PostgreSQL with repmgr for primary/standby HA.
-# Uses sourcemation/postgres-repmgr image which bundles PostgreSQL + repmgr 5.5
-# and handles automatic primary detection and streaming replication setup.
+# PostgreSQL + repmgr Role -- Default Variables
+# Deploys PostgreSQL 18 with repmgr 5.5 for primary/standby streaming replication.
+# Uses sourcemation/postgres-repmgr image (only available as latest, bundles PG18).
 #
-# Primary:  ns1 — node 1, REPMGR_ROLE=primary
-# Standby:  ns2 — node 2, REPMGR_ROLE=standby, clones from ns1
-# Failover: repmgrd on ns2 auto-promotes if ns1 is unreachable
-# Rejoin:   repmgr node rejoin + pg_rewind when ns1 comes back online
+# Primary node is configurable via postgresql_primary_node.
+# The other node is automatically configured as standby.
+# repmgrd handles auto-failover with 60s debounce (6 attempts x 10s interval).
 
-# Image — sourcemation/postgres-repmgr (only available with latest/PG18)
+# Image
 postgresql_image: "sourcemation/postgres-repmgr:latest"
 
 # Installation directory
 postgresql_install_dir: /opt/postgresql
 
-# Network — binds on 0.0.0.0:5432, traffic reaches us only via NetBird mesh
+# Network
 postgresql_port: 5432
 
 # Cluster identification
 postgresql_repmgr_cluster: "phoenix-host"
 
-# Primary server — ns1 is always the preferred primary
-# Detection uses inventory_hostname, not IP (avoids breakage when NetBird IPs change on re-enrollment)
+# Primary server -- determines which node runs as primary vs standby
+# Detection uses inventory_hostname (avoids breakage when NetBird IPs change)
 postgresql_primary_node: "ns2"
 
-# repmgr cluster credentials — set in group_vars/all.yml
-# postgresql_superuser_password: ""    # postgres superuser (POSTGRES_PASSWORD)
-# postgresql_repmgr_password: ""       # repmgr replication user
-# postgresql_netbird_password: ""      # netbird app user
+# Credentials -- set in group_vars/all.yml
+# postgresql_superuser_password: ""
+# postgresql_repmgr_password: ""
+# postgresql_netbird_password: ""
 
-# Application databases to create on primary after initial setup
+# Application databases to create on primary
 postgresql_databases:
   - name: netbird
     user: netbird
     password: "{{ postgresql_netbird_password }}"
 
-# Data directory inside container (standard postgres path)
+# Data directory inside container
 postgresql_data_dir: /var/lib/postgresql/data

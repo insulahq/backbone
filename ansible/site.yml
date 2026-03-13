@@ -1,13 +1,23 @@
 ---
-# Phoenix Host — Main Ansible Playbook
-# Aligned with docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md
+# Phoenix Host -- Infrastructure Playbook
+# Deploys fully redundant DNS + VPN mesh infrastructure on ns1 + ns2
+#
+# Bootstrap order matters:
+#   1. common    -- OS hardening, Docker, nftables, fail2ban
+#   2. powerdns  -- DNS servers (primary on ns1, secondary on ns2)
+#   3. traefik   -- Reverse proxy with DNS-01 ACME (needs PowerDNS API)
+#   4. postgresql -- HA database for NetBird (needs NetBird IPs after first deploy)
+#   5. netbird   -- VPN mesh management (needs Traefik + PostgreSQL)
+#   6. peers     -- Enroll all servers in the VPN mesh
+#   7. backup    -- Restic backup to Hetzner Storagebox
+#
+# IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 
 - name: Apply common configuration to all servers
   hosts: all
   roles:
     - common
 
-# Phase 1 deployment order
 - name: Deploy PowerDNS primary
   hosts: powerdns_primary
   roles:
@@ -18,7 +28,7 @@
   roles:
     - powerdns_slave
 
-- name: Deploy standalone Traefik reverse proxy
+- name: Deploy Traefik reverse proxy
   hosts: netbird_management
   roles:
     - traefik
@@ -43,8 +53,3 @@
   hosts: backup_targets
   roles:
     - backup
-
-- name: Deploy k3s cluster
-  hosts: k8s_servers
-  roles:
-    - k3s

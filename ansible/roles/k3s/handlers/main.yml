@@ -1,8 +1,0 @@
----
-# k3s Role — Handlers
-
-- name: restart k3s
-  systemd:
-    name: "k3s{% if not k3s_server_enabled %}-agent{% endif %}"
-    state: restarted
-    daemon_reload: yes
