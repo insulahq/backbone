@@ -6,7 +6,7 @@
 
 ## 1. What This Is
 
-Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Phoenix Host). The hosting platform itself (API, panels, k3s workloads) is built separately on top of this infrastructure.
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Phoenix Host). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
 
 **Scope:** Two Debian 13 servers running PowerDNS, Traefik, PostgreSQL HA, NetBird VPN mesh, and Restic backups.
 
