@@ -2,7 +2,7 @@
 
 > **Status:** COMPLETE — Ready for deployment  
 > **Architecture:** Secondary DNS server with NetBird mesh replication  
-> **Alignment:** `docs/01-core/DISPERSED_DNS_ARCHITECTURE.md`
+> **Alignment:** `docs/DISPERSED_DNS_ARCHITECTURE.md`
 
 ## Overview
 

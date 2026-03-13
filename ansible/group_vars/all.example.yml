@@ -1,0 +1,109 @@
+---
+# Phoenix Host -- Global Variables
+# Copy to all.yml and fill in your values.
+# This file is gitignored -- never commit the real all.yml.
+
+# ============================================================================
+# OS & System
+# ============================================================================
+os_version: debian_13_trixie
+timezone: UTC
+
+# ============================================================================
+# SSH & Security
+# ============================================================================
+ssh_port: 22
+ssh_break_glass_enabled: true
+fail2ban_enabled: true
+nftables_policy: simple
+nftables_allow_ssh: true
+
+# ============================================================================
+# Docker
+# ============================================================================
+docker_version: latest
+docker_compose_version: "2.24.5"
+docker_install_source: official_repo
+
+# ============================================================================
+# NetBird VPN Mesh
+# ============================================================================
+netbird_management_url: "https://netbird.example.com"
+
+# Personal Access Token -- create via dashboard after initial setup
+netbird_admin_pat: "<YOUR_NETBIRD_PAT>"
+
+# Reusable setup key -- create via dashboard (type: reusable, usage_limit: 0)
+netbird_setup_key: "<YOUR_SETUP_KEY>"
+
+netbird_deployment: fresh
+netbird_redundancy: dns_round_robin
+
+# Secrets -- generate once, must match on both nodes
+netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
+netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
+
+# DNS records for NetBird (round-robin on both servers)
+netbird_dns_records:
+  - name: netbird.example.com
+    type: A
+    ips:
+      - <NS1_PUBLIC_IP>
+      - <NS2_PUBLIC_IP>
+
+# ============================================================================
+# Traefik Reverse Proxy
+# ============================================================================
+netbird_pdns_primary_ip: "<NS1_NETBIRD_IP>"
+
+# ============================================================================
+# PowerDNS
+# ============================================================================
+powerdns_version: "4.9"
+powerdns_docker_image: "powerdns/pdns-auth-49:latest"
+powerdns_api_port: 8081
+powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
+powerdns_api_url: "http://<NS1_NETBIRD_IP>:8081"
+
+# PowerDNS uses its own PostgreSQL 16 container
+postgres_version: "16-alpine"
+postgres_docker_image: "postgres:16-alpine"
+
+# ============================================================================
+# PostgreSQL HA (for NetBird)
+# ============================================================================
+# Which node is the initial primary (ns1 or ns2)
+# postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
+
+postgresql_superuser_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
+
+# Multi-host DSN for NetBird
+netbird_postgres_dsn: "host=<NS1_NETBIRD_IP>,<NS2_NETBIRD_IP> port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
+
+# ============================================================================
+# Backup (Restic to Hetzner Storagebox)
+# ============================================================================
+backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
+backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
+backup_storagebox_path: /backups
+restic_password: "<GENERATE: openssl rand -base64 22>"
+
+# Backup paths per server
+ns1_backup_paths:
+  - /opt/powerdns
+  - /opt/netbird
+  - /etc/restic
+  - /root/.ssh
+
+ns2_backup_paths:
+  - /opt/powerdns
+  - /opt/netbird
+  - /etc/restic
+  - /root/.ssh
+
+# ============================================================================
+# Domain
+# ============================================================================
+platform_domain: example.com

@@ -1,169 +1,121 @@
-# Phoenix Host — Kubernetes Web Hosting Platform
+# Phoenix Host Infrastructure
 
-> **Domain:** phoenix-host.net  
-> **Status:** Phase 1 Complete, Phase 2 — Active development  
-> **Infrastructure:** k3s on Hetzner (Falkenstein + Helsinki)  
-> **Team:** 1-2 engineers
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner Cloud.
 
-A self-managed Kubernetes hosting platform replacing Plesk with automated client provisioning, multi-tenant isolation, and a full admin + client control panel.
+## What It Deploys
 
----
+Two Debian 13 servers (`ns1` and `ns2`) with:
+
+| Component | Description |
+|-----------|-------------|
+| **PowerDNS 4.9** | Primary (ns1, PostgreSQL backend) + Secondary (ns2, SQLite, AXFR replication) |
+| **Traefik 3.6** | Reverse proxy with automatic TLS via DNS-01 ACME |
+| **PostgreSQL 18** | Streaming replication with repmgr 5.5 and auto-failover |
+| **NetBird** | WireGuard VPN mesh with management, signal, and relay on both nodes |
+| **Restic** | Incremental encrypted backups to Hetzner Storagebox |
+| **OS hardening** | nftables firewall, fail2ban, Docker CE, SSH hardening |
+
+## Architecture
+
+```
+                    Internet
+                       │
+            ┌──────────┴──────────┐
+            │                     │
+   ┌────────┴────────┐  ┌────────┴────────┐
+   │      ns1        │  │      ns2        │
+   │  Falkenstein    │  │   Helsinki      │
+   ├─────────────────┤  ├─────────────────┤
+   │ PowerDNS (pri)  │  │ PowerDNS (sec)  │
+   │ Traefik         │  │ Traefik         │
+   │ PostgreSQL (sb) │  │ PostgreSQL (pri)│
+   │ NetBird mgmt    │  │ NetBird mgmt    │
+   │ Restic backup   │  │ Restic backup   │
+   └────────┬────────┘  └────────┬────────┘
+            │    WireGuard mesh   │
+            └─────────────────────┘
+```
+
+## Prerequisites
+
+- Ansible 2.15+
+- Two Hetzner VPS running Debian 13
+- SSH root access to both servers
+- Hetzner Storagebox for backups
+
+## Quick Start
+
+```bash
+# 1. Configure inventory
+cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
+# Edit with your server IPs and hostnames
+
+# 2. Configure variables
+cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
+# Edit with your domain, API keys, and passwords
+
+# 3. Deploy everything
+cd ansible
+ansible-playbook -i inventory/hosts.yml site.yml
+```
+
+> **Note:** Fresh deployment requires multiple runs due to circular dependencies
+> between components. See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for the
+> step-by-step bootstrap procedure.
+
+## Targeted Deployments
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-traefik.yml       # Traefik only
+ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml    # PostgreSQL HA
+ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
+ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + NetBird
+ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
+```
 
 ## Repository Structure
 
 ```
-hosting-platform/
-├── docs/                     # All planning and architecture documentation
-│   ├── 01-core/              # Platform architecture, hosting plans, DNS
-│   ├── 02-operations/        # Admin panel, backup, monitoring, sizing
-│   ├── 03-security/          # Security architecture, compliance, TLS
-│   ├── 04-deployment/        # CI/CD, roadmap, GitHub setup, API spec
-│   ├── 05-advanced/          # Geographic sharding, DR, multi-cloud
-│   ├── 06-features/          # Feature specs (WAF, FTP, webmail, cron, etc.)
-│   └── 07-reference/         # Tech stack, migration plan, FAQ, glossary
-│
-├── ansible/                  # Server configuration (DNS + NetBird VPS)
-│   ├── inventory/            # Host inventory (ns1, ns2)
-│   ├── roles/
-│   │   ├── common/           # Base OS hardening for all servers
-│   │   ├── powerdns-master/  # PowerDNS authoritative master (ns1, Falkenstein)
-│   │   ├── powerdns-slave/   # PowerDNS AXFR slave (ns2, Helsinki)
-│   │   ├── netbird-management/ # NetBird management server (ns1)
-│   │   └── netbird-peer/     # NetBird peer enrollment (ns2 + future nodes)
-│   ├── group_vars/           # Shared variables per group
-│   ├── host_vars/            # Per-host variable overrides
-│   ├── site.yml              # Master playbook
-│   ├── dns.yml               # DNS-only playbook
-│   └── netbird.yml           # NetBird-only playbook
-│
-├── terraform/
-│   ├── dns-netbird/          # Future: reprovisioning DNS/NetBird VPS
-│   └── k8s-cluster/          # Hetzner k3s cluster provisioning (Phase 1)
-│
-├── backend/                  # Node.js + Fastify management API
-├── frontend/
-│   ├── admin-panel/          # React 18 + Vite + shadcn/ui
-│   └── client-panel/         # React 18 + Vite + shadcn/ui
-├── migration-service/        # Plesk / cPanel / Virtualmin extractor
-├── k8s/                      # Kubernetes manifests (Kustomize)
-│   ├── base/
-│   └── overlays/
-│       ├── staging/
-│       └── production/
-├── helm/                     # Helm charts for platform services
-├── catalog-images/           # Dockerfiles for workload catalog images
-├── ops/                      # Operational shell scripts
-│   ├── dns/                  # DNS management scripts
-│   └── netbird/              # NetBird peer management scripts
-└── scripts/                  # One-off utility scripts
+ansible/
+├── site.yml                 # Main playbook (all roles in dependency order)
+├── deploy-*.yml             # Targeted playbooks for individual components
+├── inventory/hosts.yml      # Server inventory (gitignored)
+├── group_vars/all.yml       # Global variables (gitignored)
+├── host_vars/               # Per-host overrides
+└── roles/
+    ├── common/              # OS hardening, nftables, Docker, fail2ban
+    ├── powerdns_master/     # PowerDNS primary + PostgreSQL backend
+    ├── powerdns_slave/      # PowerDNS secondary + SQLite
+    ├── traefik/             # Traefik v3.6, DNS-01 ACME
+    ├── postgresql_repmgr/   # PostgreSQL 18 + repmgr 5.5 HA
+    ├── netbird_management/  # NetBird combined server
+    ├── netbird_peer/        # NetBird peer enrollment
+    └── backup/              # Restic to Hetzner Storagebox
+docs/                        # Architecture and operations documentation
 ```
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Ansible 2.15+
-- Two Hetzner VPS already provisioned (Debian 12):
-  - `ns1.phoenix-host.net` — Falkenstein (primary DNS + NetBird management)
-  - `ns2.phoenix-host.net` — Helsinki (secondary DNS + NetBird peer)
-- SSH access to both servers
-
-### 1. Configure inventory
-
-```bash
-cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
-# Edit hosts.yml with your actual server IPs
-```
-
-### 2. Configure variables
-
-```bash
-cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
-# Edit all.yml — set domain, IPs, AXFR allow-list
-```
-
-### 3. Deploy DNS + NetBird
-
-```bash
-# Full setup (both servers)
-cd ansible
-ansible-playbook -i inventory/hosts.yml site.yml
-
-# DNS only
-ansible-playbook -i inventory/hosts.yml dns.yml
-
-# NetBird only
-ansible-playbook -i inventory/hosts.yml netbird.yml
-```
-
----
-
-## Project Phases
-
-| Phase | Name | Status |
-|-------|------|--------|
-| **1** | Infrastructure Foundation (DNS + NetBird) | **COMPLETE** |
-| **2** | Platform Development (API, panels, hosting features, worker nodes) | **NEXT** |
-| **3** | Multi-Region & Full HA (geographic scaling, enterprise HA) | Future |
-
-See [`docs/PHASING_STRATEGY.md`](docs/PHASING_STRATEGY.md) for the definitive phasing reference.
-
----
-
-## Infrastructure Overview
-
-| Server | Location | Role | IP |
-|--------|----------|------|----|
-| `ns1.phoenix-host.net` | Hetzner Falkenstein | PowerDNS primary + NetBird management + PostgreSQL standby | 23.88.111.142 |
-| `ns2.phoenix-host.net` | Hetzner Helsinki | PowerDNS secondary + NetBird management + PostgreSQL primary | 89.167.125.29 |
-| `admin1.phoenix-host.net` | Hetzner | k3s cluster (Management API + Panels) | 46.224.122.58 |
-
----
 
 ## Documentation
 
-Start with [`docs/QUICKSTART.md`](docs/QUICKSTART.md) for a full documentation index.
+| Document | Description |
+|----------|-------------|
+| [AGENTS.md](AGENTS.md) | Agent/developer handoff with gotchas and instructions |
+| [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) | Step-by-step fresh deployment procedure |
+| [docs/DISPERSED_DNS_ARCHITECTURE.md](docs/DISPERSED_DNS_ARCHITECTURE.md) | PowerDNS primary/secondary architecture |
+| [docs/NETBIRD_CERTIFICATE_BOOTSTRAP.md](docs/NETBIRD_CERTIFICATE_BOOTSTRAP.md) | NetBird TLS certificate bootstrap procedure |
+| [docs/NETBIRD_SIGNAL_CORRECTION.md](docs/NETBIRD_SIGNAL_CORRECTION.md) | NetBird signal server configuration fix |
 
-Key documents:
-- **Phasing Strategy:** [`docs/PHASING_STRATEGY.md`](docs/PHASING_STRATEGY.md)
-- **Project Roadmap:** [`docs/04-deployment/PROJECT_ROADMAP.md`](docs/04-deployment/PROJECT_ROADMAP.md)
-- **Architecture:** [`docs/01-core/PLATFORM_ARCHITECTURE.md`](docs/01-core/PLATFORM_ARCHITECTURE.md)
-- **DNS Architecture:** [`docs/01-core/DISPERSED_DNS_ARCHITECTURE.md`](docs/01-core/DISPERSED_DNS_ARCHITECTURE.md)
-- **Admin Panel Spec:** [`docs/02-operations/ADMIN_PANEL_REQUIREMENTS.md`](docs/02-operations/ADMIN_PANEL_REQUIREMENTS.md)
+## Configuration
 
----
+Sensitive configuration is kept in gitignored files. Example files are provided:
 
-## Tech Stack
+| File | Purpose |
+|------|---------|
+| `ansible/inventory/hosts.example.yml` | Server IPs, hostnames, NetBird IPs |
+| `ansible/group_vars/all.example.yml` | Domain, API keys, passwords, backup config |
 
-| Layer | Technology |
-|-------|-----------|
-| Kubernetes | k3s on Debian 13 |
-| Ingress | NGINX Ingress Controller |
-| DNS | PowerDNS (self-hosted) |
-| Admin VPN | NetBird (WireGuard mesh) |
-| Storage | Longhorn |
-| Databases | Percona MariaDB + CloudNativePG |
-| Cache | Redis |
-| Auth | Dex (OIDC) |
-| Secrets | Sealed Secrets |
-| Monitoring | Prometheus + Grafana + Loki |
-| Email | Docker-Mailserver + Roundcube |
-| Registry | Harbor + Trivy |
-| GitOps | Flux v2 |
-| IaC | Terraform + Ansible |
+Copy these to their non-example counterparts and fill in your values.
 
-See [`docs/07-reference/TECH_STACK_SUMMARY.md`](docs/07-reference/TECH_STACK_SUMMARY.md) for the full list.
+## License
 
----
-
-## Hosting Plans
-
-| Plan | Price | Model |
-|------|-------|-------|
-| Starter | $5.99/mo | Shared pod (20-50 clients/pod) |
-| Business | $19.99/mo | Dedicated pod |
-| Premium | $49.99/mo | Dedicated pod + resources + WAF |
-
-See [`docs/01-core/HOSTING_PLANS.md`](docs/01-core/HOSTING_PLANS.md) for full details.
+Private repository. All rights reserved.

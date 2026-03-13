@@ -24,7 +24,7 @@ This role deploys Restic backup to Hetzner Storagebox with:
 ## Architecture
 
 ```
-Each server (ns1, ns2, admin1):
+Each server (ns1, ns2):
 ├── Restic binary (/usr/local/bin/restic)
 ├── Backup script (/etc/restic/backup.sh)
 ├── Systemd timer (daily at 02:00 + random 5min delay)
@@ -34,8 +34,7 @@ Each server (ns1, ns2, admin1):
 Hetzner Storagebox:
 └── /backups/
     ├── ns1/ (Restic repository for ns1)
-    ├── ns2/ (Restic repository for ns2)
-    └── admin1/ (Restic repository for admin1)
+    └── ns2/ (Restic repository for ns2)
 ```
 
 ## Backup Paths Per Server
@@ -54,14 +53,6 @@ ns1_backup_paths:
 ns2_backup_paths:
   - /opt/powerdns  # PowerDNS config + SQLite data
   - /opt/netbird   # NetBird config
-  - /etc/restic
-  - /root/.ssh
-
-# admin1 backup paths
-admin1_backup_paths:
-  - /etc/rancher   # k3s configuration
-  - /var/lib/rancher  # k3s data (etcd, containers)
-  - /opt/management-api  # Management API
   - /etc/restic
   - /root/.ssh
 ```

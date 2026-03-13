@@ -2,7 +2,7 @@
 
 > **Status:** COMPLETE — Ready for deployment  
 > **Architecture:** Primary DNS server with Docker internal networks  
-> **Alignment:** `docs/01-core/DISPERSED_DNS_ARCHITECTURE.md`
+> **Alignment:** `docs/DISPERSED_DNS_ARCHITECTURE.md`
 
 ## Overview
 
@@ -80,8 +80,8 @@ From **Critical Gotchas §7** in AGENTS.md:
 - ❌ PostgreSQL (no database access)
 
 **NetBird mesh can access:**
-- ✅ PowerDNS API (Management API on admin1)
-- ✅ PowerDNS-Admin UI (browser from workstation)
+- ✅ PowerDNS API (via NetBird mesh)
+- ✅ PowerDNS-Admin UI (browser via NetBird mesh)
 - ✅ DNS queries (via public interface)
 
 ## Requirements
@@ -176,7 +176,7 @@ ansible-galaxy collection install community.docker
 **Prerequisites:**
 1. ✅ Common role deployed (Docker, firewall)
 2. ✅ NetBird Management deployed (ns1 + ns2)
-3. ✅ NetBird peer deployed (ns1, ns2, admin1)
+3. ✅ NetBird peer deployed (ns1, ns2)
 4. ✅ NetBird IP captured: `netbird_ip` variable set
 5. ✅ Secrets configured in vault or group_vars
 

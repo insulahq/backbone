@@ -1,0 +1,46 @@
+---
+# Phoenix Host -- Server Inventory
+# Copy to hosts.yml and fill in your values.
+
+all:
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: ~/your-ssh-key.key
+    ansible_python_interpreter: /usr/bin/python3
+
+  children:
+    dns_servers:
+      hosts:
+        ns1:
+          ansible_host: <NS1_PUBLIC_IP>
+          hostname: ns1.example.com
+          location: hetzner_falkenstein
+          netbird_ip: <NS1_NETBIRD_IP>   # Assigned after NetBird enrollment
+        ns2:
+          ansible_host: <NS2_PUBLIC_IP>
+          hostname: ns2.example.com
+          location: hetzner_helsinki
+          netbird_ip: <NS2_NETBIRD_IP>   # Assigned after NetBird enrollment
+
+    netbird_management:
+      hosts:
+        ns1:
+        ns2:
+
+    netbird_peers:
+      hosts:
+        ns1:
+        ns2:
+
+    powerdns_primary:
+      hosts:
+        ns1:
+
+    powerdns_secondary:
+      hosts:
+        ns2:
+
+    backup_targets:
+      hosts:
+        ns1:
+        ns2:
