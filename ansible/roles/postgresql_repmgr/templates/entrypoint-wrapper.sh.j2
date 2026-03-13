@@ -68,6 +68,7 @@ if [ "$REPMGR_ROLE" = 'primary' ]; then
 
     echo "shared_preload_libraries = 'repmgr'" >> "$PGDATA/postgresql.conf"
     echo "wal_level = replica" >> "$PGDATA/postgresql.conf"
+    echo "wal_log_hints = on" >> "$PGDATA/postgresql.conf"
     echo "max_wal_senders = 10" >> "$PGDATA/postgresql.conf"
     echo "max_replication_slots = 10" >> "$PGDATA/postgresql.conf"
     echo "hot_standby = on" >> "$PGDATA/postgresql.conf"
@@ -119,17 +120,44 @@ else
   echo "--- Generating repmgr.conf ---"
   generate_repmgr_config
 
-  if [ ! -s "$PGDATA/PG_VERSION" ]; then
-    echo "--- Waiting for primary ($REPMGR_UPSTREAM_NAME) ---"
-    until pg_isready -h "$REPMGR_UPSTREAM_NAME" -p 5432 -U "$REPMGR_USER"; do
-      echo "Primary unavailable - sleeping" >&2
-      sleep 5
-    done
+  echo "--- Waiting for primary ($REPMGR_UPSTREAM_NAME) ---"
+  until pg_isready -h "$REPMGR_UPSTREAM_NAME" -p 5432 -U "$REPMGR_USER"; do
+    echo "Primary unavailable - sleeping" >&2
+    sleep 5
+  done
 
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    # Fresh standby -- clone from primary
     echo "--- Cloning from primary ---"
     repmgr -h "$REPMGR_UPSTREAM_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
            -f "$REPMGR_CONFIG_FILE" standby clone
     echo "--- Clone complete ---"
+  else
+    # Existing data directory -- try to rejoin after failover
+    # Start PostgreSQL temporarily to check if we can rejoin
+    echo "--- Attempting to rejoin cluster after failover ---"
+
+    # Try pg_rewind first (fast, preserves data)
+    echo "--- Running pg_rewind to sync with new primary ---"
+    pg_rewind --target-pgdata="$PGDATA" \
+              --source-server="host=$REPMGR_UPSTREAM_NAME user=$REPMGR_USER dbname=$REPMGR_DB" \
+              2>&1 || {
+      echo "--- pg_rewind failed, falling back to full re-clone ---" >&2
+      # pg_rewind failed (e.g., wal_log_hints not enabled, or too far diverged)
+      # Fall back to full clone: wipe data and re-clone
+      rm -rf "${PGDATA:?}"/*
+      repmgr -h "$REPMGR_UPSTREAM_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+             -f "$REPMGR_CONFIG_FILE" standby clone
+    }
+
+    # Ensure standby.signal exists (pg_rewind may not create it)
+    touch "$PGDATA/standby.signal"
+
+    # Update primary_conninfo to point to the current primary
+    sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
+    echo "primary_conninfo = 'host=$REPMGR_UPSTREAM_NAME user=$REPMGR_USER'" >> "$PGDATA/postgresql.auto.conf"
+
+    echo "--- Rejoin preparation complete ---"
   fi
 
   echo "--- Starting PostgreSQL (standby) ---"
@@ -141,7 +169,7 @@ else
     sleep 1
   done
 
-  # Register standby — idempotent with --force
+  # Register standby -- idempotent with --force
   echo "--- Registering standby node ---"
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force || {
     echo "Standby register failed but continuing" >&2

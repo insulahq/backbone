@@ -1,7 +1,6 @@
 ---
-# Common role — OS hardening, simple nftables, Docker CE, fail2ban
-# Aligned with docs/04-deployment/FRESH_INFRASTRUCTURE_PLAN.md
-# CRITICAL: Simple firewall rules only — NO advanced pre/post-routing
+# Common role -- OS hardening, simple nftables, Docker CE, fail2ban
+# CRITICAL: Simple firewall rules only -- NO advanced pre/post-routing (gotcha 7)
 
 - name: Update apt cache
   apt:
@@ -78,9 +77,13 @@
     dest: /etc/apt/keyrings/docker.asc
     mode: '0644'
 
+- name: Determine Docker repo codename (fall back to bookworm if trixie unavailable)
+  set_fact:
+    docker_repo_codename: "{{ 'bookworm' if ansible_distribution_release == 'trixie' else ansible_distribution_release }}"
+
 - name: Add Docker repository
   apt_repository:
-    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ docker_repo_codename }} stable"
     state: present
     filename: docker
 

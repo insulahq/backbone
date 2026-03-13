@@ -1,7 +1,8 @@
 ---
-# PowerDNS Master Role — Main Tasks
+# PowerDNS Master Role -- Main Tasks
 # Deploys PowerDNS Primary on ns1 with PostgreSQL backend
 # Uses Docker internal network + nginx proxy for security
+# See docs/DISPERSED_DNS_ARCHITECTURE.md for architecture details
 
 - name: Check if NetBird IP is available
   set_fact:
@@ -121,6 +122,20 @@
       soa_edit_api: "INCEPTION-INCREMENT"
     status_code: [201, 409]  # 409 = already exists
   register: zone_create_result
+  ignore_errors: yes
+
+- name: Increment SOA serial after zone creation (gotcha 33)
+  command: >
+    docker exec powerdns-auth pdnsutil increase-serial {{ platform_domain }}
+  when: zone_create_result.status == 201
+  changed_when: true
+  ignore_errors: yes
+
+- name: Notify secondary of zone update
+  command: >
+    docker exec powerdns-auth pdns_control notify {{ platform_domain }}
+  when: zone_create_result.status == 201
+  changed_when: true
   ignore_errors: yes
 
 - name: Display PowerDNS deployment status
