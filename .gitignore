@@ -18,6 +18,8 @@ ansible/group_vars/**/*.vault.yml
 # Real inventory and vars files (contain secrets/IPs) -- commit only *.example.yml
 ansible/inventory/hosts.yml
 ansible/group_vars/all.yml
+# Auto-generated secrets (persisted so re-runs don't regenerate)
+ansible/.generated_secrets/
 # Ansible fact cache (auto-generated)
 ansible/.ansible/
 

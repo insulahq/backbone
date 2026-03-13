@@ -1,14 +1,15 @@
 ---
 # PostgreSQL + repmgr Role -- Default Variables
 # Deploys PostgreSQL 18 with repmgr 5.5 for primary/standby streaming replication.
-# Uses sourcemation/postgres-repmgr image (only available as latest, bundles PG18).
+# Uses sourcemation/postgres-repmgr image (PG18 + repmgr 5.5).
 #
 # Primary node is configurable via postgresql_primary_node.
 # The other node is automatically configured as standby.
 # repmgrd handles auto-failover with 60s debounce (6 attempts x 10s interval).
 
-# Image
-postgresql_image: "sourcemation/postgres-repmgr:latest"
+# Image — pinned to specific version to prevent breakage
+# sourcemation/postgres-repmgr bundles PG18 + repmgr 5.5
+postgresql_image: "sourcemation/postgres-repmgr:5.5.0"
 
 # Installation directory
 postgresql_install_dir: /opt/postgresql
@@ -22,6 +23,11 @@ postgresql_repmgr_cluster: "phoenix-host"
 # Primary server -- determines which node runs as primary vs standby
 # Detection uses inventory_hostname (avoids breakage when NetBird IPs change)
 postgresql_primary_node: "ns2"
+
+# Node IDs — maps inventory_hostname to repmgr node_id
+postgresql_node_ids:
+  ns1: 1
+  ns2: 2
 
 # Credentials -- set in group_vars/all.yml
 # postgresql_superuser_password: ""

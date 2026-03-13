@@ -43,7 +43,7 @@ node_name=${NODE_NAME}
 #   - Self-registration works (local connect via 127.0.0.1)
 #   - repmgrd on the PEER resolves this hostname to the real NetBird IP via its
 #     own extra_hosts, enabling actual cross-wire failover detection
-conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=5'
+conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} password=${REPMGR_PASSWORD} connect_timeout=5'
 data_directory='${PGDATA}'
 failover=automatic
 promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
@@ -75,14 +75,15 @@ if [ "$REPMGR_ROLE" = 'primary' ]; then
     echo "archive_mode = on" >> "$PGDATA/postgresql.conf"
     echo "archive_command = '/bin/true'" >> "$PGDATA/postgresql.conf"
 
-    echo "host replication ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
-    echo "host ${REPMGR_DB} ${REPMGR_USER} all trust" >> "$PGDATA/pg_hba.conf"
-    # Allow app connections from Docker bridge networks and NetBird mesh
-    echo "host all all 172.0.0.0/8 scram-sha-256" >> "$PGDATA/pg_hba.conf"
-    echo "host all all 100.75.0.0/16 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+    echo "host replication ${REPMGR_USER} all scram-sha-256" >> "$PGDATA/pg_hba.conf"
+    echo "host ${REPMGR_DB} ${REPMGR_USER} all scram-sha-256" >> "$PGDATA/pg_hba.conf"
+    # Allow app connections from Docker bridge networks (RFC 1918) and NetBird mesh (CGNAT)
+    echo "host all all 172.16.0.0/12 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+    echo "host all all 100.64.0.0/10 scram-sha-256" >> "$PGDATA/pg_hba.conf"
 
     pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
-    createuser --superuser "$REPMGR_USER"
+    createuser --superuser --login "$REPMGR_USER"
+    psql -U postgres -c "ALTER USER ${REPMGR_USER} WITH PASSWORD '${REPMGR_PASSWORD}'"
     createdb --owner="$REPMGR_USER" "$REPMGR_DB"
     pg_ctl -D "$PGDATA" -m fast -w stop
 

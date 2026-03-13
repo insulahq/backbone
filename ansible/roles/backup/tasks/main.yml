@@ -28,7 +28,7 @@
   block:
     - name: Download Restic binary
       get_url:
-        url: "https://github.com/restic/restic/releases/download/v{{ restic_version }}/restic_{{ restic_version }}_linux_amd64.bz2"
+        url: "https://github.com/restic/restic/releases/download/v{{ restic_version }}/restic_{{ restic_version }}_linux_{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}.bz2"
         dest: "/tmp/restic_{{ restic_version }}.bz2"
         mode: '0644'
       register: restic_download
@@ -60,9 +60,18 @@
     - "{{ restic_cache_dir }}"
     - /var/log/restic
 
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Generate Restic password if not set
   set_fact:
-    restic_password: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+    restic_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/restic_password length=64 chars=ascii_letters,digits') }}"
   when: restic_password is not defined or restic_password | length == 0
   no_log: true
 

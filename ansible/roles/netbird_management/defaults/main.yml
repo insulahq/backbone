@@ -5,11 +5,16 @@
 # Dex embedded IdP with SQLite credential store (idp.db synced NS1->NS2).
 
 # NetBird versions -- combined server architecture (0.66+)
-netbird_server_version: "latest"
-netbird_dashboard_version: "latest"
+# Pin to specific versions to prevent breakage on deploy
+netbird_server_version: "0.66.4"
+netbird_dashboard_version: "v2.34.2"
 
 # Deployment directory
 netbird_install_dir: /opt/netbird
+
+# Docker network settings for the internal netbird network
+netbird_docker_subnet: "172.30.0.0/24"
+netbird_docker_gateway: "172.30.0.1"
 
 # NetBird combined server ports
 netbird_stun_port: 3478

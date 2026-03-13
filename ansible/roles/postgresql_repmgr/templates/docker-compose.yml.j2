@@ -4,7 +4,7 @@ services:
     container_name: postgresql
     restart: unless-stopped
     ports:
-      - '0.0.0.0:{{ postgresql_port }}:{{ postgresql_port }}'
+      - '{{ netbird_ip | default("127.0.0.1") }}:{{ postgresql_port }}:{{ postgresql_port }}'
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro

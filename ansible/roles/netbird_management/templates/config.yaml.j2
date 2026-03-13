@@ -25,7 +25,7 @@ server:
 
   reverseProxy:
     trustedHTTPProxies:
-      - "172.31.0.254/32"
+      - "{{ traefik_container_ip }}/32"
 
   store:
     engine: "postgres"

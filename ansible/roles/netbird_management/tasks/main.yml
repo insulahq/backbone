@@ -9,9 +9,18 @@
     state: directory
     mode: '0755'
 
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Generate relay auth secret (once per play)
   set_fact:
-    netbird_relay_auth_secret: "{{ lookup('password', '/dev/null length=64 chars=hexdigits') }}"
+    netbird_relay_auth_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/netbird_relay_auth_secret length=64 chars=hexdigits') }}"
   when: netbird_relay_auth_secret is not defined
   run_once: true
   no_log: true

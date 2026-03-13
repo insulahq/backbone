@@ -39,7 +39,8 @@ netbird_setup_key: "<YOUR_SETUP_KEY>"
 netbird_deployment: fresh
 netbird_redundancy: dns_round_robin
 
-# Secrets -- generate once, must match on both nodes
+# Secrets -- generate once, must match on both nodes.
+# If left undefined, Ansible auto-generates and persists in .generated_secrets/
 netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
 netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
@@ -52,16 +53,12 @@ netbird_dns_records:
       - <NS2_PUBLIC_IP>
 
 # ============================================================================
-# Traefik Reverse Proxy
-# ============================================================================
-netbird_pdns_primary_ip: "<NS1_NETBIRD_IP>"
-
-# ============================================================================
 # PowerDNS
 # ============================================================================
 powerdns_version: "4.9"
 powerdns_docker_image: "powerdns/pdns-auth-49:latest"
 powerdns_api_port: 8081
+# If left undefined, auto-generated and persisted in .generated_secrets/
 powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 powerdns_api_url: "http://<NS1_NETBIRD_IP>:8081"
 
@@ -88,6 +85,8 @@ netbird_postgres_dsn: "host=<NS1_NETBIRD_IP>,<NS2_NETBIRD_IP> port=5432 user=net
 backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
 backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
 backup_storagebox_path: /backups
+# If left undefined, auto-generated and persisted in .generated_secrets/
+# WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
 restic_password: "<GENERATE: openssl rand -base64 22>"
 
 # Backup paths per server

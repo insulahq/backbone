@@ -22,42 +22,37 @@
     - "{{ powerdns_install_dir }}"
     - "{{ powerdns_install_dir }}/backups"
 
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Generate PowerDNS API key if not set
   set_fact:
-    powerdns_api_key: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+    powerdns_api_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_api_key length=64 chars=ascii_letters,digits') }}"
   when: powerdns_api_key is not defined or powerdns_api_key | length == 0
   no_log: true
 
 - name: Generate PostgreSQL password if not set
   set_fact:
-    powerdns_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+    powerdns_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_db_password length=32 chars=ascii_letters,digits') }}"
   when: powerdns_db_password is not defined or powerdns_db_password | length == 0
   no_log: true
 
 - name: Generate PowerDNS-Admin database password if not set
   set_fact:
-    powerdns_admin_sqla_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+    powerdns_admin_sqla_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_admin_sqla_db_password length=32 chars=ascii_letters,digits') }}"
   when: powerdns_admin_sqla_db_password is not defined or powerdns_admin_sqla_db_password | length == 0
   no_log: true
 
 - name: Generate PowerDNS-Admin secret key if not set
   set_fact:
-    powerdns_admin_secret_key: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+    powerdns_admin_secret_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_admin_secret_key length=64 chars=ascii_letters,digits') }}"
   when: powerdns_admin_secret_key is not defined or powerdns_admin_secret_key | length == 0
-  no_log: true
-
-- name: Save generated secrets to file (for reference)
-  copy:
-    content: |
-      # PowerDNS Secrets (Generated {{ ansible_date_time.iso8601 }})
-      # KEEP THIS FILE SECURE - Add to .gitignore
-      
-      powerdns_api_key={{ powerdns_api_key }}
-      powerdns_db_password={{ powerdns_db_password }}
-      powerdns_admin_sqla_db_password={{ powerdns_admin_sqla_db_password }}
-      powerdns_admin_secret_key={{ powerdns_admin_secret_key }}
-    dest: "{{ powerdns_install_dir }}/.secrets"
-    mode: '0600'
   no_log: true
 
 - name: Deploy PostgreSQL schema initialization script
@@ -70,7 +65,7 @@
   template:
     src: pdns.conf.j2
     dest: "{{ powerdns_install_dir }}/pdns.conf"
-    mode: '0644'
+    mode: '0600'
   notify: restart powerdns
 
 - name: Deploy nginx proxy configuration
@@ -129,14 +124,12 @@
     docker exec powerdns-auth pdnsutil increase-serial {{ platform_domain }}
   when: zone_create_result.status == 201
   changed_when: true
-  ignore_errors: yes
 
 - name: Notify secondary of zone update
   command: >
     docker exec powerdns-auth pdns_control notify {{ platform_domain }}
   when: zone_create_result.status == 201
   changed_when: true
-  ignore_errors: yes
 
 - name: Display PowerDNS deployment status
   debug:
@@ -145,7 +138,6 @@
       - "DNS Server: {{ ansible_default_ipv4.address }}:53 (public)"
       - "PowerDNS API: http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }} (NetBird only)"
       - "PowerDNS-Admin UI: http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_admin_port }} (NetBird only)"
-      - "API Key: {{ powerdns_api_key }}"
       - "Platform zone created: {{ platform_domain }}"
       - ""
       - "Access PowerDNS-Admin:"

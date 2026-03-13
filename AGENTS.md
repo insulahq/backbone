@@ -29,7 +29,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | PowerDNS | 4.9.13 | Primary (ns1, PostgreSQL backend) + Secondary (ns2, SQLite, AXFR) |
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
-| NetBird | 0.66+ | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
+| NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ---
@@ -102,10 +102,10 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 11 | `bitnami/postgresql-repmgr` removed from registries | Use `sourcemation/postgres-repmgr:latest` (PG18 + repmgr 5.5) |
+| 11 | `bitnami/postgresql-repmgr` removed from registries | Use `sourcemation/postgres-repmgr:5.5.0` (PG18 + repmgr 5.5) |
 | 12 | Entrypoint crashes on restart ("already registered") | Custom `entrypoint-wrapper.sh` with `--force` flag |
 | 13 | Docker hairpin NAT: container can't reach its own forwarded port | Use `extra_hosts`: own hostname -> 127.0.0.1, peer -> NetBird IP |
-| 14 | pg_hba.conf blocks Docker bridge networks | Add `host all all 172.0.0.0/8 scram-sha-256` |
+| 14 | pg_hba.conf blocks Docker bridge networks | Add `host all all 172.16.0.0/12 scram-sha-256` (Docker RFC 1918) |
 | 20 | Stale `postmaster.pid` after unclean stop | Entrypoint wrapper cleans PID + socket files on startup |
 | 37 | repmgrd `conninfo` with `host=127.0.0.1` masked failures | Cross-wire via extra_hosts: peer sees real NetBird IP |
 | 41 | `promote_command` used `/usr/bin/repmgr` (doesn't exist) | Use `$(which repmgr)` -- actual path is `/usr/lib/postgresql/18/bin/repmgr` |
@@ -127,6 +127,17 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 5 | Restic `--group-by "host"` causes snapshot conflicts | Use `--group-by "host,paths"` |
 | 9 | NetBird SSH config intercepts all SSH connections | Backup script uses `-F /dev/null` in SFTP args |
 | 10 | Wrong restic password corrupts repo permanently | Wipe ALL files before re-init |
+| 42 | `ProtectSystem=strict` in systemd blocks restic reading `/opt/*` | Use `ProtectSystem=full` (protects `/usr`,`/boot` but allows `/opt` reads) |
+
+### Security
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 43 | PostgreSQL 5432 on `0.0.0.0` with `trust` auth for repmgr | Bind to NetBird IP only, use `scram-sha-256` for all pg_hba entries |
+| 44 | `lookup('password', '/dev/null')` regenerates secrets each run | Use `lookup('password', 'path/to/file')` to persist generated secrets |
+| 45 | PowerDNS `.secrets` file and API key in debug output | Removed .secrets file; removed API key from debug msg; pdns.conf mode 0600 |
+| 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
+| 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2` |
 
 ---
 
@@ -149,6 +160,7 @@ hosting-platform/
 │   ├── deploy-*.yml       # Targeted playbooks
 │   ├── inventory/
 │   │   └── hosts.yml      # Server inventory (gitignored)
+│   ├── .generated_secrets/ # Auto-generated passwords (gitignored)
 │   ├── group_vars/
 │   │   └── all.yml        # Global variables (gitignored)
 │   ├── host_vars/
@@ -174,4 +186,7 @@ hosting-platform/
 - Do not use complex nftables NAT rules (gotcha 7)
 - Do not use `bitnami/postgresql-repmgr` (removed from registries, gotcha 11)
 - Do not hardcode `/usr/bin/repmgr` (wrong path, gotcha 41)
+- Do not use `lookup('password', '/dev/null')` — secrets regenerate each run (gotcha 44)
+- Do not use `latest` tags for Docker images (gotcha 47)
+- Do not expose PostgreSQL on `0.0.0.0` — bind to NetBird IP only (gotcha 43)
 - Do not force-push to `main` without explicit user approval

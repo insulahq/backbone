@@ -10,7 +10,7 @@
 - name: Determine if this node is the primary or standby
   set_fact:
     postgresql_is_primary: "{{ inventory_hostname == postgresql_primary_node }}"
-    postgresql_node_id: "{{ 1 if inventory_hostname == 'ns1' else 2 }}"
+    postgresql_node_id: "{{ postgresql_node_ids[inventory_hostname] | default(groups['all'].index(inventory_hostname) + 1) }}"
 
 - name: Show PostgreSQL node role
   debug:
@@ -54,9 +54,8 @@
   community.docker.docker_container_exec:
     container: postgresql
     command: >
-      bash -c "grep -q '172.0.0.0/8' /var/lib/postgresql/data/pg_hba.conf ||
-               (echo 'host all all 172.0.0.0/8 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
-                 echo 'host all all 100.75.0.0/16 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
+      bash -c "grep -q '172.16.0.0/12' /var/lib/postgresql/data/pg_hba.conf ||
+               (sed -i 's|172.0.0.0/8|172.16.0.0/12|g; s|100.75.0.0/16|100.64.0.0/10|g; s| all trust| all scram-sha-256|g' /var/lib/postgresql/data/pg_hba.conf &&
                 pg_ctl -D /var/lib/postgresql/data reload)"
   when: postgresql_is_primary
   changed_when: false
@@ -105,5 +104,5 @@
     msg:
       - "PostgreSQL deployed on {{ inventory_hostname }}"
       - "Role: {{ 'PRIMARY (node ' + postgresql_node_id | string + ')' if postgresql_is_primary else 'STANDBY (node ' + postgresql_node_id | string + ')' }}"
-      - "Listening: 0.0.0.0:{{ postgresql_port }} (NetBird mesh access only)"
+      - "Listening: {{ netbird_ip | default('127.0.0.1') }}:{{ postgresql_port }} (NetBird mesh only)"
       - "Application DBs: {{ postgresql_databases | map(attribute='name') | list | join(', ') }}"
