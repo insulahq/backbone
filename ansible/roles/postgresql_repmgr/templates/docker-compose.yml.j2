@@ -29,9 +29,6 @@ services:
       REPMGR_PASSWORD: "{{ postgresql_repmgr_password }}"
       REPMGR_DB: "repmgr"
 
-      # NODE_NAME is used as both the repmgr node label and conninfo host=.
-      # With the extra_hosts mapping above, this resolves to 127.0.0.1 locally
-      # (self-registration works), and to the real NetBird IP on the peer server.
       REPMGR_ROLE: "{{ 'primary' if postgresql_is_primary else 'standby' }}"
       NODE_ID: "{{ postgresql_node_id }}"
       NODE_NAME: "{{ inventory_hostname }}"

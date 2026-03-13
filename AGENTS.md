@@ -31,7 +31,7 @@
 
 ## 2. Current State
 
-**Status:** Full HA stack operational and hardened. All post-reboot boot issues diagnosed and fixed in Ansible templates. NS2 zone replication fully verified (both A records for netbird.phoenix-host.net present). Ready for Management API + Admin Panel deployment.
+**Status:** Full HA stack operational and hardened. repmgrd auto-failover now functional (reconnect_attempts=6/reconnect_interval=10/promote_delay=10; stale file cleanup on startup). NS2 netbird-server DSN reversed to prefer local PostgreSQL. Ready for Management API + Admin Panel deployment.
 
 **Post-reboot incident (2026-03-12) — resolved:**
 NS1 reboot exposed several circular boot dependencies that have now been fixed in the Ansible templates and are documented in §8 (gotchas 22–29). NS1 manual recovery steps: force-recreate pdns, patch netbird DSN to use `postgresql` hostname, force-recreate nginx, restart NS2 Traefik for cert renewal.
@@ -81,12 +81,13 @@ The previous IPs (`100.83.x.x`) are no longer valid. All configs now use `100.75
 NS2 now has PowerDNS API exposed on `100.75.120.47:8081` via nginx proxy (NetBird only), mirroring NS1. Required for Management API to delete zones on NS2 when clients are removed. Public IP `89.167.125.29:8081` confirmed unreachable.
 
 **Architecture / config (current):**
-- NetBird PostgreSQL backend: multi-host DSN `host=100.75.10.178,100.75.120.47 port=5432 ... target_session_attrs=read-write`
+- NetBird PostgreSQL backend: multi-host DSN `host=100.75.10.178,100.75.120.47 port=5432 ... target_session_attrs=read-write` (NS1-first for NS1; NS2-first for NS2 — see gotcha 38)
 - NetBird setup key: reusable, no expiry (`ansible-reusable` key in dashboard), stored in `group_vars/all.yml`
 - Traefik: shared `traefik_public` network (172.31.0.0/24), Traefik fixed IP 172.31.0.254
-- PowerDNS nginx API: `100.75.10.178:8081` (ns1 NetBird IP)
+- PowerDNS nginx API: `100.75.10.178:8081` (ns1 NetBird IP), `100.75.120.47:8081` (ns2 NetBird IP)
 - netbird.phoenix-host.net DNS: round-robin `23.88.111.142` + `89.167.125.29` (both ns1 and ns2)
 - PowerDNS postgres password: stored in `/opt/powerdns/.secrets` on ns1 (gitignored)
+- repmgrd failover: active on both nodes, 60 s debounce before promotion (reconnect_attempts=6/reconnect_interval=10/promote_delay=10)
 
 **k3s cluster details (admin1):**
 - Version: v1.34.5+k3s1
@@ -408,6 +409,8 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 | 34 | **PostgreSQL stale `postmaster.pid` AND socket lock file after unclean container stop** — container restart leaves both `/var/lib/postgresql/data/postmaster.pid` (in volume) and `/var/run/postgresql/.s.PGSQL.5432.lock` (in runtime tmpfs). The wrapper loops forever; postgres won't start | Remove both: `docker stop postgresql; docker run --rm -v postgresql_postgresql_data:/data alpine rm -f /data/postmaster.pid; docker exec postgresql rm -f /var/run/postgresql/.s.PGSQL.5432.lock /var/run/postgresql/.s.PGSQL.5432 /tmp/repmgrd.pid` (exec before stop if container is still up), then restart. |
 | 35 | **NS2 netbird-server crash-loop after NS1 reboot** — NS2's DSN uses `100.75.10.178` (NS1's NetBird IP) with `target_session_attrs=read-write`; WireGuard to NS1 is down so NS2 falls through to its own read-only standby and fails. Crash-loop poisons DNS round-robin, blocking peer reconnection | Stop NS2 netbird-server immediately. Add temporary `/etc/hosts` override on NS2: `echo '23.88.111.142 netbird.phoenix-host.net' >> /etc/hosts` to force peer daemon to NS1's management server. Once WireGuard tunnel to NS1 is up (`ping 100.75.10.178` succeeds), remove the hosts entry and start NS2's netbird-server. |
 | 36 | **Dashboard "Unauthenticated" / client "LoginFailed" after netbird-server restart** — Dex (embedded IdP) re-generates OIDC signing keys on restart; all existing browser sessions and client tokens become invalid | Clear browser cookies/localStorage for `netbird.phoenix-host.net`, log in fresh in incognito. For desktop client: run `netbird login` to trigger a fresh OIDC flow. |
+| 37 | **repmgrd auto-failover was non-functional because `conninfo` used `host=${NODE_NAME}` which resolves to `127.0.0.1` via Docker `extra_hosts`** — NS2's repmgrd successfully "connected" to `ns1` but was actually hitting its own localhost, so primary failure was never detected; auto-promotion never triggered | Fixed: `conninfo` keeps `host=${NODE_NAME}` for self-registration (works via extra_hosts→127.0.0.1). The PEER node has `ns1:100.75.10.178` in its own extra_hosts, so from the peer's perspective `ns1` resolves to the real NetBird IP — cross-wire monitoring works. Added `reconnect_attempts=6`, `reconnect_interval=10`, `promote_delay=10` to prevent spurious promotions on transient glitches. Also added stale PID/socket cleanup at container startup (gotcha 34 issue prevented by this). Note: `repmgr cluster show` run from inside the container on NS1 will still time out when connecting to its own conninfo IP — this is a tooling limitation only, not an operational issue. Run it from NS2 instead. |
+| 38 | **NS2 `netbird-server` DSN was NS1-first** — when NS1 was down, NS2's driver timed out on NS1 (30 s) before falling back to NS2's local PostgreSQL, which would be primary after repmgr promotion | Fixed: NS2's `NB_STORE_ENGINE_POSTGRES_DSN` now lists `100.75.120.47` (NS2) first, then `100.75.10.178` (NS1). NS1 keeps the original order (NS1/local first). Both are generated from the same `netbird_postgres_dsn` group var via Jinja2 `regex_replace` in `netbird_management/templates/docker-compose.yml.j2`. |
 
 ---
 

@@ -41,11 +41,18 @@ services:
 {% endif %}
     environment:
 {% if inventory_hostname == 'ns1' %}
-      # NS1: use Docker container hostname for local PostgreSQL, then NetBird IP for NS2 standby.
-      # The 'postgresql' hostname resolves via Docker DNS on the shared postgresql_default network.
+      # NS1: use Docker container hostname for local PostgreSQL (primary), then NS2 standby via
+      # NetBird IP as fallback. The 'postgresql' hostname resolves via Docker DNS on the shared
+      # postgresql_default network — this breaks the boot-time circular dependency where
+      # netbird-server needs PG → PG needs WireGuard up → WireGuard needs netbird-server.
       NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'], 'host=postgresql') }}"
 {% else %}
-      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn }}"
+      # NS2: try local PostgreSQL first (100.75.120.47), then NS1 as fallback.
+      # Reversed host order vs the global netbird_postgres_dsn (which is NS1-first).
+      # When NS1 is down, NS2's local PostgreSQL will be promoted to primary by repmgrd;
+      # by listing it first, netbird-server finds a read-write connection without waiting
+      # for the multi-host driver to time out trying the unreachable NS1 first.
+      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'] + ',' + hostvars['ns2']['netbird_ip'], 'host=' + hostvars['ns2']['netbird_ip'] + ',' + hostvars['ns1']['netbird_ip']) }}"
 {% endif %}
     ports:
       - '{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'

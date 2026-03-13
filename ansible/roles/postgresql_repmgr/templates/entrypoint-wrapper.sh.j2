@@ -2,11 +2,34 @@
 # Wrapper around sourcemation/postgres-repmgr entrypoint.sh
 # Patches repmgr registration to be idempotent (handles 'already registered' gracefully)
 # and runs repmgrd directly when postgres is already initialized.
+#
+# Failover detection design:
+#   conninfo uses NODE_NAME (short hostname: ns1 / ns2). Docker extra_hosts maps
+#   each node's own hostname to 127.0.0.1 (self) and the peer's hostname to its
+#   real NetBird IP. So:
+#     - Self-registration succeeds (local connect via 127.0.0.1)
+#     - repmgrd on the PEER resolves the hostname to the real NetBird IP (via its
+#       own extra_hosts), enabling actual cross-wire primary health monitoring
+#   reconnect_attempts=6 / reconnect_interval=10 gives the primary 60 s to recover
+#   before NS2 promotes itself. promote_delay=10 adds an extra safety window.
 
 set -e
 
 export REPMGR_CONFIG_FILE=${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}
 export PGPASSWORD="${REPMGR_PASSWORD}"
+
+# --- Stale file cleanup ---
+# Leftover postmaster.pid (in volume) and socket lock files (in tmpfs) after an
+# unclean container stop prevent PostgreSQL from starting. Remove them on every boot.
+if [ -f "${PGDATA}/postmaster.pid" ]; then
+  echo "--- Removing stale postmaster.pid ---" >&2
+  rm -f "${PGDATA}/postmaster.pid"
+fi
+for f in /var/run/postgresql/.s.PGSQL.5432.lock \
+          /var/run/postgresql/.s.PGSQL.5432 \
+          /tmp/repmgrd.pid; do
+  [ -e "$f" ] && { echo "--- Removing stale $f ---" >&2; rm -f "$f"; }
+done
 
 generate_repmgr_config() {
   mkdir -p "$(dirname "$REPMGR_CONFIG_FILE")"
@@ -14,11 +37,23 @@ generate_repmgr_config() {
 # Repmgr configuration
 node_id=${NODE_ID}
 node_name=${NODE_NAME}
-conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=2'
+# conninfo uses NODE_NAME (hostname).
+# Docker extra_hosts maps each node's own hostname to 127.0.0.1 (self) and the
+# peer's hostname to its real NetBird IP. This means:
+#   - Self-registration works (local connect via 127.0.0.1)
+#   - repmgrd on the PEER resolves this hostname to the real NetBird IP via its
+#     own extra_hosts, enabling actual cross-wire failover detection
+conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=5'
 data_directory='${PGDATA}'
 failover=automatic
 promote_command='/usr/bin/repmgr standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
 follow_command='/usr/bin/repmgr standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
+# Give the primary 60 s (6 × 10 s) to recover before promoting the standby.
+# This avoids spurious promotions on transient network glitches.
+reconnect_attempts=6
+reconnect_interval=10
+# Extra safety window after all reconnect attempts fail, before actually promoting.
+promote_delay=10
 log_level=INFO
 EOF
 }
