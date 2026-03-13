@@ -1,4 +1,21 @@
-# Phase 1 Roadmap: Single Region MVP (Weeks 1-12)
+# Phase 1 Roadmap: Single Region MVP (Weeks 1-12) [HISTORICAL]
+
+> **STATUS: SUPERSEDED** — This document is retained for historical reference only.
+> The project phasing has been restructured. See:
+> - [`PROJECT_ROADMAP.md`](PROJECT_ROADMAP.md) — Current roadmap (all phases)
+> - [`../PHASING_STRATEGY.md`](../PHASING_STRATEGY.md) — Definitive phasing reference
+>
+> **What changed:** The original "Phase 1" combined infrastructure, API, panels, and migration
+> into a single 12-week plan. The project now uses a 3-phase structure:
+> - **Phase 1** (COMPLETE): Infrastructure Foundation (DNS + NetBird servers)
+> - **Phase 2** (NEXT): Platform Development (API, panels, hosting features, worker nodes)
+> - **Phase 3** (Future): Multi-Region & Full HA
+
+---
+
+*Original content below is preserved for historical context.*
+
+---
 
 > **Goal:** Deploy a working hosting platform on Hetzner Frankfurt with first test client migrated by Week 12.
 >

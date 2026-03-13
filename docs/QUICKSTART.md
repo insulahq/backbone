@@ -15,10 +15,11 @@ A **Kubernetes-based web hosting platform** that replaces Plesk with:
 - Support for multiple hosting plans and applications
 - Migration path from Plesk, cPanel, Virtualmin
 
-**Status:** Complete planning phase, ready for Phase 0 implementation  
+**Status:** Phase 1 (Infrastructure) complete. Phase 2 (Platform Development) starting.  
 **Team Size:** 1-2 engineers  
 **Timeline:** No hard deadline  
-**Budget:** < $200/month for initial cluster (50-100 clients)
+**Budget:** < $200/month for initial cluster (50-100 clients)  
+**Phasing:** See [PHASING_STRATEGY.md](PHASING_STRATEGY.md) for the definitive 3-phase breakdown
 
 ---
 
@@ -43,14 +44,16 @@ A **Kubernetes-based web hosting platform** that replaces Plesk with:
 
 **👨‍💻 I'm a Developer**
 - [ ] Read: [PLATFORM_ARCHITECTURE.md](01-core/PLATFORM_ARCHITECTURE.md) - Platform overview
-- [ ] Read: [PHASE_1_ROADMAP.md](04-deployment/PHASE_1_ROADMAP.md) - Implementation timeline
+- [ ] Read: [PHASING_STRATEGY.md](PHASING_STRATEGY.md) - Project phases
+- [ ] Read: [PROJECT_ROADMAP.md](04-deployment/PROJECT_ROADMAP.md) - Implementation timeline
 - [ ] Read: [GITHUB_INTEGRATION_SUMMARY.md](04-deployment/GITHUB_INTEGRATION_SUMMARY.md) - GitHub setup
 - [ ] Read: [CICD_PIPELINE_REQUIREMENTS.md](04-deployment/CICD_PIPELINE_REQUIREMENTS.md) - CI/CD pipeline
 - [ ] Read: [CLIENT_PANEL_FEATURES.md](02-operations/CLIENT_PANEL_FEATURES.md) - UI features
 - **Time: 1-1.5 hours**
 
 **📊 I'm a Project Manager**
-- [ ] Read: [PHASE_1_ROADMAP.md](04-deployment/PHASE_1_ROADMAP.md) - Implementation timeline
+- [ ] Read: [PHASING_STRATEGY.md](PHASING_STRATEGY.md) - Project phases
+- [ ] Read: [PROJECT_ROADMAP.md](04-deployment/PROJECT_ROADMAP.md) - Implementation timeline
 - [ ] Read: [TECH_STACK_SUMMARY.md](07-reference/TECH_STACK_SUMMARY.md) - Technology overview
 - [ ] Read: [FAQ.md](07-reference/FAQ.md) - Common questions
 - **Time: 30 minutes**
@@ -67,7 +70,7 @@ A **Kubernetes-based web hosting platform** that replaces Plesk with:
 → [BACKUP_STRATEGY.md](02-operations/BACKUP_STRATEGY.md)
 
 **I want to see the implementation roadmap**
-→ [PHASE_1_ROADMAP.md](04-deployment/PHASE_1_ROADMAP.md)
+→ [PROJECT_ROADMAP.md](04-deployment/PROJECT_ROADMAP.md) | [PHASING_STRATEGY.md](PHASING_STRATEGY.md)
 
 **I want to set up GitHub**
 → [GITHUB_INTEGRATION_SUMMARY.md](04-deployment/GITHUB_INTEGRATION_SUMMARY.md)
@@ -105,9 +108,10 @@ A **Kubernetes-based web hosting platform** that replaces Plesk with:
   └── COMPLIANCE_MATRIX.md        (GDPR, PCI-DSS, SOC 2)
 
 04-deployment/        CI/CD, deployment, GitHub
+  ├── PROJECT_ROADMAP.md             (Full project roadmap, all phases)
   ├── CICD_PIPELINE_REQUIREMENTS.md  (Complete CI/CD spec)
   ├── DEPLOYMENT_PROCESS.md          (Harbor, Trivy, Flux v2)
-  ├── PHASE_1_ROADMAP.md             (Week-by-week plan)
+  ├── PHASE_1_ROADMAP.md             (Historical: original 12-week plan)
   └── GITHUB_INTEGRATION_SUMMARY.md  (GitHub setup)
 
 05-advanced/          HA, DR, scaling, multi-cloud
@@ -170,9 +174,9 @@ A **Kubernetes-based web hosting platform** that replaces Plesk with:
 ## 🚀 What's Next?
 
 ### If you're starting implementation:
-1. Read [PHASE_1_ROADMAP.md](04-deployment/PHASE_1_ROADMAP.md) - Week-by-week plan
-2. Set up GitHub per [GITHUB_INTEGRATION_SUMMARY.md](04-deployment/GITHUB_INTEGRATION_SUMMARY.md)
-3. Start Phase 0 - Foundation (K8s cluster setup)
+1. Read [PHASING_STRATEGY.md](PHASING_STRATEGY.md) - Understand the 3-phase project structure
+2. Read [PROJECT_ROADMAP.md](04-deployment/PROJECT_ROADMAP.md) - Full roadmap with milestones
+3. Phase 1 (Infrastructure) is COMPLETE. Begin Phase 2 (Platform Development)
 
 ### If you're reviewing the architecture:
 1. Start with [PLATFORM_ARCHITECTURE.md](01-core/PLATFORM_ARCHITECTURE.md)

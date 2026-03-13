@@ -1,7 +1,7 @@
 # Phoenix Host — Kubernetes Web Hosting Platform
 
 > **Domain:** phoenix-host.net  
-> **Status:** Phase 1 — Active development  
+> **Status:** Phase 1 Complete, Phase 2 — Active development  
 > **Infrastructure:** k3s on Hetzner (Falkenstein + Helsinki)  
 > **Team:** 1-2 engineers
 
@@ -100,14 +100,25 @@ ansible-playbook -i inventory/hosts.yml netbird.yml
 
 ---
 
+## Project Phases
+
+| Phase | Name | Status |
+|-------|------|--------|
+| **1** | Infrastructure Foundation (DNS + NetBird) | **COMPLETE** |
+| **2** | Platform Development (API, panels, hosting features, worker nodes) | **NEXT** |
+| **3** | Multi-Region & Full HA (geographic scaling, enterprise HA) | Future |
+
+See [`docs/PHASING_STRATEGY.md`](docs/PHASING_STRATEGY.md) for the definitive phasing reference.
+
+---
+
 ## Infrastructure Overview
 
 | Server | Location | Role | IP |
 |--------|----------|------|----|
-| `ns1.phoenix-host.net` | Hetzner Falkenstein (nbg1) | PowerDNS master + NetBird management | TBD |
-| `ns2.phoenix-host.net` | Hetzner Helsinki (hel1) | PowerDNS slave + NetBird peer | TBD |
-| k3s control plane | Hetzner Falkenstein | Kubernetes control plane (Phase 1) | TBD |
-| k3s worker(s) | Hetzner Falkenstein | Kubernetes workers | TBD |
+| `ns1.phoenix-host.net` | Hetzner Falkenstein | PowerDNS primary + NetBird management + PostgreSQL standby | 23.88.111.142 |
+| `ns2.phoenix-host.net` | Hetzner Helsinki | PowerDNS secondary + NetBird management + PostgreSQL primary | 89.167.125.29 |
+| `admin1.phoenix-host.net` | Hetzner | k3s cluster (Management API + Panels) | 46.224.122.58 |
 
 ---
 
@@ -116,8 +127,9 @@ ansible-playbook -i inventory/hosts.yml netbird.yml
 Start with [`docs/QUICKSTART.md`](docs/QUICKSTART.md) for a full documentation index.
 
 Key documents:
+- **Phasing Strategy:** [`docs/PHASING_STRATEGY.md`](docs/PHASING_STRATEGY.md)
+- **Project Roadmap:** [`docs/04-deployment/PROJECT_ROADMAP.md`](docs/04-deployment/PROJECT_ROADMAP.md)
 - **Architecture:** [`docs/01-core/PLATFORM_ARCHITECTURE.md`](docs/01-core/PLATFORM_ARCHITECTURE.md)
-- **Phase 1 Roadmap:** [`docs/04-deployment/PHASE_1_ROADMAP.md`](docs/04-deployment/PHASE_1_ROADMAP.md)
 - **DNS Architecture:** [`docs/01-core/DISPERSED_DNS_ARCHITECTURE.md`](docs/01-core/DISPERSED_DNS_ARCHITECTURE.md)
 - **Admin Panel Spec:** [`docs/02-operations/ADMIN_PANEL_REQUIREMENTS.md`](docs/02-operations/ADMIN_PANEL_REQUIREMENTS.md)
 

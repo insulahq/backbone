@@ -17,8 +17,18 @@
 - Integrated backup, monitoring, and DNS management
 
 **Target:** $0–5k/month revenue, 50–100 initial clients, single Hetzner region, scale to 300+ at maturity.
-**Timeline:** 12-week Phase 1 roadmap targeting first Plesk customer migration.
+**Phasing:** 3-phase roadmap — see `docs/PHASING_STRATEGY.md` for definitive reference.
 **Team:** 1–2 engineers. No 24/7 on-call. Business hours only.
+
+### Project Phases
+
+| Phase | Name | Status |
+|-------|------|--------|
+| **1** | Infrastructure Foundation (DNS + NetBird) | **COMPLETE** |
+| **2** | Platform Development (API, panels, hosting features, worker nodes) | **NEXT** |
+| **3** | Multi-Region & Full HA (geographic scaling, enterprise HA) | Future |
+
+Full details: `docs/PHASING_STRATEGY.md` | Roadmap: `docs/04-deployment/PROJECT_ROADMAP.md`
 
 ### Vision Principles (non-negotiable)
 
@@ -63,8 +73,8 @@ The previous IPs (`100.83.x.x`) are no longer valid. All configs now use `100.75
 | PowerDNS 4.9.13 Primary + PostgreSQL | ✅ DONE | ns1 |
 | PowerDNS 4.9.13 Secondary + SQLite | ✅ DONE | ns2 |
 | Standalone Traefik v3.6 (traefik_public network, DNS-01 ACME) | ✅ DONE | ns1, ns2 |
-| PostgreSQL 18 + repmgr 5.5 (primary) | ✅ DONE | ns1 |
-| PostgreSQL 18 + repmgr 5.5 (standby — REPLICATING) | ✅ DONE | ns2 |
+| PostgreSQL 18 + repmgr 5.5 (primary) | ✅ DONE | ns2 |
+| PostgreSQL 18 + repmgr 5.5 (standby — REPLICATING) | ✅ DONE | ns1 |
 | NetBird v0.66.4 Management (PostgreSQL multi-host DSN, all peers enrolled) | ✅ DONE | ns1, ns2 |
 | NetBird peer mesh (all 3 peers connected, round-robin DNS) | ✅ DONE | ns1, ns2, admin1 |
 | PowerDNS nginx API (bound to 100.75.10.178:8081) | ✅ DONE | ns1 |
@@ -112,19 +122,28 @@ NS2 now has PowerDNS API exposed on `100.75.120.47:8081` via nginx proxy (NetBir
 
 ## 3. Immediate Next Task — START HERE
 
-**Infrastructure fully operational. Next: Deploy Management API + Admin Panel on k3s (admin1).**
+**Phase 1 (Infrastructure) is COMPLETE. Phase 2 (Platform Development) begins now.**
+
+**Next: Deploy Management API + Admin Panel on k3s (admin1).**
+
+See `docs/04-deployment/PROJECT_ROADMAP.md` for the full Phase 2 milestone breakdown.
 
 ### Next Steps (in order)
 
-1. **Deploy Management API on admin1 (k3s)** ← START HERE
+1. **Deploy Management API on admin1 (k3s)** ← START HERE (Phase 2, Milestone 2.1)
    - MariaDB deployment on k3s
    - Fastify API deployment (from `backend/`)
    - Configure environment variables, secrets via k3s secrets
+   - Update PowerDNS API URLs to current NetBird IPs (100.75.x.x)
    - Verify `POST /api/v1/auth/token` and `GET /api/v1/admin/status`
 
-2. **Deploy Admin Panel on admin1 (k3s)**
+2. **Deploy Admin Panel on admin1 (k3s)** (Phase 2, Milestone 2.2)
    - Build React/Vite/shadcn/ui app (from `frontend/admin-panel/`)
    - See `docs/08-admin-panel-mockups/` for UI reference
+
+3. **Extended API + Client Panel** (Phase 2, Milestones 2.3-2.4)
+   - Build remaining API endpoints per `MANAGEMENT_API_SPEC.md`
+   - Build client self-service panel per `CLIENT_PANEL_FEATURES.md`
 
 ### How to run Ansible
 
@@ -281,7 +300,7 @@ hosting-platform/
 │   ├── 01-core/               ← Architecture, plans, deployment models
 │   ├── 02-operations/         ← Infrastructure, monitoring, admin/client panels
 │   ├── 03-security/           ← Security architecture, compliance
-│   ├── 04-deployment/         ← Phase 1 roadmap, deployment guides
+│   ├── 04-deployment/         ← Project roadmap, deployment guides
 │   ├── 05-advanced/           ← Disaster recovery, HA
 │   ├── 06-features/           ← Backup restore, app catalog
 │   ├── 07-reference/          ← Tech stack, migration, FAQ
@@ -289,10 +308,10 @@ hosting-platform/
 ├── .git/
 ├── .github/
 ├── .gitignore
-└── opencode.json
+└── Claude.json
 ```
 
-**Note:** No infrastructure code exists yet. Ansible, k8s, helm, terraform, ops, and scripts directories have been removed.
+**Note:** Infrastructure code exists in `ansible/`. No k8s manifests, helm charts, terraform, or ops scripts have been created yet.
 
 ---
 
@@ -333,7 +352,8 @@ hosting-platform/
 | Doc | Purpose |
 |-----|---------|
 | `docs/QUICKSTART.md` | Full documentation index by role and topic |
-| `docs/04-deployment/PHASE_1_ROADMAP.md` | Week-by-week implementation plan |
+| `docs/PHASING_STRATEGY.md` | **Definitive 3-phase project breakdown** |
+| `docs/04-deployment/PROJECT_ROADMAP.md` | Full project roadmap with milestones for all phases |
 | `docs/ARCHITECTURE_DECISION_RECORDS.md` | All architectural decisions and their rationale |
 
 ### Architecture & Design
@@ -432,25 +452,37 @@ These gotchas are from the previous infrastructure deployment. They may be relev
 
 - **Do not start infrastructure work without user confirmation of architecture**
 - **Do not commit secrets, tokens, passwords, or IP addresses** — use templates and gitignored files
-- **Do not implement Phase 2 features** (geographic sharding, multi-cloud, app catalog) — Phase 1 only
+- **Do not implement Phase 3 features** (geographic sharding, multi-cloud, app catalog) — Phase 2 only until scale demands Phase 3
 - **Do not add Backrest or third-party backup UI** — backup restore will be built into the custom management UI
 - **Do not force-push to `main`** — warn the user and require explicit confirmation
 - **Do not bypass git hooks** (`--no-verify`)
 
 ---
 
-## 10. Phase 1 Roadmap Summary
+## 10. Project Roadmap Summary
 
-| Weeks | Milestone | Status |
-|-------|-----------|--------|
-| 1–2 | Infrastructure (DNS, VPN, backups, OS hardening) | **DONE** |
-| 3–4 | Management API deployment (Fastify, MariaDB, auth) | **NEXT** — infrastructure ready |
-| 5–6 | Admin Panel MVP (React, Vite, shadcn/ui) | **PENDING** |
-| 7–8 | Client Panel MVP (file manager, email, databases) | **PENDING** |
-| 9–10 | Migration Service (Plesk extractor + importer) | **PENDING** |
-| 11–12 | Testing + first Plesk customer migration | **PENDING** |
+### Phase 1: Infrastructure Foundation — COMPLETE
 
-Full roadmap: `docs/04-deployment/PHASE_1_ROADMAP.md`
+All DNS/NetBird infrastructure deployed, hardened, and battle-tested. See §2 for details.
+
+### Phase 2: Platform Development — NEXT
+
+| Milestone | Description | Status |
+|-----------|-------------|--------|
+| 2.1 | Management API deployment (MariaDB + Fastify on k3s) | **NEXT** |
+| 2.2 | Admin Panel MVP (React/Vite/shadcn/ui) | Pending |
+| 2.3 | Extended API (DNS templates, databases, cron, SFTP, backup) | Pending |
+| 2.4 | Client Panel MVP (file manager, email, databases, DNS) | Pending |
+| 2.5 | Hosting Infrastructure (Ingress, cert-manager, email, monitoring, worker nodes) | Pending |
+| 2.6 | Migration & Testing (Plesk migration, E2E tests, first customer) | Pending |
+| 2.7 | Billing & Operations (Stripe/PayPal, WAF, fail2ban, GitOps) | Pending |
+
+### Phase 3: Multi-Region & Full HA — Future
+
+Geographic scaling, multi-node HA, enterprise compliance. Triggered by customer growth.
+
+Full roadmap: `docs/04-deployment/PROJECT_ROADMAP.md`
+Phasing strategy: `docs/PHASING_STRATEGY.md`
 
 ---
 
