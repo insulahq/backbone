@@ -32,27 +32,22 @@ services:
     networks:
       - netbird
       - traefik_public
-{% if inventory_hostname == 'ns1' %}
-      # On NS1 (PostgreSQL primary host): connect directly to postgresql container
-      # so the management server can start WITHOUT the WireGuard tunnel being up.
-      # This breaks the boot-time circular dependency:
+      # Connect to postgresql_default so netbird-server can reach PostgreSQL via Docker DNS
+      # ('postgresql' hostname) WITHOUT needing the WireGuard tunnel to be up first.
+      # This breaks the boot-time circular dependency on BOTH nodes:
       #   netbird-server needs PG → PG needs WireGuard IP → WireGuard needs netbird-server
       - postgresql_default
-{% endif %}
     environment:
 {% if inventory_hostname == 'ns1' %}
-      # NS1: use Docker container hostname for local PostgreSQL (primary), then NS2 standby via
-      # NetBird IP as fallback. The 'postgresql' hostname resolves via Docker DNS on the shared
-      # postgresql_default network — this breaks the boot-time circular dependency where
-      # netbird-server needs PG → PG needs WireGuard up → WireGuard needs netbird-server.
+      # NS1: use Docker container hostname for local PostgreSQL, then NS2 NetBird IP as fallback.
+      # 'postgresql' resolves via Docker DNS on the shared postgresql_default network.
       NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'], 'host=postgresql') }}"
 {% else %}
-      # NS2: try local PostgreSQL first (100.75.120.47), then NS1 as fallback.
-      # Reversed host order vs the global netbird_postgres_dsn (which is NS1-first).
-      # When NS1 is down, NS2's local PostgreSQL will be promoted to primary by repmgrd;
-      # by listing it first, netbird-server finds a read-write connection without waiting
-      # for the multi-host driver to time out trying the unreachable NS1 first.
-      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'] + ',' + hostvars['ns2']['netbird_ip'], 'host=' + hostvars['ns2']['netbird_ip'] + ',' + hostvars['ns1']['netbird_ip']) }}"
+      # NS2: use Docker container hostname for local PostgreSQL, then NS1 NetBird IP as fallback.
+      # 'postgresql' resolves via Docker DNS on the shared postgresql_default network — no WireGuard needed.
+      # NS2-local listed first so when NS1 is down and NS2 is promoted, the driver connects immediately
+      # without timing out on the unreachable NS1 first.
+      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'] + ',' + hostvars['ns2']['netbird_ip'], 'host=postgresql,' + hostvars['ns1']['netbird_ip']) }}"
 {% endif %}
     ports:
       - '{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
@@ -98,7 +93,5 @@ networks:
           gateway: 172.30.0.1
   traefik_public:
     external: true
-{% if inventory_hostname == 'ns1' %}
   postgresql_default:
     external: true
-{% endif %}

@@ -46,8 +46,8 @@ node_name=${NODE_NAME}
 conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=5'
 data_directory='${PGDATA}'
 failover=automatic
-promote_command='/usr/bin/repmgr standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
-follow_command='/usr/bin/repmgr standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
+promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
+follow_command='$(which repmgr) standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
 # Give the primary 60 s (6 × 10 s) to recover before promoting the standby.
 # This avoids spurious promotions on transient network glitches.
 reconnect_attempts=6
