@@ -43,6 +43,36 @@
     pull: always
     state: present
 
+# Sync idp.db (Dex SQLite credential store) from NS1 → NS2 on every deploy.
+# idp.db holds admin user bcrypt password hashes for dashboard login. It lives in
+# the Docker volume (NOT in PostgreSQL), so it is NOT replicated automatically.
+# Without this sync, NS2 has an empty Dex DB and dashboard login fails when NS1
+# is down. We copy NS1's file every time so NS2 always has the latest credentials.
+- name: Sync idp.db from NS1 to NS2
+  when: inventory_hostname == 'ns2'
+  block:
+    - name: Extract idp.db from NS1 netbird container to NS1 host
+      delegate_to: ns1
+      shell: docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp-netbird.db
+      changed_when: false
+
+    - name: Fetch idp.db from NS1 to Ansible controller
+      delegate_to: ns1
+      fetch:
+        src: /tmp/idp-netbird.db
+        dest: /tmp/idp-netbird-ns1.db
+        flat: yes
+
+    - name: Copy idp.db from controller to NS2 host
+      copy:
+        src: /tmp/idp-netbird-ns1.db
+        dest: /tmp/idp-netbird.db
+        mode: '0600'
+
+    - name: Inject idp.db into NS2 netbird container
+      shell: docker cp /tmp/idp-netbird.db netbird-server:/var/lib/netbird/idp.db
+      notify: restart netbird
+
 - name: Wait for NetBird API to be ready
   uri:
     url: "https://{{ netbird_dashboard_domain }}/api/instance"
