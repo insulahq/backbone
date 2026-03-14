@@ -51,6 +51,11 @@ netbird_dns_records:
     ips:
       - <NS1_PUBLIC_IP>
       - <NS2_PUBLIC_IP>
+  - name: netbird.example.com
+    type: AAAA
+    ips:
+      - <NS1_PUBLIC_IPV6>
+      - <NS2_PUBLIC_IPV6>
 
 # ============================================================================
 # PowerDNS (both nodes, shared PostgreSQL HA backend)

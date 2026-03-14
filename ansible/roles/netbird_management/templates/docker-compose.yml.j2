@@ -50,7 +50,8 @@ services:
       NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'] + ',' + hostvars['ns2']['netbird_ip'], 'host=postgresql,' + hostvars['ns1']['netbird_ip']) }}"
 {% endif %}
     ports:
-      - '{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
+      - '0.0.0.0:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
+      - '[::]:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
     volumes:
       - netbird_data:/var/lib/netbird
       - ./config.yaml:/etc/netbird/config.yaml
@@ -87,10 +88,12 @@ volumes:
 networks:
   netbird:
     driver: bridge
+    enable_ipv6: true
     ipam:
       config:
         - subnet: {{ netbird_docker_subnet }}
           gateway: {{ netbird_docker_gateway }}
+        - subnet: "fd00:netbird::0/112"
   traefik_public:
     external: true
   postgresql_default:

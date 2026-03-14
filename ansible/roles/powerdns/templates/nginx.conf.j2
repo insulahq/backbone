@@ -29,6 +29,7 @@ http {
     # PowerDNS API (port 8081)
     server {
         listen 8081;
+        listen [::]:8081;
         server_name _;
 
         location / {
@@ -58,6 +59,7 @@ http {
     # PowerDNS-Admin UI (port 8080)
     server {
         listen 8080;
+        listen [::]:8080;
         server_name _;
 
         location / {

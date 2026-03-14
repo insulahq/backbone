@@ -16,11 +16,13 @@ all:
           hostname: ns1.example.com
           location: hetzner_falkenstein
           netbird_ip: <NS1_NETBIRD_IP>   # Assigned after NetBird enrollment
+          public_ipv6: <NS1_PUBLIC_IPV6> # Hetzner IPv6 address (for AAAA glue records)
         ns2:
           ansible_host: <NS2_PUBLIC_IP>
           hostname: ns2.example.com
           location: hetzner_helsinki
           netbird_ip: <NS2_NETBIRD_IP>   # Assigned after NetBird enrollment
+          public_ipv6: <NS2_PUBLIC_IPV6> # Hetzner IPv6 address (for AAAA glue records)
 
     netbird_peers:
       hosts:

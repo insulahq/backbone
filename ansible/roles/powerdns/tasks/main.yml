@@ -204,7 +204,7 @@
     msg:
       - "PowerDNS deployed on {{ inventory_hostname }}"
       - "Mode: Native (read-write, shared PostgreSQL HA backend)"
-      - "DNS Server: {{ ansible_default_ipv4.address }}:53 (public)"
+      - "DNS Server: {{ ansible_default_ipv4.address }}:53 (IPv4+IPv6 dual-stack)"
       - "PowerDNS API: http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }} (NetBird only)"
       - "{{ 'PowerDNS-Admin UI: http://' + powerdns_bind_interface + ':' + powerdns_nginx_admin_port | string + ' (NetBird only)' if powerdns_admin_enabled else 'PowerDNS-Admin: disabled on this node (runs on ' + powerdns_admin_node + ')' }}"
       - "Platform zone: {{ platform_domain }}"

@@ -60,6 +60,16 @@
   when: postgresql_is_primary
   changed_when: false
 
+- name: Ensure pg_hba.conf allows IPv6 Docker ULA connections
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      bash -c "grep -q 'fd00::/8' /var/lib/postgresql/data/pg_hba.conf ||
+               (echo 'host all all fd00::/8 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf &&
+                pg_ctl -D /var/lib/postgresql/data reload)"
+  when: postgresql_is_primary
+  changed_when: false
+
 # Create application databases on primary only (replicated to standby via streaming)
 - name: Create application user and database on primary
   community.docker.docker_container_exec:

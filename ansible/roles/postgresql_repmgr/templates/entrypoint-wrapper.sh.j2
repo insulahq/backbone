@@ -90,7 +90,7 @@ create_promote_check() {
 # Validate external connectivity before allowing repmgrd to promote.
 # Called by repmgr failover_validation_command.
 CHECKS=0
-for target in 8.8.8.8 1.1.1.1; do
+for target in 8.8.8.8 1.1.1.1 2001:4860:4860::8888 2606:4700:4700::1111; do
   if timeout 3 bash -c "echo >/dev/tcp/$target/53" 2>/dev/null; then
     CHECKS=$((CHECKS + 1))
   fi
@@ -309,6 +309,7 @@ host replication ${REPMGR_USER} all scram-sha-256
 host ${REPMGR_DB} ${REPMGR_USER} all scram-sha-256
 host all all 172.16.0.0/12 scram-sha-256
 host all all 100.64.0.0/10 scram-sha-256
+host all all fd00::/8 scram-sha-256
 HBA
 
   pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start

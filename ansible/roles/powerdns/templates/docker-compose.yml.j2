@@ -19,6 +19,8 @@ services:
     ports:
       - "0.0.0.0:53:53/tcp"
       - "0.0.0.0:53:53/udp"
+      - "[::]:53:53/tcp"
+      - "[::]:53:53/udp"
     networks:
       - powerdns_internal
       - postgresql_default  # Connect to HA PostgreSQL cluster via Docker DNS

@@ -67,12 +67,17 @@ Deploy PowerDNS on both nodes. Both connect to the shared PostgreSQL HA cluster 
 ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
 ```
 
-After deployment, create the DNS A records for your NetBird domain:
+After deployment, create the DNS A and AAAA records for your NetBird domain:
 
 ```bash
 # On either node (both have write access):
 docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS1_PUBLIC_IP>
 docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS2_PUBLIC_IP>
+
+# IPv6 (if your servers have public IPv6 addresses — Hetzner VPS always do)
+docker exec powerdns-auth pdnsutil add-record example.com netbird AAAA <NS1_PUBLIC_IPV6>
+docker exec powerdns-auth pdnsutil add-record example.com netbird AAAA <NS2_PUBLIC_IPV6>
+
 docker exec powerdns-auth pdnsutil increase-serial example.com
 ```
 

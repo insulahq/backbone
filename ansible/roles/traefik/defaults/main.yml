@@ -13,7 +13,12 @@ traefik_install_dir: /opt/traefik
 traefik_public_network: traefik_public
 traefik_public_subnet: "172.31.0.0/24"
 traefik_public_gateway: "172.31.0.1"
-traefik_container_ip: "172.31.0.254"  # Fixed IP — used as trustedHTTPProxy in downstream apps
+traefik_container_ip: "172.31.0.254"  # Fixed IPv4 — used as trustedHTTPProxy in downstream apps
+
+# IPv6 dual-stack for traefik_public network
+traefik_public_ipv6_enabled: true
+traefik_public_subnet_v6: "fd00:traefik::0/112"
+traefik_container_ipv6: "fd00:traefik::fe"  # Fixed IPv6 — trustedHTTPProxy alongside IPv4
 
 # ACME / Let's Encrypt
 traefik_acme_email: "admin@{{ platform_domain }}"

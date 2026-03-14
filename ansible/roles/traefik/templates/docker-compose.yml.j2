@@ -6,6 +6,9 @@ services:
     networks:
       traefik_public:
         ipv4_address: {{ traefik_container_ip }}
+{% if traefik_public_ipv6_enabled | default(true) %}
+        ipv6_address: {{ traefik_container_ipv6 }}
+{% endif %}
     command:
       - "--log.level={{ traefik_log_level }}"
       - "--accesslog=true"
@@ -30,8 +33,10 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
     ports:
-      - '80:80'
-      - '443:443'
+      - '0.0.0.0:80:80'
+      - '0.0.0.0:443:443'
+      - '[::]:80:80'
+      - '[::]:443:443'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - {{ traefik_install_dir }}/acme.json:/letsencrypt/acme.json

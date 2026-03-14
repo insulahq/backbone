@@ -11,7 +11,7 @@
 
 # Server identity
 server-id={{ inventory_hostname }}.{{ platform_domain }}
-local-address=0.0.0.0
+local-address=0.0.0.0, ::
 local-port={{ powerdns_dns_port }}
 
 # Native mode — both nodes can read and write zones.
@@ -39,7 +39,7 @@ api-key={{ powerdns_api_key }}
 webserver={{ 'yes' if powerdns_webserver_enabled else 'no' }}
 webserver-address=0.0.0.0
 webserver-port={{ powerdns_webserver_port }}
-webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8
+webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80::/10
 
 ####################
 # Database Backend (PostgreSQL HA Cluster)

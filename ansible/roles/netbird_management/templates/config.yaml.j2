@@ -26,6 +26,9 @@ server:
   reverseProxy:
     trustedHTTPProxies:
       - "{{ traefik_container_ip }}/32"
+{% if traefik_container_ipv6 is defined %}
+      - "{{ traefik_container_ipv6 }}/128"
+{% endif %}
 
   store:
     engine: "postgres"

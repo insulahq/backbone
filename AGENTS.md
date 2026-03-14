@@ -139,6 +139,18 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
 | 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
 
+### IPv6
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 50 | PowerDNS `local-address=0.0.0.0` served DNS on IPv4 only | Changed to `0.0.0.0, ::` and added `[::]:53` port bindings |
+| 51 | Traefik ports bound to IPv4 only, Docker network IPv4-only | Added `[::]:80/443` bindings, dual-stack IPAM with ULA subnet |
+| 52 | No AAAA DNS records in default config | Added AAAA record template in `all.example.yml`, `public_ipv6` in inventory |
+| 53 | `pg_hba.conf` only allowed IPv4 Docker CIDRs | Added `fd00::/8` (Docker ULA) to pg_hba rules |
+| 54 | PostgreSQL promote-check only tested IPv4 DNS resolvers | Added `2001:4860:4860::8888` and `2606:4700:4700::1111` |
+| 55 | NetBird STUN port bound to IPv4 only | Added explicit `[::]:3478` binding |
+| 56 | NetBird trusted proxy list was IPv4 only | Added Traefik IPv6 container address to `trustedHTTPProxies` |
+
 ---
 
 ## 6. Repository Structure
