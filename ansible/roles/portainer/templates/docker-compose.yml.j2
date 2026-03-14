@@ -60,7 +60,13 @@ services:
     image: {{ portainer_image }}
     container_name: portainer
     restart: unless-stopped
+{% if portainer_oidc_client_id %}
+    # --no-auth: disable Portainer's internal login — oauth2-proxy handles authentication.
+    # Safe because Portainer has no host port binding (only reachable via oauth2-proxy).
+    command: --http-disabled=false --tunnel-server-addr= --no-auth
+{% else %}
     command: --http-disabled=false --tunnel-server-addr=
+{% endif %}
 {% if portainer_oidc_client_id %}
     # No host port — only reachable via oauth2-proxy
 {% else %}
