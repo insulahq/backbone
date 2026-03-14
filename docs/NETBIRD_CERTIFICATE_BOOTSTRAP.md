@@ -1,5 +1,15 @@
 # NetBird Certificate Bootstrap Guide
 
+> **PARTIALLY OUTDATED**
+> This document was written for the **old** NetBird architecture with separate
+> containers and a per-service Traefik instance. The current deployment uses a
+> **shared standalone Traefik** (deployed by the `traefik` role) and the combined
+> `netbird-server` container (v0.66+). The certificate bootstrapping concept
+> (pre-generate certs with a temporary container) is still valid, but Traefik is
+> now shared at `/opt/traefik/` (not inside the NetBird stack). Certificates are
+> managed by the shared Traefik instance and reused by all services.
+> See `docs/BOOTSTRAP.md` Step 3 for the current procedure.
+
 ## Problem
 
 NetBird Management has a circular dependency when using self-hosted authentication:

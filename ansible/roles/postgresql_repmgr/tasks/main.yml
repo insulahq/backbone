@@ -33,7 +33,7 @@
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:
     project_src: "{{ postgresql_install_dir }}"
-    pull: always
+    pull: missing
     state: present
 
 - name: Wait for PostgreSQL to accept connections

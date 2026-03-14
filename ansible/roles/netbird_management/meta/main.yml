@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: netbird_management
+  description: NetBird combined server (management + signal + relay) with PostgreSQL HA backend
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: traefik
+  - role: postgresql_repmgr

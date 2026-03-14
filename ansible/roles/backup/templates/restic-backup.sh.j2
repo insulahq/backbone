@@ -28,6 +28,30 @@ error() {
     echo "[$(date -Iseconds)] ERROR: $*" | tee -a "$LOG_FILE" >&2
 }
 
+# Failure notification function
+notify_failure() {
+    local msg="$1"
+    error "$msg"
+{% if restic_healthcheck_url %}
+    curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
+{% endif %}
+{% if restic_notify_on_failure and restic_notify_email %}
+    if command -v mail &> /dev/null; then
+        echo "Backup FAILED on {{ inventory_hostname }} at $(date -Iseconds): $msg" | \
+            mail -s "[Phoenix Host] Backup FAILED on {{ inventory_hostname }}" "{{ restic_notify_email }}"
+    fi
+{% endif %}
+{% if restic_notify_webhook_url %}
+    curl -fsS --retry 3 -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"host\": \"{{ inventory_hostname }}\", \"status\": \"failed\", \"message\": \"$msg\", \"timestamp\": \"$(date -Iseconds)\"}" \
+        "{{ restic_notify_webhook_url }}" > /dev/null 2>&1 || true
+{% endif %}
+}
+
+# Trap unexpected errors
+trap 'notify_failure "Unexpected error on line $LINENO"' ERR
+
 # Health check ping (start)
 {% if restic_healthcheck_url %}
 curl -fsS --retry 3 "{{ restic_healthcheck_url }}/start" > /dev/null 2>&1 || true
@@ -71,10 +95,7 @@ restic "${RESTIC_OPTS[@]}" backup \
 BACKUP_EXIT_CODE=${PIPESTATUS[0]}
 
 if [ $BACKUP_EXIT_CODE -ne 0 ]; then
-    error "Backup failed with exit code $BACKUP_EXIT_CODE"
-    {% if restic_healthcheck_url %}
-    curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
-    {% endif %}
+    notify_failure "Backup failed with exit code $BACKUP_EXIT_CODE"
     exit $BACKUP_EXIT_CODE
 fi
 {% else %}

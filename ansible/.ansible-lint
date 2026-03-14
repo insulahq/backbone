@@ -1,0 +1,26 @@
+---
+# Ansible-lint configuration
+# Matches the CI profile: ansible-lint --profile production
+profile: production
+
+# Paths to lint
+exclude_paths:
+  - .generated_secrets/
+  - .ansible/
+
+# Skip rules that conflict with our deliberate patterns
+skip_list:
+  # We use shell for docker cp (no better module available)
+  - command-instead-of-shell
+  # We use changed_when: true deliberately on some tasks
+  - no-changed-when
+  # Role names with underscores are our convention
+  - role-name
+
+# Warn only (don't fail) on these rules
+warn_list:
+  - experimental
+  - yaml[line-length]
+
+# Enable offline mode (don't download anything)
+offline: true

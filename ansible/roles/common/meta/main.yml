@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: common
+  description: OS hardening, nftables firewall, Docker CE, fail2ban, SSH hardening
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

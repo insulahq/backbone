@@ -46,10 +46,10 @@
     mode: '0600'
   notify: restart netbird
 
-- name: Pull latest NetBird images
+- name: Start NetBird stack
   community.docker.docker_compose_v2:
     project_src: "{{ netbird_install_dir }}"
-    pull: always
+    pull: missing
     state: present
 
 # Sync idp.db (Dex SQLite credential store) from NS1 → NS2 on every deploy.
@@ -86,7 +86,7 @@
   uri:
     url: "https://{{ netbird_dashboard_domain }}/api/instance"
     status_code: 200
-    validate_certs: no
+    validate_certs: "{{ netbird_validate_certs | default(false) }}"
   retries: 30
   delay: 3
   register: result

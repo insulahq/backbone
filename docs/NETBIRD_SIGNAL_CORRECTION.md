@@ -1,5 +1,13 @@
 # NetBird Signal Server - Configuration Correction
 
+> **HISTORICAL DOCUMENT (Superseded)**
+> This document describes the fix applied to the **old** NetBird architecture
+> (separate management/signal/relay containers, v0.28). The current deployment
+> uses the **combined netbird-server** (v0.66+) where signal is embedded in the
+> single container and configured via `config.yaml`. The lesson below remains
+> valid but the specific docker-compose examples no longer match production.
+> See `ansible/roles/netbird_management/` for the current architecture.
+
 ## Issue Identified
 
 During initial deployment, we incorrectly configured NetBird Signal server to use a separate domain (`netbird-signal.phoenix-host.net`) and route through Traefik on port 443.

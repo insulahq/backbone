@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: backup
+  description: Restic incremental backup to Hetzner Storagebox with systemd timers
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: common

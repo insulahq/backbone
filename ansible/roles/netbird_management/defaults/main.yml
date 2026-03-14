@@ -30,3 +30,7 @@ netbird_traefik_enabled: true
 netbird_traefik_email: "admin@{{ platform_domain }}"
 netbird_traefik_acme_challenge: dns-01
 netbird_traefik_dns_provider: pdns
+
+# TLS certificate validation for API health checks
+# Set to true after initial bootstrap when Let's Encrypt certs are provisioned
+netbird_validate_certs: false

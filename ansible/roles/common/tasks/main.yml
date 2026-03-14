@@ -6,6 +6,7 @@
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  tags: [common, packages]
 
 - name: Install base packages
   apt:
@@ -24,10 +25,12 @@
       - python3
       - python3-pip
     state: present
+  tags: [common, packages]
 
 - name: Set timezone to UTC
   timezone:
     name: "{{ timezone }}"
+  tags: [common]
 
 - name: Configure fail2ban
   copy:
@@ -44,12 +47,14 @@
       logpath = /var/log/auth.log
     mode: '0644'
   notify: restart fail2ban
+  tags: [common, security, fail2ban]
 
 - name: Start and enable fail2ban
   systemd:
     name: fail2ban
     state: started
     enabled: yes
+  tags: [common, security, fail2ban]
 
 - name: Deploy simple nftables configuration (NO advanced pre/post-routing)
   template:
@@ -57,12 +62,14 @@
     dest: /etc/nftables.conf
     mode: '0644'
   notify: reload nftables
+  tags: [common, security, firewall]
 
 - name: Enable nftables service
   systemd:
     name: nftables
     state: started
     enabled: yes
+  tags: [common, security, firewall]
 
 # Docker CE installation (official repo)
 - name: Create directory for Docker GPG key
@@ -70,22 +77,26 @@
     path: /etc/apt/keyrings
     state: directory
     mode: '0755'
+  tags: [common, docker]
 
 - name: Download Docker GPG key
   get_url:
     url: https://download.docker.com/linux/debian/gpg
     dest: /etc/apt/keyrings/docker.asc
     mode: '0644'
+  tags: [common, docker]
 
 - name: Determine Docker repo codename (fall back to bookworm if trixie unavailable)
   set_fact:
     docker_repo_codename: "{{ 'bookworm' if ansible_distribution_release == 'trixie' else ansible_distribution_release }}"
+  tags: [common, docker]
 
 - name: Add Docker repository
   apt_repository:
     repo: "deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ docker_repo_codename }} stable"
     state: present
     filename: docker
+  tags: [common, docker]
 
 - name: Install Docker CE
   apt:
@@ -97,27 +108,32 @@
       - docker-compose-plugin
     state: present
     update_cache: yes
+  tags: [common, docker]
 
 - name: Start and enable Docker
   systemd:
     name: docker
     state: started
     enabled: yes
+  tags: [common, docker]
 
 - name: Add root to docker group (for convenience)
   user:
     name: root
     groups: docker
     append: yes
+  tags: [common, docker]
 
 - name: Verify Docker installation
   command: docker --version
   register: docker_version_output
   changed_when: false
+  tags: [common, docker]
 
 - name: Display Docker version
   debug:
     msg: "Docker installed: {{ docker_version_output.stdout }}"
+  tags: [common, docker]
 
 # SSH hardening
 - name: Harden SSH configuration
@@ -133,3 +149,4 @@
     - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
     - { regexp: '^#?AuthenticationMethods', line: 'AuthenticationMethods publickey' }
   notify: restart sshd
+  tags: [common, security, ssh]

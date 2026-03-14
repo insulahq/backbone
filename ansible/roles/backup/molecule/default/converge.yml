@@ -1,0 +1,10 @@
+---
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Include backup role
+      ansible.builtin.include_role:
+        name: backup
+      # Skip SSH-dependent tasks in test
+      vars:
+        molecule_test: true

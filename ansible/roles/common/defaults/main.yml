@@ -1,0 +1,9 @@
+---
+# Common Role — Default Variables
+# OS hardening, nftables, Docker CE, fail2ban, SSH hardening
+
+# Timezone
+timezone: UTC
+
+# SSH
+ssh_port: 22

@@ -1,0 +1,69 @@
+---
+# Verification playbook for backup role
+- name: Verify backup role
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check Restic binary exists
+      ansible.builtin.stat:
+        path: /usr/local/bin/restic
+      register: restic_bin
+
+    - name: Assert Restic is installed
+      ansible.builtin.assert:
+        that:
+          - restic_bin.stat.exists
+          - restic_bin.stat.mode == '0755'
+        fail_msg: "Restic binary not found or wrong permissions"
+
+    - name: Check Restic version
+      ansible.builtin.command: /usr/local/bin/restic version
+      register: restic_ver
+      changed_when: false
+      failed_when: restic_ver.rc != 0
+
+    - name: Check backup script exists
+      ansible.builtin.stat:
+        path: /etc/restic/backup.sh
+      register: backup_script
+
+    - name: Assert backup script is executable
+      ansible.builtin.assert:
+        that:
+          - backup_script.stat.exists
+          - backup_script.stat.mode == '0700'
+        fail_msg: "Backup script not found or not executable"
+
+    - name: Check password file exists
+      ansible.builtin.stat:
+        path: /etc/restic/password
+      register: pw_file
+
+    - name: Assert password file has correct permissions
+      ansible.builtin.assert:
+        that:
+          - pw_file.stat.exists
+          - pw_file.stat.mode == '0600'
+        fail_msg: "Password file not found or wrong permissions"
+
+    - name: Check systemd timer exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/restic-backup.timer
+      register: timer_file
+
+    - name: Assert timer file exists
+      ansible.builtin.assert:
+        that:
+          - timer_file.stat.exists
+        fail_msg: "Systemd timer not found"
+
+    - name: Check logrotate config exists
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/restic-backup
+      register: logrotate_conf
+
+    - name: Assert logrotate is configured
+      ansible.builtin.assert:
+        that:
+          - logrotate_conf.stat.exists
+        fail_msg: "Logrotate config for restic not found"

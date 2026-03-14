@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: traefik
+  description: Shared Traefik v3.6 reverse proxy with DNS-01 ACME via PowerDNS
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: common

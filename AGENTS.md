@@ -148,21 +148,25 @@ hosting-platform/
 ├── AGENTS.md              # This file
 ├── README.md              # Project overview
 ├── .gitignore
+├── .pre-commit-config.yaml # Pre-commit hooks (gitleaks, yamllint, ansible-lint)
 ├── .github/
 │   ├── pull_request_template.md
 │   ├── ISSUE_TEMPLATE/
 │   └── workflows/
-│       └── ansible-lint.yml
+│       └── ansible-lint.yml  # CI: lint + syntax-check + secrets scan
 ├── ansible/
 │   ├── ansible.cfg
+│   ├── .ansible-lint        # ansible-lint config (matches CI)
+│   ├── .yamllint            # yamllint config
+│   ├── requirements.yml     # Ansible Galaxy collection dependencies
 │   ├── README.md
-│   ├── site.yml           # Main playbook
-│   ├── deploy-*.yml       # Targeted playbooks
+│   ├── site.yml             # Main playbook (tagged plays)
+│   ├── deploy-*.yml         # Targeted playbooks
 │   ├── inventory/
-│   │   └── hosts.yml      # Server inventory (gitignored)
-│   ├── .generated_secrets/ # Auto-generated passwords (gitignored)
+│   │   └── hosts.yml        # Server inventory (gitignored)
+│   ├── .generated_secrets/  # Auto-generated passwords (gitignored)
 │   ├── group_vars/
-│   │   └── all.yml        # Global variables (gitignored)
+│   │   └── all.yml          # Global variables (gitignored)
 │   ├── host_vars/
 │   │   ├── ns1.yml
 │   │   └── ns2.yml
@@ -173,13 +177,63 @@ hosting-platform/
 │       ├── postgresql_repmgr/ # PostgreSQL 18 + repmgr HA
 │       ├── netbird_management/# NetBird combined server
 │       ├── netbird_peer/      # NetBird peer enrollment
-│       └── backup/            # Restic backup
-└── docs/                  # Architecture and operations docs
+│       └── backup/            # Restic backup (with logrotate + notifications)
+└── docs/
+    ├── BOOTSTRAP.md               # Fresh deployment procedure
+    ├── RECOVERY.md                # Disaster recovery runbook
+    ├── DISPERSED_DNS_ARCHITECTURE.md
+    ├── NETBIRD_CERTIFICATE_BOOTSTRAP.md  # (partially outdated, see header)
+    └── NETBIRD_SIGNAL_CORRECTION.md      # (historical, see header)
 ```
 
 ---
 
-## 7. Do NOT
+## 7. Tags
+
+All plays and tasks are tagged for selective execution:
+
+```bash
+# Run only common (OS hardening, Docker)
+ansible-playbook -i inventory/hosts.yml site.yml --tags common
+
+# Run only Docker-related tasks within common
+ansible-playbook -i inventory/hosts.yml site.yml --tags docker
+
+# Run only firewall tasks
+ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
+
+# Other available tags: traefik, postgresql, powerdns, dns,
+#   netbird, netbird_management, netbird_peer, backup,
+#   security, ssh, fail2ban, packages
+```
+
+---
+
+## 8. Testing
+
+### Ansible Lint (CI)
+```bash
+ansible-lint -c ansible/.ansible-lint ansible/
+```
+
+### Molecule (local)
+```bash
+pip install molecule molecule-plugins[docker]
+cd ansible/roles/common && molecule test
+cd ansible/roles/postgresql_repmgr && molecule test
+cd ansible/roles/backup && molecule test
+```
+
+### Pre-commit Hooks
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+---
+
+## 9. Do NOT
 
 - Do not commit secrets, tokens, passwords, or IP addresses
 - Do not use complex nftables NAT rules (gotcha 7)
@@ -189,3 +243,4 @@ hosting-platform/
 - Do not use `latest` tags for Docker images (gotcha 47)
 - Do not expose PostgreSQL on `0.0.0.0` — bind to NetBird IP only (gotcha 43)
 - Do not force-push to `main` without explicit user approval
+- Do not use `pull: always` in docker_compose_v2 tasks — use `pull: missing` (wasteful re-downloads)

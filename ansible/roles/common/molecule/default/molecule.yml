@@ -1,0 +1,35 @@
+---
+# Molecule test configuration for common role
+# Runs: molecule test -s default (from roles/common/)
+# Requires: pip install molecule molecule-plugins[docker]
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ${MOLECULE_PROJECT_DIRECTORY}/../../requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: test-common
+    image: debian:trixie
+    pre_build_image: true
+    privileged: true
+    command: /sbin/init
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+
+provisioner:
+  name: ansible
+  inventory:
+    host_vars:
+      test-common:
+        timezone: UTC
+        ssh_port: 22
+
+verifier:
+  name: ansible

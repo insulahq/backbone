@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: netbird_peer
+  description: NetBird peer client enrollment via apt
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: common

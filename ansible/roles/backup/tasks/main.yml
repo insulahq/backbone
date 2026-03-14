@@ -10,6 +10,7 @@
       - bzip2
     state: present
     update_cache: yes
+  tags: [backup]
 
 - name: Check if Restic is already installed
   stat:
@@ -143,12 +144,29 @@
     mode: '0644'
   notify: reload systemd
 
+- name: Deploy logrotate configuration for Restic logs
+  copy:
+    dest: /etc/logrotate.d/restic-backup
+    content: |
+      /var/log/restic/*.log {
+          weekly
+          rotate 8
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0640 root root
+      }
+    mode: '0644'
+  tags: [backup]
+
 - name: Enable and start backup timer
   systemd:
     name: restic-backup.timer
     enabled: yes
     state: started
     daemon_reload: yes
+  tags: [backup]
 
 - name: Create backup paths list for display
   set_fact:

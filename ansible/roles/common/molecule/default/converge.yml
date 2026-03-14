@@ -1,0 +1,10 @@
+---
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Include common role
+      ansible.builtin.include_role:
+        name: common
+      vars:
+        timezone: UTC
+        ssh_port: 22

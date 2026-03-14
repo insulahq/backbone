@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: postgresql_repmgr
+  description: PostgreSQL 18 with repmgr 5.5 HA (streaming replication + auto-failover)
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: common
+  - role: traefik

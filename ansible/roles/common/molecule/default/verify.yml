@@ -1,0 +1,44 @@
+---
+# Verification playbook for common role
+- name: Verify common role
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check Docker is installed
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+      failed_when: docker_version.rc != 0
+
+    - name: Check Docker service is running
+      ansible.builtin.service_facts:
+
+    - name: Assert Docker is running
+      ansible.builtin.assert:
+        that:
+          - "'docker.service' in ansible_facts.services"
+        fail_msg: "Docker service not found"
+
+    - name: Check nftables is installed
+      ansible.builtin.command: nft --version
+      register: nft_version
+      changed_when: false
+      failed_when: nft_version.rc != 0
+
+    - name: Check fail2ban is installed
+      ansible.builtin.command: fail2ban-client --version
+      register: f2b_version
+      changed_when: false
+      failed_when: f2b_version.rc != 0
+
+    - name: Check SSH config is hardened
+      ansible.builtin.command: grep -c "PasswordAuthentication no" /etc/ssh/sshd_config
+      register: ssh_hardened
+      changed_when: false
+      failed_when: ssh_hardened.stdout | int < 1
+
+    - name: Check timezone is UTC
+      ansible.builtin.command: timedatectl show --property=Timezone --value
+      register: tz
+      changed_when: false
+      failed_when: "'UTC' not in tz.stdout"

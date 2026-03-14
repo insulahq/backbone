@@ -25,7 +25,7 @@ restic_ssh_key_path: /etc/restic/phoenix-host.key  # deployed path on servers
 
 # Backup schedule (systemd timers)
 restic_backup_schedule: daily
-restic_backup_time: "02:00"  # 2 AM
+restic_backup_time: "*-*-* 02:00:00"  # Daily at 2 AM (systemd OnCalendar format)
 
 # Backup retention policy
 restic_keep_daily: 7
@@ -51,6 +51,7 @@ restic_exclude_patterns:
 # Backup notifications (optional)
 restic_notify_on_failure: false
 restic_notify_email: ""
+restic_notify_webhook_url: ""  # POST JSON payload on failure (Slack, Discord, ntfy, etc.)
 
 # Backup pre/post hooks (optional commands to run before/after backup)
 restic_pre_backup_hook: ""
