@@ -143,6 +143,9 @@ gatus_domain: "status.example.com"
 # gatus_alerting_telegram_token: "<BOT_TOKEN>"
 # gatus_alerting_telegram_id: "<CHAT_ID>"
 # gatus_alerting_email_host: "smtp.example.com"
+# gatus_alerting_email_port: 587
+# gatus_alerting_email_username: "alerts@example.com"
+# gatus_alerting_email_password: "<SMTP_PASSWORD>"
 # gatus_alerting_email_from: "alerts@example.com"
 # gatus_alerting_email_to: "admin@example.com"
 
