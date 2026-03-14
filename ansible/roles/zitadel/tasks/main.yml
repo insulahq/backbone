@@ -86,9 +86,13 @@
 
 - name: Wait for Zitadel to be ready
   uri:
-    url: "https://{{ zitadel_domain }}/debug/ready"
+    # Use the server's public IP with Host header to bypass DNS dependency —
+    # the auth.domain DNS record is created AFTER this check.
+    url: "https://{{ ansible_host }}/debug/ready"
+    headers:
+      Host: "{{ zitadel_domain }}"
     status_code: 200
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
+    validate_certs: false
   retries: 40
   delay: 5
   register: zitadel_ready

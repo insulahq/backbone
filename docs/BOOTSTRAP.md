@@ -13,6 +13,11 @@ A single `site.yml` run will **not** work from scratch due to circular dependenc
 3. DNS zone for your domain (e.g., `example.com`) with NS records pointing to your servers
 4. Hetzner Storagebox for backups
 5. Ansible 2.15+ on your control machine
+6. Ansible Galaxy collections installed:
+
+```bash
+ansible-galaxy install -r ansible/requirements.yml
+```
 
 ## Step 1: Configure Inventory and Variables
 
@@ -169,7 +174,44 @@ curl -I https://status.example.com
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
 ```
 
-## Step 11: Verify Everything
+After deploying Gatus, restart PostgreSQL containers so they can reach Gatus for alert delivery:
+
+```bash
+ssh root@<NS1_IP> "cd /opt/postgresql && docker compose up -d --force-recreate"
+ssh root@<NS2_IP> "cd /opt/postgresql && docker compose up -d --force-recreate"
+```
+
+## Step 11: Deploy Portainer
+
+Deploy Portainer CE for Docker management. Bound to NetBird IP only — not publicly accessible.
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
+```
+
+Access via NetBird mesh: `http://<netbird-ip>:9000`
+
+## Step 12: Zitadel Service Account (enables OIDC for Gatus + Portainer)
+
+Create a service account in Zitadel for API access. This enables automated OIDC application creation for Gatus and Portainer.
+
+1. Open `https://auth.example.com/ui/console` in a browser
+2. Go to **Users** → **Service Users** → **New**
+3. Create a user (e.g., `platform-admin`)
+4. Go to **Personal Access Tokens** → **Generate**
+5. Copy the token and add to `group_vars/all.yml`:
+   ```yaml
+   zitadel_service_pat: "<paste token here>"
+   ```
+6. Re-deploy Gatus and Portainer to enable OIDC:
+   ```bash
+   ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+   ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
+   ```
+
+The roles auto-create OIDC applications in Zitadel and configure SSO.
+
+## Step 13: Verify Everything
 
 ```bash
 # PowerDNS (both nodes serve DNS)
@@ -194,11 +236,17 @@ ssh root@<NS1_IP> "docker exec postgresql repmgr cluster show"
 ssh root@<NS1_IP> "netbird status"
 ssh root@<NS2_IP> "netbird status"
 
+# Gatus monitoring dashboard
+curl -I https://status.example.com
+
+# Portainer (via NetBird)
+curl -s http://<NS1_NETBIRD_IP>:9000/api/system/status
+
 # Backup
 ssh root@<NS1_IP> "systemctl status restic-backup.timer"
 ```
 
-## Step 12: Deploy Backups
+## Step 14: Deploy Backups
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml
@@ -214,6 +262,7 @@ These steps cannot be automated and must be done manually:
 
 1. **NetBird setup wizard** -- browser-based first-user setup
 2. **PAT and setup key creation** -- via NetBird dashboard
-3. **Storagebox SSH key registration** -- via Hetzner Robot panel
-4. **NetBird IP discovery** -- IPs are assigned dynamically on enrollment
-5. **DNS NS records** -- must be set at your domain registrar
+3. **Zitadel service account + PAT** -- via Zitadel Console (enables OIDC for Gatus + Portainer)
+4. **Storagebox SSH key registration** -- via Hetzner Robot panel
+5. **NetBird IP discovery** -- IPs are assigned dynamically on enrollment
+6. **DNS NS records** -- must be set at your domain registrar

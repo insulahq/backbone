@@ -15,12 +15,21 @@
   roles:
     - traefik
 
-- name: Deploy PostgreSQL primary/standby with repmgr
+- name: Deploy PostgreSQL primary node first
   hosts: dns_servers
   serial: 1
   tags: [postgresql]
   roles:
-    - postgresql_repmgr
+    - role: postgresql_repmgr
+      when: inventory_hostname == postgresql_primary_node
+
+- name: Deploy PostgreSQL standby node
+  hosts: dns_servers
+  serial: 1
+  tags: [postgresql]
+  roles:
+    - role: postgresql_repmgr
+      when: inventory_hostname != postgresql_primary_node
 
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers

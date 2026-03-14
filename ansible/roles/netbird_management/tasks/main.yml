@@ -64,8 +64,12 @@
 # the Docker volume (NOT in PostgreSQL), so it is NOT replicated automatically.
 # Without this sync, NS2 has an empty Dex DB and dashboard login fails when NS1
 # is down. We copy NS1's file every time so NS2 always has the latest credentials.
+# Sync idp.db (Dex SQLite credential store) from NS1 → NS2.
+# ignore_errors on the block because on first deploy, idp.db may not exist yet
+# (created only after the setup wizard is completed manually).
 - name: Sync idp.db from NS1 to NS2
   when: inventory_hostname == 'ns2'
+  ignore_errors: true
   block:
     - name: Extract idp.db from NS1 netbird container to NS1 host
       delegate_to: ns1
