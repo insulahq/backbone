@@ -48,10 +48,12 @@ restic_exclude_patterns:
   - "/tmp/*"
   - "/var/tmp/*"
 
-# Backup notifications (optional)
-restic_notify_on_failure: false
+# Backup notifications
+# Webhook defaults to the central alert_webhook_url from common role.
+# Override per-role if you want backup alerts to go somewhere different.
+restic_notify_on_failure: true
 restic_notify_email: ""
-restic_notify_webhook_url: ""  # POST JSON payload on failure (Slack, Discord, ntfy, etc.)
+restic_notify_webhook_url: "{{ alert_webhook_url | default('') }}"
 
 # Backup pre/post hooks (optional commands to run before/after backup)
 restic_pre_backup_hook: ""

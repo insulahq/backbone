@@ -129,6 +129,22 @@ ns2_backup_paths:
   - /root/.ssh
 
 # ============================================================================
+# Alerting (central webhook for all infrastructure alerts)
+# ============================================================================
+# All services POST JSON alerts here: backup failures, disk warnings,
+# PostgreSQL failover/promotion, split-brain detection, maintenance errors.
+#
+# Compatible with: ntfy, Slack (incoming webhook), Discord, Uptime Kuma,
+# Grafana OnCall, PagerDuty, or any endpoint that accepts JSON POST.
+#
+# Payload format:
+#   { "host": "ns1", "service": "backup|disk|postgresql|repmgr|docker",
+#     "level": "info|warning|critical", "message": "...", "timestamp": "..." }
+#
+# Leave empty to disable webhook alerts (alerts still go to systemd journal).
+alert_webhook_url: ""
+
+# ============================================================================
 # Domain
 # ============================================================================
 platform_domain: example.com

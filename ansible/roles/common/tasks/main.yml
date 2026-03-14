@@ -125,6 +125,14 @@
     enabled: yes
   tags: [common, docker]
 
+# Shared alert helper — sourced by all maintenance scripts
+- name: Deploy shared alert helper library
+  template:
+    src: phoenix-alert.sh.j2
+    dest: /usr/local/lib/phoenix-alert.sh
+    mode: '0644'
+  tags: [common, maintenance]
+
 # Docker cleanup — weekly prune of unused images, containers, networks, build cache
 - name: Deploy Docker cleanup script
   template:

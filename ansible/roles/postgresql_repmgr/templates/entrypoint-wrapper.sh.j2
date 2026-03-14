@@ -48,6 +48,39 @@ REPMGRD_PID=""
 WATCHDOG_PID=""
 
 # ==========================================================================
+# Webhook alerting — sends JSON to central alert endpoint
+# ==========================================================================
+# Uses ALERT_WEBHOOK_URL env var passed from docker-compose.
+# Inline implementation because this runs inside a Docker container
+# (cannot source the host's phoenix-alert.sh library).
+send_alert() {
+  local level="$1"   # info | warning | critical
+  local message="$2"
+  local timestamp
+  timestamp="$(date -Iseconds 2>/dev/null || date)"
+
+  echo "[${timestamp}] ALERT ${level}: [repmgr] ${message}"
+
+  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+    # Escape message for JSON
+    local safe_msg
+    safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+
+    # Use curl if available, otherwise try wget
+    if command -v curl &>/dev/null; then
+      curl -fsS --retry 2 --max-time 10 -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
+        "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+    elif command -v wget &>/dev/null; then
+      wget -qO- --timeout=10 --post-data="{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
+        --header="Content-Type: application/json" \
+        "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+    fi
+  fi
+}
+
+# ==========================================================================
 # Signal handler — clean shutdown on SIGTERM/SIGINT (Docker stop)
 # ==========================================================================
 shutdown_handler() {
@@ -100,6 +133,14 @@ if [ "$CHECKS" -eq 0 ]; then
   exit 1
 fi
 echo "PROMOTE CHECK PASSED: External connectivity confirmed, primary is truly unreachable" >&2
+
+# Send promotion alert via webhook (env vars from docker-compose)
+if [ -n "${ALERT_WEBHOOK_URL:-}" ] && command -v curl &>/dev/null; then
+  curl -fsS --retry 2 --max-time 10 -X POST \
+    -H "Content-Type: application/json" \
+    -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"PROMOTION: ${NODE_NAME} promoted from standby to primary (peer unreachable)\", \"timestamp\": \"$(date -Iseconds)\"}" \
+    "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+fi
 exit 0
 SCRIPT
   chmod +x "$PROMOTE_CHECK"
@@ -357,6 +398,8 @@ start_as_primary() {
   PG_PID=$!
   until pg_isready -q; do sleep 1; done
 
+  send_alert "info" "PostgreSQL started as PRIMARY on ${NODE_NAME}"
+
   echo "==> Registering as primary (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" primary register --force 2>&1 || {
     echo "==> Primary registration returned non-zero (may already be registered)"
@@ -397,6 +440,7 @@ start_as_standby() {
     # --- FAILBACK: This node was primary but peer has been promoted ---
     # Data has diverged — use pg_rewind to sync, or full re-clone as fallback
     echo "==> FAILBACK DETECTED: This node was primary, peer has been promoted"
+    send_alert "warning" "FAILBACK: ${NODE_NAME} was primary, rejoining as standby of ${PEER_NAME}"
     echo "==> Running pg_rewind to sync with new primary ($PEER_NAME)..."
 
     # pg_rewind needs the target stopped
@@ -432,6 +476,8 @@ start_as_standby() {
   postgres -D "$PGDATA" &
   PG_PID=$!
   until pg_isready -q; do sleep 1; done
+
+  send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
   echo "==> Registering as standby (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
@@ -484,6 +530,7 @@ split_brain_watchdog() {
     # SPLIT-BRAIN DETECTED: Both nodes are running as primary!
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     echo "!!! SPLIT-BRAIN DETECTED: Both ${NODE_NAME} and ${PEER_NAME} are PRIMARY !!!" >&2
+    send_alert "critical" "SPLIT-BRAIN DETECTED: Both ${NODE_NAME} and ${PEER_NAME} are running as PRIMARY"
 
     local local_tl peer_tl
     local_tl=$(psql -U "$REPMGR_USER" -d "$REPMGR_DB" \
@@ -526,6 +573,7 @@ split_brain_watchdog() {
 # sees the .demoted marker → starts as standby with pg_rewind.
 self_demote() {
   echo "==> SELF-DEMOTING: Writing demotion marker and shutting down..." >&2
+  send_alert "critical" "SELF-DEMOTION: ${NODE_NAME} demoting from primary to standby (split-brain recovery)"
   touch "$DEMOTED_MARKER"
 
   # Stop PostgreSQL to prevent further writes

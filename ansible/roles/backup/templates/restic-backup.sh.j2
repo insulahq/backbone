@@ -3,6 +3,7 @@
 # Backs up critical data to Hetzner Storagebox
 
 set -euo pipefail
+source /usr/local/lib/phoenix-alert.sh
 
 # Configuration
 export RESTIC_REPOSITORY="{{ restic_repository }}"
@@ -32,6 +33,7 @@ error() {
 notify_failure() {
     local msg="$1"
     error "$msg"
+    phoenix_alert "critical" "backup" "Backup FAILED on {{ inventory_hostname }}: $msg"
 {% if restic_healthcheck_url %}
     curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
 {% endif %}
@@ -40,12 +42,6 @@ notify_failure() {
         echo "Backup FAILED on {{ inventory_hostname }} at $(date -Iseconds): $msg" | \
             mail -s "[Phoenix Host] Backup FAILED on {{ inventory_hostname }}" "{{ restic_notify_email }}"
     fi
-{% endif %}
-{% if restic_notify_webhook_url %}
-    curl -fsS --retry 3 -X POST \
-        -H "Content-Type: application/json" \
-        -d "{\"host\": \"{{ inventory_hostname }}\", \"status\": \"failed\", \"message\": \"$msg\", \"timestamp\": \"$(date -Iseconds)\"}" \
-        "{{ restic_notify_webhook_url }}" > /dev/null 2>&1 || true
 {% endif %}
 }
 

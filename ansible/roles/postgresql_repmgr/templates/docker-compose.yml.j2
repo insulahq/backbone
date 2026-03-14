@@ -36,6 +36,10 @@ services:
       # Used for failover detection, pg_rewind, split-brain watchdog.
       PEER_NAME: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 
+      # Webhook URL for failover/promotion/split-brain alerts.
+      # Uses the central alert_webhook_url from common role.
+      ALERT_WEBHOOK_URL: "{{ alert_webhook_url }}"
+
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []
     healthcheck:

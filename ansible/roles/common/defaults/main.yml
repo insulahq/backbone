@@ -8,6 +8,20 @@ timezone: UTC
 # SSH
 ssh_port: 22
 
+# ============================================================================
+# Central alerting — single webhook URL for all infrastructure alerts
+# ============================================================================
+# All maintenance scripts, monitors, and failover events POST JSON here.
+# Compatible with: ntfy, Slack (incoming webhook), Discord, Uptime Kuma push,
+# Grafana OnCall, PagerDuty, or any endpoint that accepts JSON POST.
+#
+# Payload format (consistent across all services):
+#   { "host": "ns1", "service": "backup|disk|postgresql|repmgr|docker",
+#     "level": "info|warning|critical", "message": "...", "timestamp": "..." }
+#
+# Set in group_vars/all.yml. Leave empty to disable webhook alerts.
+alert_webhook_url: ""
+
 # Docker daemon defaults (daemon.json)
 # Applied globally — containers without explicit logging config inherit these limits
 docker_log_max_size: "100m"
@@ -28,4 +42,3 @@ disk_monitor_enabled: true
 disk_monitor_schedule: "*-*-* *:00:00"    # Every hour
 disk_monitor_warn_percent: 80             # Warn at 80% disk usage
 disk_monitor_crit_percent: 90             # Critical at 90% disk usage
-disk_monitor_webhook_url: ""              # POST JSON alert (Slack, Discord, ntfy, etc.)

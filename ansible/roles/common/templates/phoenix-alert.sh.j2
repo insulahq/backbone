@@ -1,0 +1,38 @@
+#!/bin/bash
+# Phoenix Host — shared alert helper library.
+# Deployed by Ansible (common role). Sourced by all maintenance scripts.
+#
+# Usage:
+#   source /usr/local/lib/phoenix-alert.sh
+#   phoenix_alert "critical" "backup" "Backup failed with exit code 1"
+#   phoenix_alert "warning"  "disk"   "/ is 85% full (2.1G available)"
+#   phoenix_alert "info"     "repmgr" "Standby promoted to primary"
+
+PHOENIX_HOSTNAME="{{ inventory_hostname }}"
+PHOENIX_WEBHOOK_URL="{{ alert_webhook_url }}"
+
+# Send an alert via webhook.
+# Args: $1=level (info|warning|critical), $2=service, $3=message
+phoenix_alert() {
+    local level="$1"
+    local service="$2"
+    local message="$3"
+    local timestamp
+    timestamp="$(date -Iseconds)"
+
+    # Always log to stdout (captured by systemd journal)
+    echo "[${timestamp}] ALERT ${level^^}: [${service}] ${message}"
+
+    # Send webhook if configured
+    if [ -n "$PHOENIX_WEBHOOK_URL" ]; then
+        # Escape double quotes and backslashes in message for JSON safety
+        local safe_msg
+        safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
+
+        curl -fsS --retry 3 --max-time 10 -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"host\": \"${PHOENIX_HOSTNAME}\", \"service\": \"${service}\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
+            "$PHOENIX_WEBHOOK_URL" > /dev/null 2>&1 || \
+            echo "[${timestamp}] WARNING: Failed to send webhook alert to ${PHOENIX_WEBHOOK_URL}"
+    fi
+}

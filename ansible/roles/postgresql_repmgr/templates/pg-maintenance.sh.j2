@@ -5,16 +5,21 @@
 # Runs weekly via systemd timer.
 
 set -euo pipefail
+source /usr/local/lib/phoenix-alert.sh
 
 CONTAINER="postgresql"
+ERRORS=0
 
 log() {
     echo "[$(date -Iseconds)] PG-MAINTENANCE: $*"
 }
 
+# Alert on unexpected errors
+trap 'phoenix_alert "critical" "postgresql" "PostgreSQL maintenance failed unexpectedly on line $LINENO"' ERR
+
 # Check if PostgreSQL is running
 if ! docker exec "$CONTAINER" pg_isready -U postgres -q 2>/dev/null; then
-    log "PostgreSQL not ready — skipping maintenance"
+    phoenix_alert "warning" "postgresql" "PostgreSQL not ready — skipping maintenance"
     exit 0
 fi
 
@@ -32,15 +37,17 @@ DATABASES=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT datname FROM 
 
 for DB in $DATABASES; do
     log "Running VACUUM ANALYZE on database: $DB"
-    docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1 || {
-        log "WARNING: VACUUM ANALYZE failed on $DB"
-    }
+    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1; then
+        phoenix_alert "warning" "postgresql" "VACUUM ANALYZE failed on database $DB"
+        ERRORS=$((ERRORS + 1))
+    fi
 
     # Reindex system catalogs (prevents index bloat on heavily-written databases like Zitadel)
     log "Running REINDEX SYSTEM on database: $DB"
-    docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM $DB" 2>&1 || {
-        log "WARNING: REINDEX SYSTEM failed on $DB"
-    }
+    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM $DB" 2>&1; then
+        phoenix_alert "warning" "postgresql" "REINDEX SYSTEM failed on database $DB"
+        ERRORS=$((ERRORS + 1))
+    fi
 done
 
 # Check and report replication slot status (warn about lagging slots)
@@ -58,7 +65,10 @@ if [ -n "$SLOT_INFO" ]; then
             lag_mb=$((${lag:-0} / 1048576))
             log "  Slot: $name | Active: $active | WAL lag: ${lag_mb}MB"
             if [ "${lag_mb}" -gt 5120 ]; then
-                log "  WARNING: Slot $name has ${lag_mb}MB WAL lag (>5GB). Consider dropping if standby is permanently offline."
+                phoenix_alert "warning" "postgresql" "Replication slot $name has ${lag_mb}MB WAL lag (>5GB). Standby may need re-clone."
+            fi
+            if [ "$active" = "f" ] && [ "${lag_mb}" -gt 1024 ]; then
+                phoenix_alert "warning" "postgresql" "Replication slot $name is INACTIVE with ${lag_mb}MB WAL lag. Consider dropping if standby is permanently offline."
             fi
         fi
     done
@@ -75,4 +85,8 @@ docker exec "$CONTAINER" psql -U postgres -c "
     WHERE datistemplate = false
     ORDER BY pg_database_size(datname) DESC" 2>&1
 
-log "PostgreSQL maintenance completed"
+if [ "$ERRORS" -gt 0 ]; then
+    phoenix_alert "warning" "postgresql" "PostgreSQL maintenance completed with $ERRORS error(s)"
+else
+    log "PostgreSQL maintenance completed successfully"
+fi

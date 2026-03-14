@@ -43,6 +43,24 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | Restic cache cleanup | Weekly (Sun, with backup) | Cleans stale Restic cache entries |
 | Journal rotation | Automatic | systemd journal capped at 500MB, 4-week retention |
 
+### Alerting
+
+All infrastructure alerts flow through a single `alert_webhook_url` (set in `group_vars/all.yml`). Every alert is a JSON POST with a consistent payload:
+
+```json
+{ "host": "ns1", "service": "backup", "level": "critical", "message": "...", "timestamp": "..." }
+```
+
+| Service | Events | Level |
+|---------|--------|-------|
+| `backup` | Backup failed, unexpected error | critical |
+| `disk` | Filesystem 80%+ full | warning/critical |
+| `docker` | Cleanup script failed | critical |
+| `postgresql` | VACUUM/REINDEX failed, replication slot lag >5GB, inactive slot | warning |
+| `repmgr` | Node started as primary/standby, failback detected, promotion, split-brain detected, self-demotion | info/warning/critical |
+
+Compatible with: ntfy, Slack, Discord, Uptime Kuma, Grafana OnCall, PagerDuty, or any JSON POST endpoint. Host-side scripts use a shared library (`/usr/local/lib/phoenix-alert.sh`); the PostgreSQL container uses an inline implementation via `ALERT_WEBHOOK_URL` env var.
+
 ---
 
 ## 3. How to Deploy
