@@ -13,8 +13,9 @@ export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
 # SFTP options: bypass system SSH config to avoid NetBird ProxyCommand interception.
 # NetBird installs a global Match exec rule that intercepts ALL SSH connections.
 # We use -F /dev/null to skip SSH config and specify all options explicitly.
+# restic's sftp.args replaces the FULL sftp command (including binary name).
 # Using a bash array ensures the multi-word sftp.args value is passed as a single argument.
-SFTP_ARGS="-F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }}"
+SFTP_ARGS="sftp -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }}"
 RESTIC_OPTS=("-o" "sftp.args=${SFTP_ARGS}")
 
 # Logging

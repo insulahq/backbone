@@ -116,8 +116,10 @@
   changed_when: true
 
 - name: Test Storagebox SFTP connection
-  # Hetzner Storagebox only supports SFTP, not shell commands
-  shell: "echo quit | sftp -o ConnectTimeout=10 -i {{ restic_ssh_key_path }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }}"
+  # Hetzner Storagebox only supports SFTP, not shell commands.
+  # Use -F /dev/null to bypass NetBird SSH config interception (gotcha 9).
+  # Use the restic-specific known_hosts file seeded by the keyscan task above.
+  shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }}"
   register: sftp_test
   changed_when: false
   failed_when: sftp_test.rc != 0

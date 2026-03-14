@@ -35,7 +35,7 @@ services:
         max-size: "100m"
         max-file: "2"
 
-{% if powerdns_admin_enabled %}
+{% if powerdns_admin_enabled | bool %}
   # PowerDNS-Admin — Web UI for managing PowerDNS ({{ powerdns_admin_node }} only)
   pdns-admin:
     image: {{ powerdns_admin_image }}
@@ -75,14 +75,14 @@ services:
     restart: unless-stopped
     depends_on:
       - pdns
-{% if powerdns_admin_enabled %}
+{% if powerdns_admin_enabled | bool %}
       - pdns-admin
 {% endif %}
     volumes:
       - {{ powerdns_install_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}:8081"
-{% if powerdns_admin_enabled %}
+{% if powerdns_admin_enabled | bool %}
       - "{{ powerdns_bind_interface }}:{{ powerdns_nginx_admin_port }}:8080"
 {% endif %}
     networks:
@@ -104,7 +104,7 @@ networks:
   postgresql_default:
     external: true
 
-{% if powerdns_admin_enabled %}
+{% if powerdns_admin_enabled | bool %}
 volumes:
   pdns_admin_data:
 {% endif %}

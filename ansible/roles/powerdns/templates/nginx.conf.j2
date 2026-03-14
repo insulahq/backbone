@@ -55,7 +55,7 @@ http {
         }
     }
 
-{% if powerdns_admin_enabled %}
+{% if powerdns_admin_enabled | bool %}
     # PowerDNS-Admin UI (port 8080)
     server {
         listen 8080;

@@ -16,6 +16,10 @@ services:
       - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] }}"
       - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] }}"
     environment:
+      # Data directory — must match the volume mount target.
+      # Explicit because the custom entrypoint replaces the image default.
+      PGDATA: "{{ postgresql_data_dir }}"
+
       # PostgreSQL superuser credentials (used by initdb on first run)
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "{{ postgresql_superuser_password }}"
