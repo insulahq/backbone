@@ -153,7 +153,32 @@ curl -s https://auth.example.com/.well-known/openid-configuration | python3 -m j
 
 **Important:** The masterkey in `ansible/.generated_secrets/zitadel_masterkey` **cannot be changed** after initialization. Back it up securely.
 
-## Step 10: Verify Everything
+## Step 10: Deploy Gatus Monitoring
+
+Deploy Gatus as the HA status dashboard and alert receiver. Both servers run Gatus with a shared PostgreSQL backend. Deployed with `serial: 1` so the first node creates the database before the second starts.
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+```
+
+Gatus automatically:
+- Creates its database in the PostgreSQL HA cluster
+- Creates DNS A/AAAA records for `status.example.com` via the PowerDNS API
+- Starts receiving push events from all maintenance scripts
+
+After deployment, verify:
+
+```bash
+curl -I https://status.example.com
+```
+
+**Notification targets:** To forward alerts to Slack, Discord, ntfy, email, etc., set `gatus_alerting_*` variables in `group_vars/all.yml` and re-deploy:
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+```
+
+## Step 11: Verify Everything
 
 ```bash
 # PowerDNS (both nodes serve DNS)
@@ -182,7 +207,7 @@ ssh root@<NS2_IP> "netbird status"
 ssh root@<NS1_IP> "systemctl status restic-backup.timer"
 ```
 
-## Step 11: Deploy Backups
+## Step 12: Deploy Backups
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml

@@ -11,5 +11,6 @@
 
 - name: Deploy backup configuration
   hosts: backup_targets
+  tags: [backup]
   roles:
     - backup

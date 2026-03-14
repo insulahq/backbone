@@ -9,5 +9,6 @@
 
 - name: Deploy standalone Traefik reverse proxy
   hosts: dns_servers
+  tags: [traefik]
   roles:
     - traefik

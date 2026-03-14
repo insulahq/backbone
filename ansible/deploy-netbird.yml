@@ -4,5 +4,6 @@
 
 - name: Deploy NetBird management server
   hosts: dns_servers
+  tags: [netbird, netbird_management]
   roles:
     - netbird_management

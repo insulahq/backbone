@@ -1,12 +1,11 @@
 ---
-# Phoenix Host -- Global Variables
+# Hosting Platform -- Global Variables
 # Copy to all.yml and fill in your values.
 # This file is gitignored -- never commit the real all.yml.
 
 # ============================================================================
 # OS & System
 # ============================================================================
-os_version: debian_13_trixie
 timezone: UTC
 
 # ============================================================================
@@ -14,16 +13,6 @@ timezone: UTC
 # ============================================================================
 ssh_port: 22
 ssh_break_glass_enabled: true
-fail2ban_enabled: true
-nftables_policy: simple
-nftables_allow_ssh: true
-
-# ============================================================================
-# Docker
-# ============================================================================
-docker_version: latest
-docker_compose_version: "2.24.5"
-docker_install_source: official_repo
 
 # ============================================================================
 # NetBird VPN Mesh
@@ -70,7 +59,7 @@ powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 zitadel_domain: "auth.example.com"
 
 # Organization name shown in the console
-zitadel_org_name: "Phoenix Host"
+zitadel_org_name: "Hosting Platform"
 
 # Initial admin user (password change required on first login)
 zitadel_admin_username: "admin"
@@ -88,7 +77,7 @@ zitadel_admin_email: "admin@example.com"
 # zitadel_smtp_password: "<YOUR_SMTP_PASSWORD>"
 # zitadel_smtp_tls: true
 # zitadel_smtp_from: "noreply@example.com"
-# zitadel_smtp_from_name: "Phoenix Host"
+# zitadel_smtp_from_name: "Hosting Platform"
 
 # ============================================================================
 # PostgreSQL HA (shared by PowerDNS + NetBird + Zitadel)
@@ -139,7 +128,7 @@ gatus_domain: "status.example.com"
 # gatus_alerting_slack_webhook: "https://hooks.slack.com/services/..."
 # gatus_alerting_discord_webhook: "https://discord.com/api/webhooks/..."
 # gatus_alerting_ntfy_url: "https://ntfy.sh"
-# gatus_alerting_ntfy_topic: "phoenix-alerts"
+# gatus_alerting_ntfy_topic: "platform-alerts-sma98dalblk2anbc"
 # gatus_alerting_telegram_token: "<BOT_TOKEN>"
 # gatus_alerting_telegram_id: "<CHAT_ID>"
 # gatus_alerting_email_host: "smtp.example.com"

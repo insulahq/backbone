@@ -25,6 +25,13 @@
   run_once: true
   no_log: true
 
+- name: Generate datastore encryption key (once per play)
+  set_fact:
+    netbird_datastore_encryption_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/netbird_datastore_encryption_key length=32 chars=ascii_letters,digits') }}"
+  when: netbird_datastore_encryption_key is not defined
+  run_once: true
+  no_log: true
+
 - name: Deploy docker-compose.yml
   template:
     src: docker-compose.yml.j2

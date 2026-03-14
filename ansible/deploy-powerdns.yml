@@ -12,5 +12,6 @@
 
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers
+  tags: [powerdns, dns]
   roles:
     - powerdns

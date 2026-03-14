@@ -4,5 +4,6 @@
 
 - name: Deploy NetBird peers
   hosts: netbird_peers
+  tags: [netbird, netbird_peer]
   roles:
     - netbird_peer

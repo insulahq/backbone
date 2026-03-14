@@ -45,17 +45,17 @@ services:
       pdns:
         condition: service_started
     environment:
-      SECRET_KEY: {{ powerdns_admin_secret_key }}
-      BIND_ADDRESS: 0.0.0.0
-      PORT: {{ powerdns_admin_port }}
-      SQLA_DB_HOST: postgresql
-      SQLA_DB_PORT: 5432
-      SQLA_DB_NAME: {{ powerdns_admin_sqla_db_name }}
-      SQLA_DB_USER: {{ powerdns_admin_sqla_db_user }}
-      SQLA_DB_PASSWORD: {{ powerdns_admin_sqla_db_password }}
-      PDNS_API_KEY: {{ powerdns_api_key }}
-      PDNS_API_URL: http://pdns:{{ powerdns_webserver_port }}
-      PDNS_VERSION: {{ powerdns_version }}
+      SECRET_KEY: "{{ powerdns_admin_secret_key }}"
+      BIND_ADDRESS: "0.0.0.0"
+      PORT: "{{ powerdns_admin_port }}"
+      SQLA_DB_HOST: "postgresql"
+      SQLA_DB_PORT: "5432"
+      SQLA_DB_NAME: "{{ powerdns_admin_sqla_db_name }}"
+      SQLA_DB_USER: "{{ powerdns_admin_sqla_db_user }}"
+      SQLA_DB_PASSWORD: "{{ powerdns_admin_sqla_db_password }}"
+      PDNS_API_KEY: "{{ powerdns_api_key }}"
+      PDNS_API_URL: "http://pdns:{{ powerdns_webserver_port }}"
+      PDNS_VERSION: "{{ powerdns_version }}"
     volumes:
       - pdns_admin_data:/data
     networks:

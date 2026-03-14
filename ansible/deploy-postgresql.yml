@@ -14,5 +14,6 @@
 - name: Deploy PostgreSQL primary/standby with repmgr
   hosts: dns_servers
   serial: 1
+  tags: [postgresql]
   roles:
     - postgresql_repmgr

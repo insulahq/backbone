@@ -49,7 +49,7 @@
       "SELECT 1 FROM pg_roles WHERE rolname='{{ gatus_db_user }}'"
   register: gatus_user_check
   changed_when: false
-  run_once: true
+  when: inventory_hostname == postgresql_primary_node
   tags: [gatus]
 
 - name: Create Gatus database user
@@ -58,8 +58,9 @@
     command: >
       psql -U postgres -c
       "CREATE USER {{ gatus_db_user }} WITH PASSWORD '{{ gatus_db_password }}'"
-  when: gatus_user_check.stdout | default('') | trim == ""
-  run_once: true
+  when:
+    - inventory_hostname == postgresql_primary_node
+    - gatus_user_check.stdout | default('') | trim == ""
   no_log: true
   tags: [gatus]
 
@@ -68,7 +69,7 @@
     container: postgresql
     command: >
       bash -c "psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='{{ gatus_db_name }}'\" | grep -q 1 || createdb -U postgres -O {{ gatus_db_user }} {{ gatus_db_name }}"
-  run_once: true
+  when: inventory_hostname == postgresql_primary_node
   changed_when: false
   tags: [gatus]
 

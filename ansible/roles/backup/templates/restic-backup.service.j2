@@ -13,7 +13,9 @@ Group=root
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=full
-ProtectHome=yes
+# ProtectHome=read-only: allows reading /root/.ssh (backed up) while preventing writes
+# Cannot use ProtectHome=yes — it blocks reading /root/.ssh entirely
+ProtectHome=read-only
 ReadWritePaths={{ restic_config_dir }} {{ restic_cache_dir }} /var/log/restic
 
 # Timeout (4 hours max)

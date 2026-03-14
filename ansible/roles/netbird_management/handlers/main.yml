@@ -4,7 +4,8 @@
 - name: restart netbird
   community.docker.docker_compose_v2:
     project_src: "{{ netbird_install_dir }}"
-    state: restarted
+    state: present
+    recreate: always
 
 - name: reload systemd
   systemd:

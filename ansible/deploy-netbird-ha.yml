@@ -11,21 +11,25 @@
 
 - name: Deploy standalone Traefik reverse proxy
   hosts: dns_servers
+  tags: [traefik]
   roles:
     - traefik
 
 - name: Deploy PostgreSQL primary/standby with repmgr
   hosts: dns_servers
   serial: 1
+  tags: [postgresql]
   roles:
     - postgresql_repmgr
 
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers
+  tags: [powerdns, dns]
   roles:
     - powerdns
 
 - name: Deploy NetBird management server
   hosts: dns_servers
+  tags: [netbird, netbird_management]
   roles:
     - netbird_management

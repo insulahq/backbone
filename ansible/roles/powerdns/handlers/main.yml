@@ -4,4 +4,5 @@
 - name: restart powerdns
   community.docker.docker_compose_v2:
     project_src: "{{ powerdns_install_dir }}"
-    state: restarted
+    state: present
+    recreate: always

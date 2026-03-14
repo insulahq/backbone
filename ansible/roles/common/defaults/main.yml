@@ -7,6 +7,7 @@ timezone: UTC
 
 # SSH
 ssh_port: 22
+ssh_break_glass_enabled: true
 
 # ============================================================================
 # Central alerting — single webhook URL for all infrastructure alerts
