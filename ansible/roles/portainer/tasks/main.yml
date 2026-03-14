@@ -29,7 +29,7 @@
   debug:
     msg:
       - "Portainer {{ portainer_version }} deployed on {{ inventory_hostname }}"
-      - "Dashboard: https://{{ portainer_bind_interface }}:{{ portainer_https_port }}"
+      - "Dashboard: http://{{ portainer_bind_interface }}:{{ portainer_port }}"
       - ""
       - "Access via NetBird mesh only (not publicly accessible)."
       - "On first visit, create an admin user in the Portainer UI."

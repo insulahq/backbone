@@ -1,21 +1,22 @@
 ---
 # Portainer CE — Docker Management ({{ inventory_hostname }})
-# Bound to NetBird IP only — access via https://{{ portainer_bind_interface }}:{{ portainer_https_port }}
-# NOT publicly accessible. No Traefik integration.
+# Bound to NetBird IP only — access via http://{{ portainer_bind_interface }}:{{ portainer_port }}
+# No TLS — WireGuard tunnel encrypts traffic. Avoids self-signed cert browser warnings.
 
 services:
   portainer:
     image: {{ portainer_image }}
     container_name: portainer
     restart: unless-stopped
+    command: --http-disabled=false --tunnel-server-addr=
     ports:
       # Bind to NetBird WireGuard IP only — not reachable from the public internet
-      - "{{ portainer_bind_interface }}:{{ portainer_https_port }}:9443"
+      - "{{ portainer_bind_interface }}:{{ portainer_port }}:9000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portainer_data:/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://localhost:9443/api/system/status"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/api/system/status"]
       interval: 30s
       timeout: 5s
       retries: 3
