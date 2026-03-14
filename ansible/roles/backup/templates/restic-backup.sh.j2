@@ -3,7 +3,7 @@
 # Backs up critical data to Hetzner Storagebox
 
 set -euo pipefail
-source /usr/local/lib/phoenix-alert.sh
+source /usr/local/lib/platform-alert.sh
 
 # Configuration
 export RESTIC_REPOSITORY="{{ restic_repository }}"
@@ -34,14 +34,14 @@ error() {
 notify_failure() {
     local msg="$1"
     error "$msg"
-    phoenix_alert "critical" "backup" "Backup FAILED on {{ inventory_hostname }}: $msg"
+    platform_alert "critical" "backup" "Backup FAILED on {{ inventory_hostname }}: $msg"
 {% if restic_healthcheck_url %}
     curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
 {% endif %}
 {% if restic_notify_on_failure and restic_notify_email %}
     if command -v mail &> /dev/null; then
         echo "Backup FAILED on {{ inventory_hostname }} at $(date -Iseconds): $msg" | \
-            mail -s "[Phoenix Host] Backup FAILED on {{ inventory_hostname }}" "{{ restic_notify_email }}"
+            mail -s "[Hosting Platform] Backup FAILED on {{ inventory_hostname }}" "{{ restic_notify_email }}"
     fi
 {% endif %}
 }
@@ -139,7 +139,7 @@ log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"
 log "Repository size: $REPO_SIZE bytes"
 
 # Report success to Gatus dashboard
-phoenix_alert "info" "backup" "Backup completed: $SNAPSHOT_COUNT snapshots, $REPO_SIZE bytes"
+platform_alert "info" "backup" "Backup completed: $SNAPSHOT_COUNT snapshots, $REPO_SIZE bytes"
 
 # Health check ping (success)
 {% if restic_healthcheck_url %}

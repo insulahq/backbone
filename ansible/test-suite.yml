@@ -1,5 +1,5 @@
 ---
-# Phoenix Host — System Test Suite
+# Hosting Platform — System Test Suite
 #
 # Comprehensive tests for all infrastructure components, service integrations,
 # OIDC authentication, and failover scenarios.
@@ -312,7 +312,7 @@
       tags: [backup]
 
     - name: "Backup | Storagebox SFTP connectivity"
-      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/phoenix-host.key') }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }} 2>&1"
+      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/hosting-platform.key') }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }} 2>&1"
       register: _t_backup_sftp
       changed_when: false
       ignore_errors: true
@@ -531,8 +531,8 @@
       when: zitadel_service_pat | default('') | length > 0
       tags: [oidc]
 
-    # --- Verify Phoenix Host OIDC apps exist in Zitadel ---
-    - name: "OIDC | List apps in Phoenix Host project"
+    # --- Verify Hosting Platform OIDC apps exist in Zitadel ---
+    - name: "OIDC | List apps in Hosting Platform project"
       uri:
         url: "{{ _zitadel_url }}/management/v1/projects/{{ (_t_zitadel_pat.json.result | default([]) | first).id | default('') }}/apps/_search"
         method: POST
@@ -926,7 +926,7 @@
       debug:
         msg: |
           ╔══════════════════════════════════════════════════════════════╗
-          ║                  PHOENIX HOST TEST RESULTS                  ║
+          ║               HOSTING PLATFORM TEST RESULTS                  ║
           ╠══════════════════════════════════════════════════════════════╣
           {% for r in _all_results %}
           ║ {{ '✓' if r.passed else '✗' }} [{{ '%-7s' | format(r.host) }}] {{ '%-48s' | format(r.name[:48]) }}║

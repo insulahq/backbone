@@ -94,7 +94,7 @@
   no_log: true
   tags: [gatus]
 
-- name: Search for Phoenix Host project in Zitadel
+- name: Search for Hosting Platform project in Zitadel
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
     method: POST
@@ -105,7 +105,7 @@
     body:
       queries:
         - nameQuery:
-            name: "Phoenix Host"
+            name: "Hosting Platform"
             method: TEXT_QUERY_METHOD_EQUALS
     status_code: 200
     validate_certs: "{{ gatus_validate_certs | default(false) }}"
@@ -116,7 +116,7 @@
     - gatus_oidc_client_id | default('') | length == 0
   tags: [gatus]
 
-- name: Create Phoenix Host project if not exists
+- name: Create Hosting Platform project if not exists
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects"
     method: POST
@@ -125,7 +125,7 @@
       Content-Type: application/json
     body_format: json
     body:
-      name: "Phoenix Host"
+      name: "Hosting Platform"
     status_code: [200]
     validate_certs: "{{ gatus_validate_certs | default(false) }}"
   register: gatus_project_created
@@ -372,13 +372,13 @@
   ignore_errors: true
   tags: [gatus, dns]
 
-# --- Update phoenix-alert.sh with Gatus endpoint info ---
+# --- Update platform-alert.sh with Gatus endpoint info ---
 # Re-deploy the shared alert library now that we know the Gatus token and port
 
 - name: Update shared alert helper with Gatus endpoint info
   template:
-    src: ../../../common/templates/phoenix-alert.sh.j2
-    dest: /usr/local/lib/phoenix-alert.sh
+    src: ../../../common/templates/platform-alert.sh.j2
+    dest: /usr/local/lib/platform-alert.sh
     mode: '0644'
   tags: [gatus]
 

@@ -218,7 +218,7 @@ ssh root@<NODE> "systemctl start restic-backup.service"  # Re-initializes repo
 ssh root@<NODE> "journalctl -u restic-backup.service --since '24 hours ago'"
 
 # Check Storagebox connectivity
-ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/phoenix-host.key <USER>@<HOST>"
+ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/hosting-platform.key <USER>@<HOST>"
 
 # Run backup manually with verbose output
 ssh root@<NODE> "/etc/restic/backup.sh"

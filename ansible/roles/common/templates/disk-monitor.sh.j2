@@ -4,7 +4,7 @@
 # Runs hourly via systemd timer.
 
 set -euo pipefail
-source /usr/local/lib/phoenix-alert.sh
+source /usr/local/lib/platform-alert.sh
 
 WARN_PERCENT={{ disk_monitor_warn_percent }}
 CRIT_PERCENT={{ disk_monitor_crit_percent }}
@@ -22,10 +22,10 @@ while IFS= read -r line; do
     AVAIL=$(echo "$line" | awk '{print $4}')
 
     if [ "$USAGE" -ge "$CRIT_PERCENT" ]; then
-        phoenix_alert "critical" "disk" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
+        platform_alert "critical" "disk" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
         ALERT_COUNT=$((ALERT_COUNT + 1))
     elif [ "$USAGE" -ge "$WARN_PERCENT" ]; then
-        phoenix_alert "warning" "disk" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
+        platform_alert "warning" "disk" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
         ALERT_COUNT=$((ALERT_COUNT + 1))
     fi
 done < <(df -h -t ext4 -t xfs -t btrfs -t ext3 2>/dev/null || df -h --exclude-type=tmpfs --exclude-type=devtmpfs --exclude-type=overlay --exclude-type=squashfs 2>/dev/null)
@@ -44,5 +44,5 @@ fi
 if [ "$ALERT_COUNT" -eq 0 ]; then
     log "All filesystems within thresholds (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
     # Report healthy status to Gatus dashboard
-    phoenix_alert "info" "disk" "All filesystems OK (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
+    platform_alert "info" "disk" "All filesystems OK (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
 fi

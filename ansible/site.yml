@@ -1,5 +1,5 @@
 ---
-# Phoenix Host -- Infrastructure Playbook
+# Hosting Platform -- Infrastructure Playbook
 # Deploys fully redundant DNS + VPN mesh infrastructure on ns1 + ns2
 #
 # Bootstrap order matters:

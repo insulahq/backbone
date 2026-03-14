@@ -8,7 +8,7 @@ storage:
   path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432/{{ gatus_db_name }}?sslmode=disable"
 
 ui:
-  title: "Phoenix Host"
+  title: "Hosting Platform"
   header: "Infrastructure Status"
 
 {% if gatus_oidc_client_id %}
@@ -111,7 +111,7 @@ alerting:
 # ============================================================================
 # External endpoints — receive pushes from infrastructure scripts
 # ============================================================================
-# phoenix-alert.sh and entrypoint-wrapper.sh push status updates here.
+# platform-alert.sh and entrypoint-wrapper.sh push status updates here.
 # Key format: {group}_{name} (e.g., ns1_backup, ns2_disk)
 # Alerts auto-applied from alerting providers with default-alert enabled.
 external-endpoints:

@@ -128,8 +128,8 @@
 # Shared alert helper — sourced by all maintenance scripts
 - name: Deploy shared alert helper library
   template:
-    src: phoenix-alert.sh.j2
-    dest: /usr/local/lib/phoenix-alert.sh
+    src: platform-alert.sh.j2
+    dest: /usr/local/lib/platform-alert.sh
     mode: '0644'
   tags: [common, maintenance]
 

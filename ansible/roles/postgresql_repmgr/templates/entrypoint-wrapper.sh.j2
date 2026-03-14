@@ -51,7 +51,7 @@ WATCHDOG_PID=""
 # Alerting — sends status to Gatus + fallback raw webhook
 # ==========================================================================
 # Inline implementation because this runs inside a Docker container
-# (cannot source the host's phoenix-alert.sh library).
+# (cannot source the host's platform-alert.sh library).
 # Uses env vars from docker-compose: ALERT_WEBHOOK_URL, GATUS_URL, GATUS_TOKEN
 send_alert() {
   local level="$1"   # info | warning | critical

@@ -4,14 +4,14 @@
 # Does NOT prune named volumes (those hold PostgreSQL data, etc.).
 
 set -euo pipefail
-source /usr/local/lib/phoenix-alert.sh
+source /usr/local/lib/platform-alert.sh
 
 log() {
     echo "[$(date -Iseconds)] DOCKER-CLEANUP: $*"
 }
 
 # Alert on unexpected errors
-trap 'phoenix_alert "critical" "docker" "Docker cleanup failed unexpectedly on line $LINENO"' ERR
+trap 'platform_alert "critical" "docker" "Docker cleanup failed unexpectedly on line $LINENO"' ERR
 
 log "Starting Docker cleanup"
 

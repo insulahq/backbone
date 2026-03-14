@@ -1,5 +1,5 @@
 ---
-# Phoenix Host — Deploy PowerDNS
+# Hosting Platform — Deploy PowerDNS
 # Deploys PowerDNS on both nodes with shared PostgreSQL HA backend.
 # Both nodes run as Native (read-write) — zone data replicates via
 # PostgreSQL streaming replication.

@@ -10,7 +10,7 @@
 
 ## Issue Identified
 
-During initial deployment, we incorrectly configured NetBird Signal server to use a separate domain (`netbird-signal.phoenix-host.net`) and route through Traefik on port 443.
+During initial deployment, we incorrectly configured NetBird Signal server to use a separate domain (`netbird-signal.example.com`) and route through Traefik on port 443.
 
 ## Why This Was Wrong
 
@@ -58,8 +58,8 @@ environment:
 ## What We Changed
 
 **Removed:**
-- ❌ `netbird-signal.phoenix-host.net` DNS record (unnecessary)
-- ❌ `netbird-signal.phoenix-host.net` SSL certificate (wasted)
+- ❌ `netbird-signal.example.com` DNS record (unnecessary)
+- ❌ `netbird-signal.example.com` SSL certificate (wasted)
 - ❌ Traefik labels on signal service
 - ❌ Signal routing through Traefik reverse proxy
 
@@ -72,11 +72,11 @@ environment:
 
 For a complete NetBird deployment, you only need:
 
-✅ **One certificate:** `netbird.phoenix-host.net`
+✅ **One certificate:** `netbird.example.com`
 - Used for Management API (HTTPS on port 443 via Traefik)
 - Used for Dashboard UI (HTTPS on port 443 via Traefik)
 
-❌ **Not needed:** `netbird-signal.phoenix-host.net`
+❌ **Not needed:** `netbird-signal.example.com`
 - Signal uses port 10000 directly
 - No HTTPS needed for signal traffic
 
@@ -88,7 +88,7 @@ When using the certificate bootstrap method, only request certificate for the ma
 whoami:
   labels:
     - "traefik.enable=true"
-    - "traefik.http.routers.whoami.rule=Host(`netbird.phoenix-host.net`)"
+    - "traefik.http.routers.whoami.rule=Host(`netbird.example.com`)"
     - "traefik.http.routers.whoami.entrypoints=websecure"
     - "traefik.http.routers.whoami.tls.certresolver=letsencrypt"
     # NO signal domain label needed
@@ -114,16 +114,16 @@ whoami:
 telnet 23.88.111.142 10000
 
 # Should NOT be behind Traefik
-curl https://netbird-signal.phoenix-host.net  # Should NOT work
+curl https://netbird-signal.example.com  # Should NOT work
 ```
 
 **Check only one certificate needed:**
 ```bash
-# Only netbird.phoenix-host.net should be in acme.json
+# Only netbird.example.com should be in acme.json
 cat /opt/netbird/acme.json | python3 -c 'import json, sys; data=json.load(sys.stdin); [print(cert["domain"]["main"]) for cert in data["letsencrypt"]["Certificates"]]'
 
 # Expected output:
-# netbird.phoenix-host.net
+# netbird.example.com
 ```
 
 ## For Future Deployments

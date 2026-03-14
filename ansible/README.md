@@ -1,6 +1,6 @@
 # Ansible Deployment
 
-Ansible playbooks and roles for deploying Phoenix Host infrastructure on two Debian 13 servers.
+Ansible playbooks and roles for deploying Hosting Platform infrastructure on two Debian 13 servers.
 
 ## Roles
 

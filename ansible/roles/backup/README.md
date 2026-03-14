@@ -198,8 +198,8 @@ restic repair snapshots
 
 ## License
 
-Proprietary — Phoenix Host internal infrastructure
+Proprietary — Hosting Platform internal infrastructure
 
 ## Author
 
-Phoenix Host Platform Team
+Hosting Platform Platform Team

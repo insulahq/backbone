@@ -1,4 +1,4 @@
-# AGENTS.md -- Phoenix Host Infrastructure
+# AGENTS.md -- Hosting Platform Infrastructure
 
 > **Read this file first.** Single entry point for any agent or developer resuming work.
 
@@ -6,7 +6,7 @@
 
 ## 1. What This Is
 
-Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Phoenix Host). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Hosting Platform). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
 
 **Scope:** Two Debian 13 servers running PowerDNS, Traefik, PostgreSQL HA, NetBird VPN mesh, and Restic backups.
 
@@ -57,7 +57,7 @@ All infrastructure alerts flow through **Gatus** (HA monitoring dashboard at `st
 | `postgresql` | VACUUM/REINDEX failed, replication slot lag >5GB, inactive slot | warning |
 | `repmgr` | Node started as primary/standby, failback detected, promotion, split-brain detected, self-demotion | info/warning/critical |
 
-Host-side scripts use a shared library (`/usr/local/lib/phoenix-alert.sh`) that pushes to the local Gatus instance; the PostgreSQL container uses an inline implementation via `GATUS_URL`/`GATUS_TOKEN` env vars. A raw `alert_webhook_url` fallback exists for non-Gatus setups.
+Host-side scripts use a shared library (`/usr/local/lib/platform-alert.sh`) that pushes to the local Gatus instance; the PostgreSQL container uses an inline implementation via `GATUS_URL`/`GATUS_TOKEN` env vars. A raw `alert_webhook_url` fallback exists for non-Gatus setups.
 
 Gatus also performs **active monitoring**: DNS resolution on both servers, Traefik HTTPS, and Zitadel health checks.
 

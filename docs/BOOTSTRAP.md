@@ -212,9 +212,9 @@ Create a service account in Zitadel for API access. This enables automated OIDC 
    ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
    ```
 
-The roles auto-create OIDC applications in Zitadel ("Phoenix Host" project) and configure SSO. Each service's login page shows a "Platform OIDC" button alongside local auth.
+The roles auto-create OIDC applications in Zitadel ("Hosting Platform" project) and configure SSO. Each service's login page shows a "Platform OIDC" button alongside local auth.
 
-**Zitadel token settings:** For each OIDC application created in Zitadel (visible in the Phoenix Host project), navigate to **Token Settings** and enable **"Include user's profile info in the ID Token"**. This ensures claim mapping (name, email) works correctly in PowerDNS Admin and NetBird.
+**Zitadel token settings:** For each OIDC application created in Zitadel (visible in the Hosting Platform project), navigate to **Token Settings** and enable **"Include user's profile info in the ID Token"**. This ensures claim mapping (name, email) works correctly in PowerDNS Admin and NetBird.
 
 ## Step 13: Run System Test Suite
 

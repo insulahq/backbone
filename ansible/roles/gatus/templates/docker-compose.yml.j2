@@ -10,7 +10,7 @@ services:
     container_name: gatus
     restart: unless-stopped
     ports:
-      # Localhost binding for host-side scripts (phoenix-alert.sh)
+      # Localhost binding for host-side scripts (platform-alert.sh)
       # Not publicly accessible — Traefik handles public TLS access
       - "127.0.0.1:{{ gatus_local_port }}:{{ gatus_port }}"
     networks:

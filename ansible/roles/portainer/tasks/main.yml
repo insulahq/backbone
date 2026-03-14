@@ -47,8 +47,8 @@
   no_log: true
   tags: [portainer]
 
-# Search for existing "Phoenix Host" project in Zitadel (may already exist from Gatus role)
-- name: Search for Phoenix Host project in Zitadel
+# Search for existing "Hosting Platform" project in Zitadel (may already exist from Gatus role)
+- name: Search for Hosting Platform project in Zitadel
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
     method: POST
@@ -59,7 +59,7 @@
     body:
       queries:
         - nameQuery:
-            name: "Phoenix Host"
+            name: "Hosting Platform"
             method: TEXT_QUERY_METHOD_EQUALS
     status_code: 200
     validate_certs: "{{ portainer_validate_certs | default(false) }}"
@@ -70,7 +70,7 @@
     - portainer_oidc_client_id | default('') | length == 0
   tags: [portainer]
 
-- name: Create Phoenix Host project if not exists
+- name: Create Hosting Platform project if not exists
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects"
     method: POST
@@ -79,7 +79,7 @@
       Content-Type: application/json
     body_format: json
     body:
-      name: "Phoenix Host"
+      name: "Hosting Platform"
     status_code: [200]
     validate_certs: "{{ portainer_validate_certs | default(false) }}"
   register: portainer_project_created

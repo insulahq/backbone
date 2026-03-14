@@ -28,10 +28,10 @@ zitadel_db_user: zitadel
 # CRITICAL: masterkey CANNOT be changed after initialization (gotcha)
 
 # First instance configuration (only used on initial setup)
-zitadel_org_name: "Phoenix Host"
+zitadel_org_name: "Hosting Platform"
 zitadel_admin_username: "admin"
 zitadel_admin_first_name: "Admin"
-zitadel_admin_last_name: "Phoenix Host"
+zitadel_admin_last_name: "Hosting Platform"
 zitadel_admin_email: "admin@{{ platform_domain }}"
 # zitadel_admin_password: auto-generated and persisted
 

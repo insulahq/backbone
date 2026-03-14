@@ -1,5 +1,5 @@
 ---
-# Phoenix Host — Deploy Standalone Traefik
+# Hosting Platform — Deploy Standalone Traefik
 # Deploys shared Traefik reverse proxy with traefik_public Docker network
 # Run BEFORE deploying netbird_management or any service that needs TLS termination
 #

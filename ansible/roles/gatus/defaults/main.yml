@@ -18,7 +18,7 @@ gatus_domain: "status.{{ platform_domain }}"
 # Internal port (inside the container)
 gatus_port: 8080
 
-# Localhost port for host-side scripts (phoenix-alert.sh) to reach Gatus
+# Localhost port for host-side scripts (platform-alert.sh) to reach Gatus
 # Bound to 127.0.0.1 only — not publicly accessible
 gatus_local_port: 8080
 
@@ -28,7 +28,7 @@ gatus_db_user: gatus
 # gatus_db_password: auto-generated and persisted in .generated_secrets/
 
 # External endpoint token — shared by all push endpoints
-# Used by phoenix-alert.sh and entrypoint-wrapper.sh to authenticate pushes
+# Used by platform-alert.sh and entrypoint-wrapper.sh to authenticate pushes
 # gatus_external_token: auto-generated and persisted in .generated_secrets/
 
 # DNS record management (auto-create A/AAAA records via PowerDNS API)
@@ -50,7 +50,7 @@ gatus_log_level: "info"
 #   Generate Personal Access Token → copy to group_vars/all.yml.
 #
 # Option B (manual): Create the OIDC app in Zitadel Console yourself:
-#   Projects → New → "Phoenix Host" → Applications → New → Web →
+#   Projects → New → "Hosting Platform" → Applications → New → Web →
 #   Auth Method: BASIC → Redirect: https://status.example.com/authorization-code/callback
 #   Post-Logout: https://status.example.com → Save → copy client_id/secret below.
 #

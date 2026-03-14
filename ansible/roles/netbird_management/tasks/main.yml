@@ -175,7 +175,7 @@
   no_log: true
   tags: [netbird, netbird_management]
 
-- name: Search for Phoenix Host project in Zitadel (for NetBird)
+- name: Search for Hosting Platform project in Zitadel (for NetBird)
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
     method: POST
@@ -186,7 +186,7 @@
     body:
       queries:
         - nameQuery:
-            name: "Phoenix Host"
+            name: "Hosting Platform"
             method: TEXT_QUERY_METHOD_EQUALS
     status_code: 200
     validate_certs: "{{ netbird_validate_certs | default(false) }}"
@@ -200,7 +200,7 @@
     - not (result.json.setup_required | default(false))
   tags: [netbird, netbird_management]
 
-- name: Create Phoenix Host project if not exists (for NetBird)
+- name: Create Hosting Platform project if not exists (for NetBird)
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects"
     method: POST
@@ -209,7 +209,7 @@
       Content-Type: application/json
     body_format: json
     body:
-      name: "Phoenix Host"
+      name: "Hosting Platform"
     status_code: [200]
     validate_certs: "{{ netbird_validate_certs | default(false) }}"
   register: nb_oidc_project_created

@@ -1,5 +1,5 @@
 ---
-# Phoenix Host — Deploy NetBird HA Stack
+# Hosting Platform — Deploy NetBird HA Stack
 # Full deployment sequence for NetBird high-availability on ns1 + ns2:
 #   1. Standalone Traefik (creates traefik_public Docker network, handles TLS)
 #   2. PostgreSQL HA (repmgr automatic failover)

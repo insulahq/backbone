@@ -39,7 +39,7 @@ services:
       - netbird
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`netbird.phoenix-host.net`)"
+      - "traefik.http.routers.whoami.rule=Host(`netbird.example.com`)"
       - "traefik.http.routers.whoami.entrypoints=websecure"
       - "traefik.http.routers.whoami.tls.certresolver=letsencrypt"
       - "traefik.http.services.whoami.loadbalancer.server.port=80"
@@ -95,7 +95,7 @@ cat acme.json | python3 -c 'import json, sys; data=json.load(sys.stdin); [print(
 
 Expected output:
 ```
-✓ netbird.phoenix-host.net
+✓ netbird.example.com
 ```
 
 ### Step 5: Extract Certificates (Optional)
@@ -128,11 +128,11 @@ chmod 600 certs/*.key
 Test that Traefik is serving with valid certificates:
 
 ```bash
-curl -I https://netbird.phoenix-host.net
+curl -I https://netbird.example.com
 # Should return HTTP/2 200 or 502 (backend not ready yet)
 
 # Check certificate details
-echo | openssl s_client -connect netbird.phoenix-host.net:443 -servername netbird.phoenix-host.net 2>/dev/null | openssl x509 -noout -subject -dates
+echo | openssl s_client -connect netbird.example.com:443 -servername netbird.example.com 2>/dev/null | openssl x509 -noout -subject -dates
 ```
 
 ### Step 7: Remove Whoami, Deploy NetBird
@@ -165,7 +165,7 @@ Before removing whoami and deploying NetBird:
 
 - [ ] `acme.json` exists and is not empty
 - [ ] Certificates for the domain are in `acme.json`
-- [ ] HTTPS access works: `curl -I https://netbird.phoenix-host.net` returns valid response
+- [ ] HTTPS access works: `curl -I https://netbird.example.com` returns valid response
 - [ ] Certificate is from Let's Encrypt (not self-signed)
 - [ ] Certificate valid for 90 days
 - [ ] PowerDNS API accessible from Traefik container

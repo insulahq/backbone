@@ -1,4 +1,4 @@
-# Phoenix Host Infrastructure
+# Hosting Platform Infrastructure
 
 Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner Cloud.
 
