@@ -138,6 +138,18 @@ gatus_domain: "status.example.com"
 # gatus_alerting_email_from: "alerts@example.com"
 # gatus_alerting_email_to: "admin@example.com"
 
+# OIDC authentication — protect Gatus dashboard via Zitadel login
+# Option A (automated): provide a Zitadel service account PAT.
+#   Create in Zitadel Console: Users → Service Users → New →
+#   Personal Access Tokens → Generate → paste value below.
+#   The Gatus role auto-creates the OIDC app and stores client credentials.
+# zitadel_service_pat: "<PASTE_PAT_HERE>"
+#
+# Option B (manual): create the OIDC app in Zitadel Console yourself,
+#   then paste the client_id and client_secret here.
+# gatus_oidc_client_id: "<CLIENT_ID>"
+# gatus_oidc_client_secret: "<CLIENT_SECRET>"
+
 # ============================================================================
 # Alerting (fallback raw webhook — used when Gatus is not deployed)
 # ============================================================================

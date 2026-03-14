@@ -11,6 +11,19 @@ ui:
   title: "Phoenix Host"
   header: "Infrastructure Status"
 
+{% if gatus_oidc_client_id %}
+# ============================================================================
+# OIDC authentication — Zitadel login required for dashboard access
+# ============================================================================
+security:
+  oidc:
+    issuer-url: "{{ gatus_oidc_issuer_url }}"
+    redirect-url: "{{ gatus_oidc_redirect_url }}"
+    client-id: "{{ gatus_oidc_client_id }}"
+    client-secret: "{{ gatus_oidc_client_secret }}"
+    scopes: [{{ gatus_oidc_scopes.split() | map('regex_replace', '(.*)', '"\\1"') | join(', ') }}]
+{% endif %}
+
 # ============================================================================
 # Notification targets
 # ============================================================================

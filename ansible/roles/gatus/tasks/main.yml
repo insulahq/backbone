@@ -73,6 +73,139 @@
   changed_when: false
   tags: [gatus]
 
+# --- OIDC application creation in Zitadel (automated, requires PAT) ---
+# Creates an OIDC application for Gatus in Zitadel if:
+#   1. zitadel_service_pat is set (admin created a service account PAT)
+#   2. gatus_oidc_client_id is NOT already set (app not yet created)
+# The client_id and client_secret are persisted to .generated_secrets/
+
+- name: Load persisted Gatus OIDC client_id if available
+  set_fact:
+    gatus_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_id', errors='ignore') | default('', true) }}"
+  when: gatus_oidc_client_id is not defined or gatus_oidc_client_id | length == 0
+  run_once: true
+  tags: [gatus]
+
+- name: Load persisted Gatus OIDC client_secret if available
+  set_fact:
+    gatus_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_secret', errors='ignore') | default('', true) }}"
+  when: gatus_oidc_client_secret is not defined or gatus_oidc_client_secret | length == 0
+  run_once: true
+  no_log: true
+  tags: [gatus]
+
+- name: Create Zitadel project for Phoenix Host platform
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "Phoenix Host"
+    status_code: [200, 409]
+    validate_certs: "{{ gatus_validate_certs | default(false) }}"
+  register: zitadel_project
+  run_once: true
+  when:
+    - zitadel_service_pat | default('') | length > 0
+    - gatus_oidc_client_id | default('') | length == 0
+  tags: [gatus]
+
+- name: Get existing Zitadel project ID (if project already existed)
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      queries:
+        - nameQuery:
+            name: "Phoenix Host"
+            method: TEXT_QUERY_METHOD_EQUALS
+    status_code: 200
+    validate_certs: "{{ gatus_validate_certs | default(false) }}"
+  register: zitadel_project_search
+  run_once: true
+  when:
+    - zitadel_service_pat | default('') | length > 0
+    - gatus_oidc_client_id | default('') | length == 0
+  tags: [gatus]
+
+- name: Set Zitadel project ID
+  set_fact:
+    zitadel_project_id: "{{ zitadel_project_search.json.result[0].id }}"
+  run_once: true
+  when:
+    - zitadel_project_search is not skipped
+    - zitadel_project_search.json.result | default([]) | length > 0
+  tags: [gatus]
+
+- name: Create Gatus OIDC application in Zitadel
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ zitadel_project_id }}/apps/oidc"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "Gatus Dashboard"
+      redirectUris:
+        - "{{ gatus_oidc_redirect_url }}"
+      postLogoutRedirectUris:
+        - "https://{{ gatus_domain }}"
+      responseTypes:
+        - "OIDC_RESPONSE_TYPE_CODE"
+      grantTypes:
+        - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
+      appType: "OIDC_APP_TYPE_WEB"
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
+    status_code: [200]
+    validate_certs: "{{ gatus_validate_certs | default(false) }}"
+  register: zitadel_oidc_app
+  run_once: true
+  when:
+    - zitadel_service_pat | default('') | length > 0
+    - gatus_oidc_client_id | default('') | length == 0
+    - zitadel_project_id is defined
+  tags: [gatus]
+
+- name: Persist Gatus OIDC client_id
+  copy:
+    content: "{{ zitadel_oidc_app.json.clientId }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/gatus_oidc_client_id"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: zitadel_oidc_app is changed
+  tags: [gatus]
+
+- name: Persist Gatus OIDC client_secret
+  copy:
+    content: "{{ zitadel_oidc_app.json.clientSecret }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/gatus_oidc_client_secret"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: zitadel_oidc_app is changed
+  tags: [gatus]
+
+- name: Set OIDC client credentials from Zitadel API response
+  set_fact:
+    gatus_oidc_client_id: "{{ zitadel_oidc_app.json.clientId }}"
+    gatus_oidc_client_secret: "{{ zitadel_oidc_app.json.clientSecret }}"
+  run_once: true
+  no_log: true
+  when: zitadel_oidc_app is changed
+  tags: [gatus]
+
 # --- Deploy configuration files ---
 
 - name: Deploy Gatus config
