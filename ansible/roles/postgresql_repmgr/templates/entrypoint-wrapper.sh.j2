@@ -1,181 +1,545 @@
 #!/bin/bash
-# Wrapper around sourcemation/postgres-repmgr entrypoint.sh
-# Patches repmgr registration to be idempotent (handles 'already registered' gracefully)
-# and runs repmgrd directly when postgres is already initialized.
+# ==========================================================================
+# PostgreSQL HA Entrypoint Wrapper — Rock-Solid Failover & Failback
+# ==========================================================================
 #
-# Failover detection design:
-#   conninfo uses NODE_NAME (short hostname: ns1 / ns2). Docker extra_hosts maps
-#   each node's own hostname to 127.0.0.1 (self) and the peer's hostname to its
-#   real NetBird IP. So:
-#     - Self-registration succeeds (local connect via 127.0.0.1)
-#     - repmgrd on the PEER resolves the hostname to the real NetBird IP (via its
-#       own extra_hosts), enabling actual cross-wire primary health monitoring
-#   reconnect_attempts=6 / reconnect_interval=10 gives the primary 60 s to recover
-#   before NS2 promotes itself. promote_delay=10 adds an extra safety window.
+# Replaces the sourcemation/postgres-repmgr default entrypoint with
+# split-brain-safe startup logic, automatic failback via pg_rewind,
+# and a runtime watchdog that detects and resolves dual-primary states.
+#
+# Architecture:
+#   2-node PostgreSQL cluster (ns1 + ns2) connected via WireGuard (NetBird).
+#   Docker extra_hosts maps each hostname: self → 127.0.0.1, peer → NetBird IP.
+#   repmgr conninfo uses the hostname, so:
+#     - Self-registration connects locally (127.0.0.1)
+#     - Peer monitoring resolves to the real NetBird IP
+#
+# Failover flow:
+#   1. Primary goes down
+#   2. repmgrd on standby detects failure (6 × 10s = 60s)
+#   3. promote-check validates external connectivity (prevents false promotion
+#      during network partitions)
+#   4. Standby promotes → new timeline
+#   5. Old primary comes back
+#   6. determine_role() queries peer → sees peer is primary → starts as standby
+#   7. pg_rewind syncs diverged data (or full re-clone if WAL diverged too far)
+#   8. Registers as standby, repmgrd resumes monitoring
+#
+# Split-brain prevention layers:
+#   Layer 1 — Startup:   determine_role() always checks peer before choosing role
+#   Layer 2 — Promotion: promote-check.sh validates external connectivity
+#   Layer 3 — Runtime:   split_brain_watchdog detects dual-primary, lower timeline
+#                         self-demotes (deterministic tiebreaker: REPMGR_INITIAL_ROLE)
+#   Layer 4 — Demotion:  .demoted marker survives container restarts
+#
+# ==========================================================================
 
 set -e
 
-export REPMGR_CONFIG_FILE=${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}
+export REPMGR_CONFIG_FILE="${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}"
 export PGPASSWORD="${REPMGR_PASSWORD}"
 
-# --- Stale file cleanup ---
-# Leftover postmaster.pid (in volume) and socket lock files (in tmpfs) after an
-# unclean container stop prevent PostgreSQL from starting. Remove them on every boot.
-if [ -f "${PGDATA}/postmaster.pid" ]; then
-  echo "--- Removing stale postmaster.pid ---" >&2
-  rm -f "${PGDATA}/postmaster.pid"
-fi
-for f in /var/run/postgresql/.s.PGSQL.5432.lock \
-          /var/run/postgresql/.s.PGSQL.5432 \
-          /tmp/repmgrd.pid; do
-  [ -e "$f" ] && { echo "--- Removing stale $f ---" >&2; rm -f "$f"; }
-done
+PROMOTE_CHECK="/usr/local/bin/promote-check.sh"
+DEMOTED_MARKER="${PGDATA}/.demoted"
 
+# PIDs for signal handling
+PG_PID=""
+REPMGRD_PID=""
+WATCHDOG_PID=""
+
+# ==========================================================================
+# Signal handler — clean shutdown on SIGTERM/SIGINT (Docker stop)
+# ==========================================================================
+shutdown_handler() {
+  echo "==> Received shutdown signal, stopping gracefully..."
+  [ -n "$WATCHDOG_PID" ] && kill "$WATCHDOG_PID" 2>/dev/null || true
+  [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
+  pg_ctl -D "$PGDATA" -m fast -w stop 2>/dev/null || true
+  exit 0
+}
+trap shutdown_handler SIGTERM SIGINT
+
+# ==========================================================================
+# Phase 1: Stale file cleanup
+# ==========================================================================
+cleanup_stale_files() {
+  # Leftover postmaster.pid (in volume) and socket lock files (in tmpfs)
+  # after an unclean container stop prevent PostgreSQL from starting.
+  if [ -f "${PGDATA}/postmaster.pid" ]; then
+    echo "==> Removing stale postmaster.pid"
+    rm -f "${PGDATA}/postmaster.pid"
+  fi
+  for f in /var/run/postgresql/.s.PGSQL.5432.lock \
+           /var/run/postgresql/.s.PGSQL.5432 \
+           /tmp/repmgrd.pid; do
+    [ -e "$f" ] && { echo "==> Removing stale $f"; rm -f "$f"; }
+  done
+}
+
+# ==========================================================================
+# Phase 2: Create promotion validation script
+# ==========================================================================
+# Prevents false promotions during network partitions: if the standby loses
+# its WireGuard tunnel to the primary but the primary is still running,
+# promoting would create a split-brain. This script checks if the standby
+# has external connectivity — if it can reach the internet but not the
+# primary, the primary is truly down and promotion is safe.
+create_promote_check() {
+  cat > "$PROMOTE_CHECK" <<'SCRIPT'
+#!/bin/bash
+# Validate external connectivity before allowing repmgrd to promote.
+# Called by repmgr failover_validation_command.
+CHECKS=0
+for target in 8.8.8.8 1.1.1.1; do
+  if timeout 3 bash -c "echo >/dev/tcp/$target/53" 2>/dev/null; then
+    CHECKS=$((CHECKS + 1))
+  fi
+done
+if [ "$CHECKS" -eq 0 ]; then
+  echo "PROMOTE CHECK FAILED: No external connectivity — refusing promotion (likely local network issue)" >&2
+  exit 1
+fi
+echo "PROMOTE CHECK PASSED: External connectivity confirmed, primary is truly unreachable" >&2
+exit 0
+SCRIPT
+  chmod +x "$PROMOTE_CHECK"
+}
+
+# ==========================================================================
+# Phase 3: Generate repmgr.conf
+# ==========================================================================
 generate_repmgr_config() {
   mkdir -p "$(dirname "$REPMGR_CONFIG_FILE")"
   cat > "${REPMGR_CONFIG_FILE}" <<EOF
-# Repmgr configuration
+# repmgr configuration — generated by entrypoint-wrapper.sh
 node_id=${NODE_ID}
 node_name=${NODE_NAME}
-# conninfo uses NODE_NAME (hostname).
-# Docker extra_hosts maps each node's own hostname to 127.0.0.1 (self) and the
-# peer's hostname to its real NetBird IP. This means:
-#   - Self-registration works (local connect via 127.0.0.1)
-#   - repmgrd on the PEER resolves this hostname to the real NetBird IP via its
-#     own extra_hosts, enabling actual cross-wire failover detection
+
+# conninfo uses NODE_NAME (hostname). Docker extra_hosts maps:
+#   self → 127.0.0.1 (local connect for self-registration)
+#   peer → NetBird IP (cross-wire failover detection)
 conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} password=${REPMGR_PASSWORD} connect_timeout=5'
 data_directory='${PGDATA}'
+
+# Automatic failover with promotion validation
 failover=automatic
 promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
 follow_command='$(which repmgr) standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
-# Give the primary 60 s (6 × 10 s) to recover before promoting the standby.
-# This avoids spurious promotions on transient network glitches.
+
+# Detection window: 6 × 10s = 60s before declaring primary dead
 reconnect_attempts=6
 reconnect_interval=10
-# Extra safety window after all reconnect attempts fail, before actually promoting.
+
+# Validate external connectivity before promoting (split-brain prevention)
+failover_validation_command='${PROMOTE_CHECK}'
+
+# Extra safety window after all reconnect attempts fail
 promote_delay=10
+
 log_level=INFO
 EOF
 }
 
-if [ "$REPMGR_ROLE" = 'primary' ]; then
-
-  # First run: initialize the cluster
-  if [ ! -s "$PGDATA/PG_VERSION" ]; then
-    echo "--- Initializing primary node ---"
-
-    initdb -U "$POSTGRES_USER" -D "$PGDATA"
-
-    echo "shared_preload_libraries = 'repmgr'" >> "$PGDATA/postgresql.conf"
-    echo "wal_level = replica" >> "$PGDATA/postgresql.conf"
-    echo "wal_log_hints = on" >> "$PGDATA/postgresql.conf"
-    echo "max_wal_senders = 10" >> "$PGDATA/postgresql.conf"
-    echo "max_replication_slots = 10" >> "$PGDATA/postgresql.conf"
-    echo "hot_standby = on" >> "$PGDATA/postgresql.conf"
-    echo "archive_mode = on" >> "$PGDATA/postgresql.conf"
-    echo "archive_command = '/bin/true'" >> "$PGDATA/postgresql.conf"
-
-    echo "host replication ${REPMGR_USER} all scram-sha-256" >> "$PGDATA/pg_hba.conf"
-    echo "host ${REPMGR_DB} ${REPMGR_USER} all scram-sha-256" >> "$PGDATA/pg_hba.conf"
-    # Allow app connections from Docker bridge networks (RFC 1918) and NetBird mesh (CGNAT)
-    echo "host all all 172.16.0.0/12 scram-sha-256" >> "$PGDATA/pg_hba.conf"
-    echo "host all all 100.64.0.0/10 scram-sha-256" >> "$PGDATA/pg_hba.conf"
-
-    pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
-    createuser --superuser --login "$REPMGR_USER"
-    psql -U postgres -c "ALTER USER ${REPMGR_USER} WITH PASSWORD '${REPMGR_PASSWORD}'"
-    createdb --owner="$REPMGR_USER" "$REPMGR_DB"
-    pg_ctl -D "$PGDATA" -m fast -w stop
-
-    echo "--- Primary initialized ---"
+# ==========================================================================
+# Phase 4: Determine actual role (CRITICAL — prevents split-brain)
+# ==========================================================================
+# On first boot (empty PGDATA), uses REPMGR_INITIAL_ROLE.
+# On subsequent boots, detects actual cluster state:
+#   1. Check .demoted marker (from previous split-brain recovery)
+#   2. Query peer: if peer is primary → we're standby
+#   3. If peer unreachable: use timeline comparison
+#      - Higher timeline = was promoted = should be primary
+#      - Lower/equal timeline + initial_role=primary = wait for peer (90s)
+#        to avoid split-brain during simultaneous restart after failover
+determine_role() {
+  # --- Check 1: Demotion marker from split-brain recovery ---
+  if [ -f "$DEMOTED_MARKER" ]; then
+    echo "==> Found demotion marker from split-brain recovery — forcing STANDBY"
+    rm -f "$DEMOTED_MARKER"
+    echo "standby"
+    return
   fi
 
-  echo "--- Generating repmgr.conf ---"
-  generate_repmgr_config
+  # --- Check 2: First boot (empty data directory) ---
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    echo "==> Fresh data directory — using initial role: $REPMGR_INITIAL_ROLE"
+    echo "$REPMGR_INITIAL_ROLE"
+    return
+  fi
 
-  echo "--- Starting PostgreSQL ---"
-  postgres -D "$PGDATA" &
-  PG_PID=$!
+  # --- Check 3: Existing data — detect actual cluster state ---
+  local local_timeline
+  local_timeline=$(pg_controldata "$PGDATA" 2>/dev/null \
+    | grep "Latest checkpoint's TimeLineID" | awk '{print $NF}')
+  if [ -z "$local_timeline" ]; then
+    echo "==> WARNING: Cannot read pg_controldata — data may be corrupt"
+    echo "==> Falling back to initial role: $REPMGR_INITIAL_ROLE"
+    echo "$REPMGR_INITIAL_ROLE"
+    return
+  fi
 
-  until pg_isready -q; do
-    echo "Waiting for PostgreSQL..." >&2
-    sleep 1
+  local db_state
+  db_state=$(pg_controldata "$PGDATA" 2>/dev/null \
+    | grep "Database cluster state" | sed 's/.*: *//')
+
+  # Was this node a standby? (check cluster state from pg_controldata)
+  local was_standby=false
+  case "$db_state" in
+    *"in archive recovery"*|*"shut down in recovery"*)
+      was_standby=true ;;
+  esac
+
+  echo "==> Local state: timeline=$local_timeline, db_state='$db_state', was_standby=$was_standby"
+
+  # --- Check 4: Query peer ---
+  echo "==> Checking peer ($PEER_NAME)..."
+  local peer_reachable=false
+  local peer_is_primary=false
+
+  for attempt in 1 2 3; do
+    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; then
+      peer_reachable=true
+      break
+    fi
+    [ "$attempt" -lt 3 ] && { echo "==> Peer not ready (attempt $attempt/3)..."; sleep 5; }
   done
 
-  # Register primary — idempotent with --force
-  echo "--- Registering primary node ---"
-  repmgr -f "$REPMGR_CONFIG_FILE" primary register --force || {
-    echo "Primary register failed but continuing (may already be registered)" >&2
-  }
+  if $peer_reachable; then
+    local peer_recovery
+    peer_recovery=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+      -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
 
-  echo "--- Starting repmgrd ---"
-  exec repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false
-
-else
-
-  if [ -z "$REPMGR_UPSTREAM_NAME" ]; then
-    echo "ERROR: REPMGR_UPSTREAM_NAME is not set" >&2
-    exit 1
+    if [ "$peer_recovery" = "f" ]; then
+      peer_is_primary=true
+      echo "==> Peer ($PEER_NAME) is running as PRIMARY"
+    elif [ "$peer_recovery" = "t" ]; then
+      echo "==> Peer ($PEER_NAME) is running as STANDBY"
+    else
+      echo "==> Cannot determine peer role (result: $peer_recovery)"
+    fi
+  else
+    echo "==> Peer ($PEER_NAME) is UNREACHABLE"
   fi
 
-  echo "--- Generating repmgr.conf ---"
-  generate_repmgr_config
+  # --- Decision matrix ---
 
-  echo "--- Waiting for primary ($REPMGR_UPSTREAM_NAME) ---"
-  until pg_isready -h "$REPMGR_UPSTREAM_NAME" -p 5432 -U "$REPMGR_USER"; do
-    echo "Primary unavailable - sleeping" >&2
+  if $peer_reachable && $peer_is_primary; then
+    # Peer is primary → we must be standby (regardless of what we were)
+    echo "==> Decision: STANDBY (peer is primary)"
+    echo "standby"
+    return
+  fi
+
+  if $peer_reachable && ! $peer_is_primary; then
+    # Peer is standby or unknown → we should be primary
+    echo "==> Decision: PRIMARY (peer is standby or undetermined)"
+    echo "primary"
+    return
+  fi
+
+  # --- Peer unreachable: use timeline + state to decide ---
+
+  if $was_standby; then
+    # We were a standby — stay standby, let repmgrd promote if needed
+    echo "==> Decision: STANDBY (was standby, peer unreachable — repmgrd will promote if needed)"
+    echo "standby"
+    return
+  fi
+
+  # We were NOT a standby (no standby.signal, primary-like state)
+  if [ "$local_timeline" -gt 1 ] 2>/dev/null; then
+    # Timeline > 1 = we were promoted at some point → we're the valid primary
+    echo "==> Decision: PRIMARY (was promoted, timeline=$local_timeline > 1)"
+    echo "primary"
+    return
+  fi
+
+  # Timeline = 1, was primary, peer unreachable
+  # This is the dangerous case: could be the original primary that was
+  # superseded by a promotion on the peer. If both nodes restart
+  # simultaneously after a failover, the peer (promoted, TL>1) should
+  # win. We wait to give the peer time to start and identify itself.
+  echo "==> Timeline=1, initial primary, peer unreachable — waiting for peer before deciding..."
+  for i in $(seq 1 18); do  # 18 × 5s = 90s
+    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; then
+      local pr
+      pr=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+        -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
+      if [ "$pr" = "f" ]; then
+        echo "==> Peer came up as PRIMARY — Decision: STANDBY"
+        echo "standby"
+        return
+      else
+        echo "==> Peer came up as STANDBY — Decision: PRIMARY"
+        echo "primary"
+        return
+      fi
+    fi
+    echo "==> Waiting for peer ($i/18)..."
     sleep 5
   done
 
+  # Peer never appeared after 90s — start as primary (best effort)
+  echo "==> Peer did not appear after 90s — Decision: PRIMARY (initial role, no peer)"
+  echo "primary"
+}
+
+# ==========================================================================
+# Phase 5a: Initialize fresh primary
+# ==========================================================================
+init_primary() {
+  echo "==> Initializing new primary node..."
+  initdb -U "$POSTGRES_USER" -D "$PGDATA"
+
+  # WAL and replication settings
+  cat >> "$PGDATA/postgresql.conf" <<CONF
+shared_preload_libraries = 'repmgr'
+wal_level = replica
+wal_log_hints = on
+max_wal_senders = 10
+max_replication_slots = 10
+hot_standby = on
+archive_mode = on
+archive_command = '/bin/true'
+CONF
+
+  # pg_hba.conf — replication + app access
+  cat >> "$PGDATA/pg_hba.conf" <<HBA
+host replication ${REPMGR_USER} all scram-sha-256
+host ${REPMGR_DB} ${REPMGR_USER} all scram-sha-256
+host all all 172.16.0.0/12 scram-sha-256
+host all all 100.64.0.0/10 scram-sha-256
+HBA
+
+  pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
+  createuser --superuser --login "$REPMGR_USER"
+  psql -U postgres -c "ALTER USER ${REPMGR_USER} WITH PASSWORD '${REPMGR_PASSWORD}'"
+  createdb --owner="$REPMGR_USER" "$REPMGR_DB"
+  pg_ctl -D "$PGDATA" -m fast -w stop
+  echo "==> Primary initialized"
+}
+
+# ==========================================================================
+# Phase 5b: Start as primary
+# ==========================================================================
+start_as_primary() {
   if [ ! -s "$PGDATA/PG_VERSION" ]; then
-    # Fresh standby -- clone from primary
-    echo "--- Cloning from primary ---"
-    repmgr -h "$REPMGR_UPSTREAM_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
-           -f "$REPMGR_CONFIG_FILE" standby clone
-    echo "--- Clone complete ---"
-  else
-    # Existing data directory -- try to rejoin after failover
-    # Start PostgreSQL temporarily to check if we can rejoin
-    echo "--- Attempting to rejoin cluster after failover ---"
-
-    # Try pg_rewind first (fast, preserves data)
-    echo "--- Running pg_rewind to sync with new primary ---"
-    pg_rewind --target-pgdata="$PGDATA" \
-              --source-server="host=$REPMGR_UPSTREAM_NAME user=$REPMGR_USER dbname=$REPMGR_DB" \
-              2>&1 || {
-      echo "--- pg_rewind failed, falling back to full re-clone ---" >&2
-      # pg_rewind failed (e.g., wal_log_hints not enabled, or too far diverged)
-      # Fall back to full clone: wipe data and re-clone
-      rm -rf "${PGDATA:?}"/*
-      repmgr -h "$REPMGR_UPSTREAM_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
-             -f "$REPMGR_CONFIG_FILE" standby clone
-    }
-
-    # Ensure standby.signal exists (pg_rewind may not create it)
-    touch "$PGDATA/standby.signal"
-
-    # Update primary_conninfo to point to the current primary
-    sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-    echo "primary_conninfo = 'host=$REPMGR_UPSTREAM_NAME user=$REPMGR_USER'" >> "$PGDATA/postgresql.auto.conf"
-
-    echo "--- Rejoin preparation complete ---"
+    init_primary
   fi
 
-  echo "--- Starting PostgreSQL (standby) ---"
+  # Ensure no standby.signal (we're primary)
+  rm -f "$PGDATA/standby.signal"
+
+  echo "==> Starting PostgreSQL as PRIMARY..."
   postgres -D "$PGDATA" &
   PG_PID=$!
+  until pg_isready -q; do sleep 1; done
 
-  until pg_isready -q; do
-    echo "Waiting for local PostgreSQL..." >&2
-    sleep 1
-  done
-
-  # Register standby -- idempotent with --force
-  echo "--- Registering standby node ---"
-  repmgr -f "$REPMGR_CONFIG_FILE" standby register --force || {
-    echo "Standby register failed but continuing" >&2
+  echo "==> Registering as primary (--force for idempotency)..."
+  repmgr -f "$REPMGR_CONFIG_FILE" primary register --force 2>&1 || {
+    echo "==> Primary registration returned non-zero (may already be registered)"
   }
 
-  echo "--- Starting repmgrd ---"
-  exec repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false
-fi
+  # Start split-brain watchdog in background
+  split_brain_watchdog &
+  WATCHDOG_PID=$!
+
+  echo "==> Starting repmgrd (foreground)..."
+  repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false &
+  REPMGRD_PID=$!
+
+  # Block until repmgrd exits (or signal handler fires)
+  wait "$REPMGRD_PID" 2>/dev/null || true
+}
+
+# ==========================================================================
+# Phase 5c: Start as standby (includes failback / rejoin logic)
+# ==========================================================================
+start_as_standby() {
+  # Wait for the primary to be available
+  echo "==> Waiting for primary ($PEER_NAME)..."
+  until pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; do
+    echo "==> Primary ($PEER_NAME) unavailable — retrying in 5s..."
+    sleep 5
+  done
+  echo "==> Primary ($PEER_NAME) is ready"
+
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    # --- Fresh standby: clone from primary ---
+    echo "==> Cloning from primary ($PEER_NAME)..."
+    repmgr -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+           -f "$REPMGR_CONFIG_FILE" standby clone
+    echo "==> Clone complete"
+
+  elif [ ! -f "$PGDATA/standby.signal" ]; then
+    # --- FAILBACK: This node was primary but peer has been promoted ---
+    # Data has diverged — use pg_rewind to sync, or full re-clone as fallback
+    echo "==> FAILBACK DETECTED: This node was primary, peer has been promoted"
+    echo "==> Running pg_rewind to sync with new primary ($PEER_NAME)..."
+
+    # pg_rewind needs the target stopped
+    pg_ctl -D "$PGDATA" -m fast stop 2>/dev/null || true
+
+    if pg_rewind --target-pgdata="$PGDATA" \
+         --source-server="host=$PEER_NAME user=$REPMGR_USER dbname=$REPMGR_DB password=$REPMGR_PASSWORD" \
+         2>&1; then
+      echo "==> pg_rewind succeeded"
+    else
+      echo "==> pg_rewind failed — falling back to full re-clone..."
+      rm -rf "${PGDATA:?}"/*
+      repmgr -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+             -f "$REPMGR_CONFIG_FILE" standby clone
+    fi
+
+    # Configure as standby
+    touch "$PGDATA/standby.signal"
+    sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+      >> "$PGDATA/postgresql.auto.conf"
+    echo "==> Failback preparation complete"
+
+  else
+    # --- Already a standby: update primary_conninfo ---
+    # The primary hostname might have changed after a double-failover
+    sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+      >> "$PGDATA/postgresql.auto.conf"
+  fi
+
+  echo "==> Starting PostgreSQL as STANDBY..."
+  postgres -D "$PGDATA" &
+  PG_PID=$!
+  until pg_isready -q; do sleep 1; done
+
+  echo "==> Registering as standby (--force for idempotency)..."
+  repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
+    echo "==> Standby registration returned non-zero (may already be registered)"
+  }
+
+  echo "==> Starting repmgrd (foreground)..."
+  repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false &
+  REPMGRD_PID=$!
+
+  wait "$REPMGRD_PID" 2>/dev/null || true
+}
+
+# ==========================================================================
+# Split-brain watchdog (runs in background on primary)
+# ==========================================================================
+# Every 15 seconds, checks if the peer is ALSO running as primary.
+# If dual-primary is detected:
+#   - Compare timelines: higher timeline = was promoted more recently = real primary
+#   - If same timeline: REPMGR_INITIAL_ROLE is the deterministic tiebreaker
+#   - The loser self-demotes: writes .demoted marker and exits
+#   - Docker restart policy restarts the container
+#   - On restart, determine_role() sees .demoted → starts as standby
+split_brain_watchdog() {
+  sleep 30  # Initial settling period
+
+  while true; do
+    sleep 15
+
+    # Only act if we're currently primary (not in recovery)
+    local local_recovery
+    local_recovery=$(psql -U "$REPMGR_USER" -d "$REPMGR_DB" \
+      -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
+    [ "$local_recovery" != "f" ] && continue
+
+    # Check if peer is reachable and also primary
+    if ! pg_isready -h "$PEER_NAME" -p 5432 -t 3 2>/dev/null; then
+      continue  # Peer unreachable — nothing to check
+    fi
+
+    local peer_recovery
+    peer_recovery=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+      -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
+
+    if [ "$peer_recovery" != "f" ]; then
+      continue  # Peer is standby or unknown — no split-brain
+    fi
+
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # SPLIT-BRAIN DETECTED: Both nodes are running as primary!
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    echo "!!! SPLIT-BRAIN DETECTED: Both ${NODE_NAME} and ${PEER_NAME} are PRIMARY !!!" >&2
+
+    local local_tl peer_tl
+    local_tl=$(psql -U "$REPMGR_USER" -d "$REPMGR_DB" \
+      -tAc "SELECT timeline_id FROM pg_control_checkpoint()" 2>/dev/null || echo "0")
+    peer_tl=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+      -tAc "SELECT timeline_id FROM pg_control_checkpoint()" 2>/dev/null || echo "0")
+
+    echo "!!! Local timeline: $local_tl | Peer timeline: $peer_tl !!!" >&2
+
+    local should_demote=false
+
+    if [ "$peer_tl" -gt "$local_tl" ] 2>/dev/null; then
+      echo "!!! Peer has higher timeline — WE MUST DEMOTE !!!" >&2
+      should_demote=true
+    elif [ "$local_tl" -gt "$peer_tl" ] 2>/dev/null; then
+      echo "!!! We have higher timeline — peer should demote (doing nothing) !!!" >&2
+    else
+      # Same timeline — use REPMGR_INITIAL_ROLE as deterministic tiebreaker
+      # Only the node whose initial role was NOT primary will demote
+      if [ "$REPMGR_INITIAL_ROLE" != "primary" ]; then
+        echo "!!! Same timeline — we are NOT initial primary — WE MUST DEMOTE !!!" >&2
+        should_demote=true
+      else
+        echo "!!! Same timeline — we ARE initial primary — peer should demote !!!" >&2
+      fi
+    fi
+
+    if $should_demote; then
+      self_demote
+      return  # self_demote exits, but just in case
+    fi
+  done
+}
+
+# ==========================================================================
+# Self-demotion (split-brain auto-recovery)
+# ==========================================================================
+# Writes a marker file, stops PostgreSQL, and exits the container.
+# Docker's restart policy restarts us. On restart, determine_role()
+# sees the .demoted marker → starts as standby with pg_rewind.
+self_demote() {
+  echo "==> SELF-DEMOTING: Writing demotion marker and shutting down..." >&2
+  touch "$DEMOTED_MARKER"
+
+  # Stop PostgreSQL to prevent further writes
+  pg_ctl -D "$PGDATA" -m fast -w stop 2>/dev/null || true
+
+  # Kill repmgrd
+  [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
+
+  echo "==> Container will restart and rejoin as standby" >&2
+  exit 1
+}
+
+# ==========================================================================
+# Main
+# ==========================================================================
+echo "============================================================"
+echo "  PostgreSQL HA Entrypoint — ${NODE_NAME} (node ${NODE_ID})"
+echo "  Initial role: ${REPMGR_INITIAL_ROLE} | Peer: ${PEER_NAME}"
+echo "============================================================"
+
+cleanup_stale_files
+create_promote_check
+generate_repmgr_config
+
+ACTUAL_ROLE=$(determine_role)
+
+echo "============================================================"
+echo "  RESOLVED ROLE: ${ACTUAL_ROLE}"
+echo "  (initial: ${REPMGR_INITIAL_ROLE}, peer: ${PEER_NAME})"
+echo "============================================================"
+
+case "$ACTUAL_ROLE" in
+  primary) start_as_primary ;;
+  standby) start_as_standby ;;
+  *)
+    echo "FATAL: Could not determine role — exiting" >&2
+    exit 1
+    ;;
+esac

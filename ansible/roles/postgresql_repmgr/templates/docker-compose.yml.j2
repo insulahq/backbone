@@ -12,7 +12,6 @@ services:
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real NetBird IP: WAL streaming replication + cross-wire repmgrd
     # monitoring use this to reach the other node.
-    # Written role-agnostically so either ns1 or ns2 can be primary after a failover.
     extra_hosts:
       - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] }}"
       - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] }}"
@@ -26,14 +25,16 @@ services:
       REPMGR_PASSWORD: "{{ postgresql_repmgr_password }}"
       REPMGR_DB: "repmgr"
 
-      REPMGR_ROLE: "{{ 'primary' if postgresql_is_primary else 'standby' }}"
+      # REPMGR_INITIAL_ROLE: Only used on first boot (empty PGDATA).
+      # On subsequent boots, the entrypoint detects the actual cluster state
+      # by querying the peer, comparing timelines, and checking demotion markers.
+      REPMGR_INITIAL_ROLE: "{{ 'primary' if postgresql_is_primary else 'standby' }}"
       NODE_ID: "{{ postgresql_node_id }}"
       NODE_NAME: "{{ inventory_hostname }}"
 
-      # Standby only: primary hostname to clone from (resolves to NetBird IP via extra_hosts)
-{% if not postgresql_is_primary %}
-      REPMGR_UPSTREAM_NAME: "{{ postgresql_primary_node }}"
-{% endif %}
+      # PEER_NAME: The other node in the 2-node cluster.
+      # Used for failover detection, pg_rewind, split-brain watchdog.
+      PEER_NAME: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []

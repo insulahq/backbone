@@ -107,6 +107,7 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 20 | Stale `postmaster.pid` after unclean stop | Entrypoint wrapper cleans PID + socket files on startup |
 | 37 | repmgrd `conninfo` with `host=127.0.0.1` masked failures | Cross-wire via extra_hosts: peer sees real NetBird IP |
 | 41 | `promote_command` used `/usr/bin/repmgr` (doesn't exist) | Use `$(which repmgr)` -- actual path is `/usr/lib/postgresql/18/bin/repmgr` |
+| 49 | Old entrypoint wrapper blindly trusted `REPMGR_ROLE` env var — after failover, old primary restarted as primary creating split-brain | Rewritten wrapper: `determine_role()` queries peer + compares timelines on every boot; `promote-check.sh` validates connectivity before promotion; runtime watchdog detects dual-primary and self-demotes lower timeline; `.demoted` marker survives restarts |
 
 ### NetBird
 
