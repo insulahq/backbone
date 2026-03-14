@@ -32,6 +32,8 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider={{ traefik_acme_dns_provider }}"
       - "--certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Health check endpoint (used by Docker healthcheck below)
+      - "--ping=true"
 {% if traefik_wildcard_cert | default(true) %}
       # Wildcard certificate: *.{{ platform_domain }} + {{ platform_domain }}
       # All subdomains covered automatically — services don't need individual certresolver labels.
@@ -52,6 +54,12 @@ services:
     environment:
       PDNS_API_URL: "{{ traefik_pdns_api_url }}"
       PDNS_API_KEY: "{{ powerdns_api_key }}"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     logging:
       driver: "json-file"
       options:
