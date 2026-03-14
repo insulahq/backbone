@@ -31,6 +31,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
 | Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
+| Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ### Maintenance Automation
@@ -45,11 +46,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 
 ### Alerting
 
-All infrastructure alerts flow through a single `alert_webhook_url` (set in `group_vars/all.yml`). Every alert is a JSON POST with a consistent payload:
-
-```json
-{ "host": "ns1", "service": "backup", "level": "critical", "message": "...", "timestamp": "..." }
-```
+All infrastructure alerts flow through **Gatus** (HA monitoring dashboard at `status.platform_domain`). Gatus receives push events from all services and forwards to configured notification targets (Slack, Discord, ntfy, email, Telegram, PagerDuty, etc.).
 
 | Service | Events | Level |
 |---------|--------|-------|
@@ -59,7 +56,9 @@ All infrastructure alerts flow through a single `alert_webhook_url` (set in `gro
 | `postgresql` | VACUUM/REINDEX failed, replication slot lag >5GB, inactive slot | warning |
 | `repmgr` | Node started as primary/standby, failback detected, promotion, split-brain detected, self-demotion | info/warning/critical |
 
-Compatible with: ntfy, Slack, Discord, Uptime Kuma, Grafana OnCall, PagerDuty, or any JSON POST endpoint. Host-side scripts use a shared library (`/usr/local/lib/phoenix-alert.sh`); the PostgreSQL container uses an inline implementation via `ALERT_WEBHOOK_URL` env var.
+Host-side scripts use a shared library (`/usr/local/lib/phoenix-alert.sh`) that pushes to the local Gatus instance; the PostgreSQL container uses an inline implementation via `GATUS_URL`/`GATUS_TOKEN` env vars. A raw `alert_webhook_url` fallback exists for non-Gatus setups.
+
+Gatus also performs **active monitoring**: DNS resolution on both servers, Traefik HTTPS, and Zitadel health checks.
 
 ---
 
@@ -75,6 +74,7 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird manag
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml       # Zitadel IAM
+ansible-playbook -i inventory/hosts.yml deploy-gatus.yml         # Gatus monitoring
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
@@ -233,6 +233,7 @@ hosting-platform/
 │       ├── netbird_management/# NetBird combined server
 │       ├── netbird_peer/      # NetBird peer enrollment
 │       ├── zitadel/           # Zitadel IAM (OIDC/OAuth2, multi-tenant)
+│       ├── gatus/             # Gatus monitoring (HA dashboard + alert receiver)
 │       └── backup/            # Restic backup (with logrotate + notifications)
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
@@ -259,8 +260,8 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags docker
 ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 
 # Other available tags: traefik, postgresql, powerdns, dns,
-#   netbird, netbird_management, netbird_peer, zitadel, backup,
-#   security, ssh, fail2ban, packages, maintenance
+#   netbird, netbird_management, netbird_peer, zitadel, gatus,
+#   backup, security, ssh, fail2ban, packages, maintenance
 ```
 
 ---

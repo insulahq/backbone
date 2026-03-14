@@ -48,11 +48,11 @@ REPMGRD_PID=""
 WATCHDOG_PID=""
 
 # ==========================================================================
-# Webhook alerting — sends JSON to central alert endpoint
+# Alerting — sends status to Gatus + fallback raw webhook
 # ==========================================================================
-# Uses ALERT_WEBHOOK_URL env var passed from docker-compose.
 # Inline implementation because this runs inside a Docker container
 # (cannot source the host's phoenix-alert.sh library).
+# Uses env vars from docker-compose: ALERT_WEBHOOK_URL, GATUS_URL, GATUS_TOKEN
 send_alert() {
   local level="$1"   # info | warning | critical
   local message="$2"
@@ -61,20 +61,33 @@ send_alert() {
 
   echo "[${timestamp}] ALERT ${level}: [repmgr] ${message}"
 
-  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-    # Escape message for JSON
-    local safe_msg
-    safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+  # Escape message for JSON
+  local safe_msg
+  safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
 
-    # Use curl if available, otherwise try wget
+  # Map level to Gatus success/failure
+  local gatus_success="true"
+  [ "$level" = "warning" ] || [ "$level" = "critical" ] && gatus_success="false"
+
+  # Push to Gatus external endpoint (primary path)
+  if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
+    local gatus_key="${NODE_NAME}_repmgr"
+    if command -v curl &>/dev/null; then
+      curl -fsS --retry 2 --max-time 5 -X POST \
+        "${GATUS_URL}/api/v1/endpoints/${gatus_key}/external" \
+        -H "Authorization: Bearer ${GATUS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"success\": ${gatus_success}, \"errors\": [\"${safe_msg}\"]}" \
+        > /dev/null 2>&1 || true
+    fi
+  fi
+
+  # Fallback: raw webhook
+  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
     if command -v curl &>/dev/null; then
       curl -fsS --retry 2 --max-time 10 -X POST \
         -H "Content-Type: application/json" \
         -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
-        "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
-    elif command -v wget &>/dev/null; then
-      wget -qO- --timeout=10 --post-data="{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
-        --header="Content-Type: application/json" \
         "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
     fi
   fi
@@ -134,12 +147,26 @@ if [ "$CHECKS" -eq 0 ]; then
 fi
 echo "PROMOTE CHECK PASSED: External connectivity confirmed, primary is truly unreachable" >&2
 
-# Send promotion alert via webhook (env vars from docker-compose)
-if [ -n "${ALERT_WEBHOOK_URL:-}" ] && command -v curl &>/dev/null; then
-  curl -fsS --retry 2 --max-time 10 -X POST \
-    -H "Content-Type: application/json" \
-    -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"PROMOTION: ${NODE_NAME} promoted from standby to primary (peer unreachable)\", \"timestamp\": \"$(date -Iseconds)\"}" \
-    "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+# Send promotion alert (env vars from docker-compose)
+if command -v curl &>/dev/null; then
+  MSG="PROMOTION: ${NODE_NAME} promoted from standby to primary (peer unreachable)"
+  TS="$(date -Iseconds)"
+  # Push to Gatus
+  if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
+    curl -fsS --retry 2 --max-time 5 -X POST \
+      "${GATUS_URL}/api/v1/endpoints/${NODE_NAME}_repmgr/external" \
+      -H "Authorization: Bearer ${GATUS_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{\"success\": false, \"errors\": [\"$MSG\"]}" \
+      > /dev/null 2>&1 || true
+  fi
+  # Fallback webhook
+  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+    curl -fsS --retry 2 --max-time 10 -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"$MSG\", \"timestamp\": \"$TS\"}" \
+      "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+  fi
 fi
 exit 0
 SCRIPT

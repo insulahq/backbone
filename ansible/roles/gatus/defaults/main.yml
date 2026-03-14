@@ -1,0 +1,67 @@
+---
+# Gatus Monitoring Role — Default Variables
+# Deploys Gatus as HA status dashboard and alert receiver.
+# Uses PostgreSQL HA backend (deployed by postgresql_repmgr role).
+# Sits behind Traefik for TLS termination.
+# Both ns1 and ns2 run Gatus — shared database via PostgreSQL replication.
+
+# Version — pin to a tested stable release (gotcha 47)
+gatus_version: "v5.14.0"
+gatus_image: "ghcr.io/twin/gatus:{{ gatus_version }}"
+
+# Installation directory
+gatus_install_dir: /opt/gatus
+
+# Public domain for the status dashboard (behind Traefik)
+gatus_domain: "status.{{ platform_domain }}"
+
+# Internal port (inside the container)
+gatus_port: 8080
+
+# Localhost port for host-side scripts (phoenix-alert.sh) to reach Gatus
+# Bound to 127.0.0.1 only — not publicly accessible
+gatus_local_port: 8080
+
+# Database (uses existing PostgreSQL HA cluster via Docker network)
+gatus_db_name: gatus
+gatus_db_user: gatus
+# gatus_db_password: auto-generated and persisted in .generated_secrets/
+
+# External endpoint token — shared by all push endpoints
+# Used by phoenix-alert.sh and entrypoint-wrapper.sh to authenticate pushes
+# gatus_external_token: auto-generated and persisted in .generated_secrets/
+
+# DNS record management (auto-create A/AAAA records via PowerDNS API)
+gatus_create_dns_records: true
+
+# Logging
+gatus_log_level: "info"
+
+# ============================================================================
+# Notification targets — configure these to receive alerts
+# ============================================================================
+# Gatus forwards alerts to these targets when external endpoints report failures
+# or active checks detect issues. Leave empty to disable a target.
+# After setting values, re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+#
+# Slack incoming webhook URL
+gatus_alerting_slack_webhook: ""
+# Discord webhook URL
+gatus_alerting_discord_webhook: ""
+# ntfy server URL and topic
+gatus_alerting_ntfy_url: ""
+gatus_alerting_ntfy_topic: ""
+# Email (SMTP)
+gatus_alerting_email_host: ""
+gatus_alerting_email_port: 587
+gatus_alerting_email_username: ""
+gatus_alerting_email_password: ""
+gatus_alerting_email_from: ""
+gatus_alerting_email_to: ""
+# Telegram bot token and chat ID
+gatus_alerting_telegram_token: ""
+gatus_alerting_telegram_id: ""
+# PagerDuty integration key
+gatus_alerting_pagerduty_integration_key: ""
+# Generic custom webhook (raw JSON POST)
+gatus_alerting_custom_url: ""

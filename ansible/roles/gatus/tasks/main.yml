@@ -1,0 +1,212 @@
+---
+# Gatus Monitoring Role — Main Tasks
+# Deploys Gatus as HA status dashboard and alert receiver.
+# Uses existing PostgreSQL HA cluster and Traefik reverse proxy.
+# Deployed with serial: 1 so the first node creates the database before the second starts.
+
+- name: Create Gatus installation directory
+  file:
+    path: "{{ gatus_install_dir }}"
+    state: directory
+    mode: '0755'
+  tags: [gatus]
+
+# --- Secret generation (idempotent, persisted to .generated_secrets/) ---
+
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [gatus]
+
+- name: Generate Gatus database password if not set
+  set_fact:
+    gatus_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/gatus_db_password length=32 chars=ascii_letters,digits') }}"
+  when: gatus_db_password is not defined or gatus_db_password | length == 0
+  run_once: true
+  no_log: true
+  tags: [gatus]
+
+- name: Generate Gatus external endpoint token if not set
+  set_fact:
+    gatus_external_token: "{{ lookup('password', playbook_dir + '/.generated_secrets/gatus_external_token length=48 chars=ascii_letters,digits') }}"
+  when: gatus_external_token is not defined or gatus_external_token | length == 0
+  run_once: true
+  no_log: true
+  tags: [gatus]
+
+# --- Database creation (on primary only, replicated to standby) ---
+
+- name: Check if Gatus database user exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -tAc
+      "SELECT 1 FROM pg_roles WHERE rolname='{{ gatus_db_user }}'"
+  register: gatus_user_check
+  changed_when: false
+  run_once: true
+  tags: [gatus]
+
+- name: Create Gatus database user
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -c
+      "CREATE USER {{ gatus_db_user }} WITH PASSWORD '{{ gatus_db_password }}'"
+  when: gatus_user_check.stdout | default('') | trim == ""
+  run_once: true
+  no_log: true
+  tags: [gatus]
+
+- name: Create Gatus database if not exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      bash -c "psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='{{ gatus_db_name }}'\" | grep -q 1 || createdb -U postgres -O {{ gatus_db_user }} {{ gatus_db_name }}"
+  run_once: true
+  changed_when: false
+  tags: [gatus]
+
+# --- Deploy configuration files ---
+
+- name: Deploy Gatus config
+  template:
+    src: config.yaml.j2
+    dest: "{{ gatus_install_dir }}/config.yaml"
+    mode: '0600'
+  notify: restart gatus
+  tags: [gatus]
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ gatus_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart gatus
+  tags: [gatus]
+
+# --- Start Gatus ---
+
+- name: Start Gatus stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ gatus_install_dir }}"
+    pull: missing
+    state: present
+  tags: [gatus]
+
+- name: Wait for Gatus to be healthy
+  uri:
+    url: "http://127.0.0.1:{{ gatus_local_port }}/health"
+    status_code: 200
+  retries: 20
+  delay: 3
+  register: gatus_health
+  until: gatus_health.status == 200
+  tags: [gatus]
+
+# --- DNS record creation (optional, via PowerDNS API) ---
+
+- name: Create DNS A records for Gatus dashboard
+  when:
+    - gatus_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ gatus_domain }}."
+          type: A
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'ansible_host')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [gatus, dns]
+
+- name: Create DNS AAAA records for Gatus dashboard
+  when:
+    - gatus_create_dns_records | default(true)
+    - powerdns_api_key is defined
+    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ gatus_domain }}."
+          type: AAAA
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'public_ipv6')
+              | select('defined')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [gatus, dns]
+
+- name: Increment SOA serial after DNS record changes
+  when:
+    - gatus_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  changed_when: true
+  ignore_errors: true
+  tags: [gatus, dns]
+
+# --- Update phoenix-alert.sh with Gatus endpoint info ---
+# Re-deploy the shared alert library now that we know the Gatus token and port
+
+- name: Update shared alert helper with Gatus endpoint info
+  template:
+    src: ../../../common/templates/phoenix-alert.sh.j2
+    dest: /usr/local/lib/phoenix-alert.sh
+    mode: '0644'
+  tags: [gatus]
+
+# --- Status display ---
+
+- name: Display Gatus deployment status
+  debug:
+    msg:
+      - "Gatus {{ gatus_version }} deployed on {{ inventory_hostname }}"
+      - "Dashboard: https://{{ gatus_domain }}"
+      - "Local API: http://127.0.0.1:{{ gatus_local_port }}"
+      - ""
+      - "External endpoint token is in ansible/.generated_secrets/gatus_external_token"
+      - ""
+      - "To configure notification targets, set gatus_alerting_* variables"
+      - "in group_vars/all.yml and re-deploy:"
+      - "  ansible-playbook -i inventory/hosts.yml deploy-gatus.yml"
+  tags: [gatus]

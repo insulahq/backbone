@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: gatus
+  description: Gatus monitoring — HA status dashboard and alert receiver with PostgreSQL HA backend
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: traefik
+  - role: postgresql_repmgr

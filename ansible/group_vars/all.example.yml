@@ -129,19 +129,27 @@ ns2_backup_paths:
   - /root/.ssh
 
 # ============================================================================
-# Alerting (central webhook for all infrastructure alerts)
+# Gatus Monitoring (HA status dashboard + alert receiver)
 # ============================================================================
-# All services POST JSON alerts here: backup failures, disk warnings,
-# PostgreSQL failover/promotion, split-brain detection, maintenance errors.
-#
-# Compatible with: ntfy, Slack (incoming webhook), Discord, Uptime Kuma,
-# Grafana OnCall, PagerDuty, or any endpoint that accepts JSON POST.
-#
-# Payload format:
-#   { "host": "ns1", "service": "backup|disk|postgresql|repmgr|docker",
-#     "level": "info|warning|critical", "message": "...", "timestamp": "..." }
-#
-# Leave empty to disable webhook alerts (alerts still go to systemd journal).
+# Dashboard domain (A/AAAA records auto-created via PowerDNS API)
+gatus_domain: "status.example.com"
+
+# Notification targets — configure at least one to receive alerts.
+# After setting, re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+# gatus_alerting_slack_webhook: "https://hooks.slack.com/services/..."
+# gatus_alerting_discord_webhook: "https://discord.com/api/webhooks/..."
+# gatus_alerting_ntfy_url: "https://ntfy.sh"
+# gatus_alerting_ntfy_topic: "phoenix-alerts"
+# gatus_alerting_telegram_token: "<BOT_TOKEN>"
+# gatus_alerting_telegram_id: "<CHAT_ID>"
+# gatus_alerting_email_host: "smtp.example.com"
+# gatus_alerting_email_from: "alerts@example.com"
+# gatus_alerting_email_to: "admin@example.com"
+
+# ============================================================================
+# Alerting (fallback raw webhook — used when Gatus is not deployed)
+# ============================================================================
+# Leave empty if using Gatus (recommended).
 alert_webhook_url: ""
 
 # ============================================================================

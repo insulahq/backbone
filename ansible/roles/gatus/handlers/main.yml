@@ -1,0 +1,6 @@
+---
+- name: restart gatus
+  community.docker.docker_compose_v2:
+    project_src: "{{ gatus_install_dir }}"
+    state: present
+    recreate: always

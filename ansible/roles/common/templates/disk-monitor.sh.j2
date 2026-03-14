@@ -43,4 +43,6 @@ fi
 
 if [ "$ALERT_COUNT" -eq 0 ]; then
     log "All filesystems within thresholds (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
+    # Report healthy status to Gatus dashboard
+    phoenix_alert "info" "disk" "All filesystems OK (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
 fi

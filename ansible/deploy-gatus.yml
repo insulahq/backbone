@@ -1,0 +1,9 @@
+---
+# Deploy Gatus monitoring dashboard
+# Deployed with serial: 1 — first node creates DB before second starts.
+- name: Deploy Gatus monitoring
+  hosts: dns_servers
+  serial: 1
+  tags: [gatus]
+  roles:
+    - gatus

@@ -10,7 +10,8 @@
 #   5. netbird     -- VPN mesh management (needs Traefik + PostgreSQL)
 #   6. peers       -- Enroll all servers in the VPN mesh
 #   7. zitadel     -- Central IAM (needs Traefik + PostgreSQL + PowerDNS for DNS records)
-#   8. backup      -- Restic backup to Hetzner Storagebox
+#   8. gatus       -- Monitoring dashboard + alert receiver (needs Traefik + PostgreSQL + PowerDNS)
+#   9. backup      -- Restic backup to Hetzner Storagebox
 #
 # IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 
@@ -57,6 +58,13 @@
   tags: [zitadel]
   roles:
     - zitadel
+
+- name: Deploy Gatus monitoring
+  hosts: dns_servers
+  serial: 1
+  tags: [gatus]
+  roles:
+    - gatus
 
 - name: Deploy backup configuration
   hosts: backup_targets

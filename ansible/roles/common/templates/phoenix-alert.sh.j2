@@ -1,6 +1,7 @@
 #!/bin/bash
 # Phoenix Host — shared alert helper library.
-# Deployed by Ansible (common role). Sourced by all maintenance scripts.
+# Deployed by Ansible (common role, updated by gatus role).
+# Sourced by all maintenance scripts.
 #
 # Usage:
 #   source /usr/local/lib/phoenix-alert.sh
@@ -11,7 +12,12 @@
 PHOENIX_HOSTNAME="{{ inventory_hostname }}"
 PHOENIX_WEBHOOK_URL="{{ alert_webhook_url }}"
 
-# Send an alert via webhook.
+# Gatus external endpoint configuration
+# Set after gatus role deploys — empty until then (graceful fallback)
+PHOENIX_GATUS_URL="http://127.0.0.1:{{ gatus_local_port | default('8080') }}"
+PHOENIX_GATUS_TOKEN="{{ gatus_external_token | default('') }}"
+
+# Send an alert via Gatus external endpoint and/or raw webhook.
 # Args: $1=level (info|warning|critical), $2=service, $3=message
 phoenix_alert() {
     local level="$1"
@@ -23,16 +29,35 @@ phoenix_alert() {
     # Always log to stdout (captured by systemd journal)
     echo "[${timestamp}] ALERT ${level^^}: [${service}] ${message}"
 
-    # Send webhook if configured
-    if [ -n "$PHOENIX_WEBHOOK_URL" ]; then
-        # Escape double quotes and backslashes in message for JSON safety
-        local safe_msg
-        safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
+    # Map level to Gatus success/failure
+    local gatus_success="true"
+    if [ "$level" = "warning" ] || [ "$level" = "critical" ]; then
+        gatus_success="false"
+    fi
 
+    # Escape message for JSON
+    local safe_msg
+    safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
+
+    # Push to local Gatus external endpoint (primary alert path)
+    # Key format: {hostname}_{service} (matches Gatus config external-endpoints)
+    if [ -n "$PHOENIX_GATUS_TOKEN" ]; then
+        local gatus_key="${PHOENIX_HOSTNAME}_${service}"
+        curl -fsS --retry 2 --max-time 5 -X POST \
+            "${PHOENIX_GATUS_URL}/api/v1/endpoints/${gatus_key}/external" \
+            -H "Authorization: Bearer ${PHOENIX_GATUS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"success\": ${gatus_success}, \"errors\": [\"${safe_msg}\"]}" \
+            > /dev/null 2>&1 || \
+            echo "[${timestamp}] WARNING: Failed to push to Gatus (endpoint: ${gatus_key})"
+    fi
+
+    # Fallback: send to raw webhook if configured (for non-Gatus setups)
+    if [ -n "$PHOENIX_WEBHOOK_URL" ]; then
         curl -fsS --retry 3 --max-time 10 -X POST \
             -H "Content-Type: application/json" \
             -d "{\"host\": \"${PHOENIX_HOSTNAME}\", \"service\": \"${service}\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
             "$PHOENIX_WEBHOOK_URL" > /dev/null 2>&1 || \
-            echo "[${timestamp}] WARNING: Failed to send webhook alert to ${PHOENIX_WEBHOOK_URL}"
+            echo "[${timestamp}] WARNING: Failed to send webhook alert"
     fi
 }
