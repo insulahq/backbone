@@ -1,0 +1,9 @@
+---
+# Deploy Zitadel IAM
+# Deployed with serial: 1 — first node runs DB migrations before second starts.
+- name: Deploy Zitadel IAM
+  hosts: dns_servers
+  serial: 1
+  tags: [zitadel]
+  roles:
+    - zitadel

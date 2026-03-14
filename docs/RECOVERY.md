@@ -138,7 +138,10 @@ ssh root@<NEW_IP> "netbird status --json | python3 -c 'import json,sys; d=json.l
 # 8. Update inventory/hosts.yml if NetBird IP changed, then redeploy services that bind to it
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml --limit <DEAD_NODE>
 
-# 9. Deploy backups
+# 9. Deploy Zitadel (stateless — just starts and connects to existing PG data)
+ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml --limit <DEAD_NODE>
+
+# 10. Deploy backups
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml --limit <DEAD_NODE>
 ```
 

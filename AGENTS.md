@@ -30,6 +30,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
+| Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ---
@@ -45,6 +46,7 @@ ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml      # PowerDNS only
 ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
+ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml       # Zitadel IAM
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
@@ -189,6 +191,7 @@ hosting-platform/
 │       ├── postgresql_repmgr/ # PostgreSQL 18 + repmgr HA
 │       ├── netbird_management/# NetBird combined server
 │       ├── netbird_peer/      # NetBird peer enrollment
+│       ├── zitadel/           # Zitadel IAM (OIDC/OAuth2, multi-tenant)
 │       └── backup/            # Restic backup (with logrotate + notifications)
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
@@ -215,7 +218,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags docker
 ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 
 # Other available tags: traefik, postgresql, powerdns, dns,
-#   netbird, netbird_management, netbird_peer, backup,
+#   netbird, netbird_management, netbird_peer, zitadel, backup,
 #   security, ssh, fail2ban, packages
 ```
 
@@ -256,3 +259,4 @@ pre-commit run --all-files
 - Do not expose PostgreSQL on `0.0.0.0` — bind to NetBird IP only (gotcha 43)
 - Do not force-push to `main` without explicit user approval
 - Do not use `pull: always` in docker_compose_v2 tasks — use `pull: missing` (wasteful re-downloads)
+- Do not change the Zitadel masterkey after initialization — it cannot be rotated (encrypted data becomes inaccessible)

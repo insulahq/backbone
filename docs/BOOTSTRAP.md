@@ -125,7 +125,35 @@ Now that NetBird IPs are known, redeploy components that bind to them:
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml
 ```
 
-## Step 9: Verify Everything
+## Step 9: Deploy Zitadel IAM
+
+Deploy Zitadel as the central identity provider. It uses the existing PostgreSQL HA cluster and sits behind Traefik. Deployed with `serial: 1` so the first node runs database migrations before the second starts.
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml
+```
+
+Zitadel automatically:
+- Creates its database and schema in the PostgreSQL HA cluster
+- Creates the first instance with the admin user from `group_vars/all.yml`
+- Creates DNS A/AAAA records for `auth.example.com` via the PowerDNS API
+- Obtains a TLS certificate via Traefik (DNS-01 ACME)
+
+After deployment, verify:
+
+```bash
+# Console should be accessible
+curl -I https://auth.example.com/ui/console
+
+# OIDC discovery endpoint
+curl -s https://auth.example.com/.well-known/openid-configuration | python3 -m json.tool
+```
+
+**First login:** Open `https://auth.example.com/ui/console` in a browser. Log in with the admin username from `group_vars/all.yml` and the password from `ansible/.generated_secrets/zitadel_admin_password`. You will be prompted to change the password.
+
+**Important:** The masterkey in `ansible/.generated_secrets/zitadel_masterkey` **cannot be changed** after initialization. Back it up securely.
+
+## Step 10: Verify Everything
 
 ```bash
 # PowerDNS (both nodes serve DNS)
@@ -140,6 +168,9 @@ curl -s -H "X-API-Key: $KEY" http://<NS2_NETBIRD_IP>:8081/api/v1/servers/localho
 # Traefik (valid TLS cert)
 curl -I https://netbird.example.com
 
+# Zitadel OIDC
+curl -s https://auth.example.com/.well-known/openid-configuration | python3 -m json.tool
+
 # PostgreSQL replication
 ssh root@<NS1_IP> "docker exec postgresql repmgr cluster show"
 
@@ -151,7 +182,7 @@ ssh root@<NS2_IP> "netbird status"
 ssh root@<NS1_IP> "systemctl status restic-backup.timer"
 ```
 
-## Step 10: Deploy Backups
+## Step 11: Deploy Backups
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml

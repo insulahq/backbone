@@ -64,7 +64,34 @@ netbird_dns_records:
 powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 
 # ============================================================================
-# PostgreSQL HA (shared by PowerDNS + NetBird)
+# Zitadel IAM (central identity provider)
+# ============================================================================
+# Domain for the Zitadel login/console UI
+zitadel_domain: "auth.example.com"
+
+# Organization name shown in the console
+zitadel_org_name: "Phoenix Host"
+
+# Initial admin user (password change required on first login)
+zitadel_admin_username: "admin"
+zitadel_admin_email: "admin@example.com"
+
+# If left undefined, auto-generated and persisted in .generated_secrets/
+# zitadel_db_password: "<GENERATE>"
+# zitadel_admin_password: "<GENERATE>"
+# CRITICAL: masterkey CANNOT be changed after initialization — back it up!
+# zitadel_masterkey: "<GENERATE: 32 chars>"
+
+# SMTP for user invitations and password resets (optional, can be configured later in console)
+# zitadel_smtp_host: "smtp.example.com:587"
+# zitadel_smtp_user: "noreply@example.com"
+# zitadel_smtp_password: "<YOUR_SMTP_PASSWORD>"
+# zitadel_smtp_tls: true
+# zitadel_smtp_from: "noreply@example.com"
+# zitadel_smtp_from_name: "Phoenix Host"
+
+# ============================================================================
+# PostgreSQL HA (shared by PowerDNS + NetBird + Zitadel)
 # ============================================================================
 # Which node is the initial primary (ns1 or ns2)
 # postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
@@ -90,12 +117,14 @@ restic_password: "<GENERATE: openssl rand -base64 22>"
 ns1_backup_paths:
   - /opt/powerdns
   - /opt/netbird
+  - /opt/zitadel
   - /etc/restic
   - /root/.ssh
 
 ns2_backup_paths:
   - /opt/powerdns
   - /opt/netbird
+  - /opt/zitadel
   - /etc/restic
   - /root/.ssh
 

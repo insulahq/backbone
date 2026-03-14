@@ -1,0 +1,50 @@
+---
+# Zitadel IAM — Docker Compose ({{ inventory_hostname }})
+# Central identity provider behind Traefik reverse proxy.
+# Connects to PostgreSQL HA cluster via Docker network.
+# Stateless — all state lives in PostgreSQL (event store).
+
+services:
+  zitadel:
+    image: {{ zitadel_image }}
+    container_name: zitadel
+    restart: unless-stopped
+    command: 'start-from-init --config /etc/zitadel/config.yaml --steps /etc/zitadel/steps.yaml --masterkeyFromEnv'
+    environment:
+      ZITADEL_MASTERKEY: "{{ zitadel_masterkey }}"
+    networks:
+      - traefik_public
+      # Connect to postgresql_default so Zitadel can reach PostgreSQL via Docker DNS
+      # ('postgresql' hostname) without needing the WireGuard tunnel.
+      - postgresql_default
+    volumes:
+      - {{ zitadel_install_dir }}/config.yaml:/etc/zitadel/config.yaml:ro
+      - {{ zitadel_install_dir }}/steps.yaml:/etc/zitadel/steps.yaml:ro
+    labels:
+      - traefik.enable=true
+      # Main router — handles console UI, APIs, OIDC endpoints, login UI
+      - traefik.http.routers.zitadel.rule=Host(`{{ zitadel_domain }}`)
+      - traefik.http.routers.zitadel.entrypoints=websecure
+      - traefik.http.routers.zitadel.tls=true
+      - traefik.http.routers.zitadel.tls.certresolver=letsencrypt
+      - traefik.http.routers.zitadel.service=zitadel
+      # Backend service — h2c for gRPC support
+      - traefik.http.services.zitadel.loadbalancer.server.port={{ zitadel_port }}
+      - traefik.http.services.zitadel.loadbalancer.server.scheme=h2c
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready", "--config", "/etc/zitadel/config.yaml"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "2"
+
+networks:
+  traefik_public:
+    external: true
+  postgresql_default:
+    external: true

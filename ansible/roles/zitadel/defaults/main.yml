@@ -1,0 +1,48 @@
+---
+# Zitadel IAM Role — Default Variables
+# Deploys Zitadel as central identity provider on both ns1 and ns2.
+# Uses PostgreSQL HA backend (deployed by postgresql_repmgr role).
+# Sits behind Traefik for TLS termination.
+
+# Version — pin to a tested stable release (gotcha 47)
+# CRITICAL: test upgrades in staging first — Zitadel migrations can be breaking
+zitadel_version: "v2.71.0"
+zitadel_image: "ghcr.io/zitadel/zitadel:{{ zitadel_version }}"
+
+# Installation directory
+zitadel_install_dir: /opt/zitadel
+
+# Public domain and port (as seen by browsers/clients)
+zitadel_domain: "auth.{{ platform_domain }}"
+zitadel_external_port: 443
+zitadel_external_secure: true
+
+# Internal port (inside the container, behind Traefik)
+zitadel_port: 8080
+
+# Database (uses existing PostgreSQL HA cluster via Docker network)
+zitadel_db_name: zitadel
+zitadel_db_user: zitadel
+# zitadel_db_password: auto-generated and persisted in .generated_secrets/
+# zitadel_masterkey: auto-generated and persisted (32 chars)
+# CRITICAL: masterkey CANNOT be changed after initialization (gotcha)
+
+# First instance configuration (only used on initial setup)
+zitadel_org_name: "Phoenix Host"
+zitadel_admin_username: "admin"
+zitadel_admin_first_name: "Admin"
+zitadel_admin_last_name: "Phoenix Host"
+zitadel_admin_email: "admin@{{ platform_domain }}"
+# zitadel_admin_password: auto-generated and persisted
+
+# Logging
+zitadel_log_level: "info"
+
+# PostgreSQL connection pool
+zitadel_db_max_open_conns: 25
+zitadel_db_max_idle_conns: 10
+zitadel_db_max_conn_lifetime: "1h"
+zitadel_db_max_conn_idle_time: "5m"
+
+# DNS record management (auto-create A/AAAA records via PowerDNS API)
+zitadel_create_dns_records: true

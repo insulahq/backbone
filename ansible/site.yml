@@ -5,11 +5,12 @@
 # Bootstrap order matters:
 #   1. common      -- OS hardening, Docker, nftables, fail2ban
 #   2. traefik     -- Reverse proxy (needs to start before NetBird for certs)
-#   3. postgresql  -- HA database (needed by both PowerDNS and NetBird)
+#   3. postgresql  -- HA database (needed by PowerDNS, NetBird, and Zitadel)
 #   4. powerdns    -- DNS servers (both nodes, shared PostgreSQL HA backend)
 #   5. netbird     -- VPN mesh management (needs Traefik + PostgreSQL)
 #   6. peers       -- Enroll all servers in the VPN mesh
-#   7. backup      -- Restic backup to Hetzner Storagebox
+#   7. zitadel     -- Central IAM (needs Traefik + PostgreSQL + PowerDNS for DNS records)
+#   8. backup      -- Restic backup to Hetzner Storagebox
 #
 # IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 
@@ -49,6 +50,13 @@
   tags: [netbird, netbird_peer]
   roles:
     - netbird_peer
+
+- name: Deploy Zitadel IAM
+  hosts: dns_servers
+  serial: 1
+  tags: [zitadel]
+  roles:
+    - zitadel
 
 - name: Deploy backup configuration
   hosts: backup_targets

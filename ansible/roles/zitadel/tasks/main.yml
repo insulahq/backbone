@@ -1,0 +1,190 @@
+---
+# Zitadel IAM Role — Main Tasks
+# Deploys Zitadel as central identity provider.
+# Uses existing PostgreSQL HA cluster and Traefik reverse proxy.
+# Deployed with serial: 1 so the first node runs migrations before the second starts.
+
+- name: Create Zitadel installation directory
+  file:
+    path: "{{ zitadel_install_dir }}"
+    state: directory
+    mode: '0755'
+  tags: [zitadel]
+
+# --- Secret generation (idempotent, persisted to .generated_secrets/) ---
+
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [zitadel]
+
+- name: Generate Zitadel database password if not set
+  set_fact:
+    zitadel_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_db_password length=32 chars=ascii_letters,digits') }}"
+  when: zitadel_db_password is not defined or zitadel_db_password | length == 0
+  run_once: true
+  no_log: true
+  tags: [zitadel]
+
+# CRITICAL: masterkey must be exactly 32 characters and CANNOT be changed after init
+- name: Generate Zitadel masterkey if not set
+  set_fact:
+    zitadel_masterkey: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_masterkey length=32 chars=ascii_letters,digits') }}"
+  when: zitadel_masterkey is not defined or zitadel_masterkey | length == 0
+  run_once: true
+  no_log: true
+  tags: [zitadel]
+
+- name: Generate Zitadel admin password if not set
+  set_fact:
+    zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=24 chars=ascii_letters,digits,punctuation') }}"
+  when: zitadel_admin_password is not defined or zitadel_admin_password | length == 0
+  run_once: true
+  no_log: true
+  tags: [zitadel]
+
+# --- Deploy configuration files ---
+
+- name: Deploy Zitadel runtime config
+  template:
+    src: config.yaml.j2
+    dest: "{{ zitadel_install_dir }}/config.yaml"
+    mode: '0600'
+  notify: restart zitadel
+  tags: [zitadel]
+
+- name: Deploy Zitadel first-instance steps config
+  template:
+    src: steps.yaml.j2
+    dest: "{{ zitadel_install_dir }}/steps.yaml"
+    mode: '0600'
+  tags: [zitadel]
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ zitadel_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart zitadel
+  tags: [zitadel]
+
+# --- Start Zitadel ---
+# start-from-init is idempotent: runs migrations if needed, creates instance if needed, then starts.
+# serial: 1 in the playbook ensures the first node completes migrations before the second starts.
+
+- name: Start Zitadel stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ zitadel_install_dir }}"
+    pull: missing
+    state: present
+  tags: [zitadel]
+
+- name: Wait for Zitadel to be ready
+  uri:
+    url: "https://{{ zitadel_domain }}/debug/ready"
+    status_code: 200
+    validate_certs: "{{ netbird_validate_certs | default(false) }}"
+  retries: 40
+  delay: 5
+  register: zitadel_ready
+  until: zitadel_ready.status == 200
+  tags: [zitadel]
+
+# --- DNS record creation (optional, via PowerDNS API) ---
+
+- name: Create DNS A records for Zitadel domain
+  when:
+    - zitadel_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ zitadel_domain }}."
+          type: A
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'ansible_host')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [zitadel, dns]
+
+- name: Create DNS AAAA records for Zitadel domain
+  when:
+    - zitadel_create_dns_records | default(true)
+    - powerdns_api_key is defined
+    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ zitadel_domain }}."
+          type: AAAA
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'public_ipv6')
+              | select('defined')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [zitadel, dns]
+
+- name: Increment SOA serial after DNS record changes
+  when:
+    - zitadel_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  changed_when: true
+  ignore_errors: true
+  tags: [zitadel, dns]
+
+# --- Status display ---
+
+- name: Display Zitadel deployment status
+  debug:
+    msg:
+      - "Zitadel {{ zitadel_version }} deployed on {{ inventory_hostname }}"
+      - "Console: https://{{ zitadel_domain }}/ui/console"
+      - "Login:   https://{{ zitadel_domain }}/ui/login"
+      - "OIDC:    https://{{ zitadel_domain }}/.well-known/openid-configuration"
+      - ""
+      - "Initial admin: {{ zitadel_admin_username }} (password change required on first login)"
+      - "Admin email: {{ zitadel_admin_email }}"
+      - "Organization: {{ zitadel_org_name }}"
+      - ""
+      - "IMPORTANT: Admin password is in ansible/.generated_secrets/zitadel_admin_password"
+      - "IMPORTANT: Masterkey is in ansible/.generated_secrets/zitadel_masterkey (CANNOT be changed)"
+  tags: [zitadel]

@@ -1,0 +1,8 @@
+---
+# Zitadel Role — Handlers
+
+- name: restart zitadel
+  community.docker.docker_compose_v2:
+    project_src: "{{ zitadel_install_dir }}"
+    state: present
+    recreate: always
