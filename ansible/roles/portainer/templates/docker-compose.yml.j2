@@ -1,0 +1,30 @@
+---
+# Portainer CE — Docker Management ({{ inventory_hostname }})
+# Bound to NetBird IP only — access via https://{{ portainer_bind_interface }}:{{ portainer_https_port }}
+# NOT publicly accessible. No Traefik integration.
+
+services:
+  portainer:
+    image: {{ portainer_image }}
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      # Bind to NetBird WireGuard IP only — not reachable from the public internet
+      - "{{ portainer_bind_interface }}:{{ portainer_https_port }}:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://localhost:9443/api/system/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+volumes:
+  portainer_data:

@@ -11,7 +11,8 @@
 #   6. peers       -- Enroll all servers in the VPN mesh
 #   7. zitadel     -- Central IAM (needs Traefik + PostgreSQL + PowerDNS for DNS records)
 #   8. gatus       -- Monitoring dashboard + alert receiver (needs Traefik + PostgreSQL + PowerDNS)
-#   9. backup      -- Restic backup to Hetzner Storagebox
+#   9. portainer   -- Docker management UI (needs NetBird IPs, internal only)
+#  10. backup      -- Restic backup to Hetzner Storagebox
 #
 # IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 
@@ -65,6 +66,12 @@
   tags: [gatus]
   roles:
     - gatus
+
+- name: Deploy Portainer Docker management
+  hosts: dns_servers
+  tags: [portainer]
+  roles:
+    - portainer
 
 - name: Deploy backup configuration
   hosts: backup_targets

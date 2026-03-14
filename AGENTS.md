@@ -32,6 +32,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
 | Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
+| Portainer | 2.24.1 | Docker management UI, NetBird-only access |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ### Maintenance Automation
@@ -75,6 +76,7 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml       # Zitadel IAM
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml         # Gatus monitoring
+ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer Docker UI
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
@@ -234,6 +236,7 @@ hosting-platform/
 │       ├── netbird_peer/      # NetBird peer enrollment
 │       ├── zitadel/           # Zitadel IAM (OIDC/OAuth2, multi-tenant)
 │       ├── gatus/             # Gatus monitoring (HA dashboard + alert receiver)
+│       ├── portainer/         # Portainer CE Docker management (NetBird-only)
 │       └── backup/            # Restic backup (with logrotate + notifications)
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
@@ -261,7 +264,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 
 # Other available tags: traefik, postgresql, powerdns, dns,
 #   netbird, netbird_management, netbird_peer, zitadel, gatus,
-#   backup, security, ssh, fail2ban, packages, maintenance
+#   portainer, backup, security, ssh, fail2ban, packages, maintenance
 ```
 
 ---

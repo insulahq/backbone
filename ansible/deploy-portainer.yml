@@ -1,0 +1,10 @@
+---
+# Deploy Portainer CE — Docker management UI
+# Bound to NetBird IP only (not publicly accessible)
+# Usage: ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
+
+- name: Deploy Portainer Docker management
+  hosts: dns_servers
+  tags: [portainer]
+  roles:
+    - portainer
