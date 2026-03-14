@@ -53,21 +53,13 @@ netbird_dns_records:
       - <NS2_PUBLIC_IP>
 
 # ============================================================================
-# PowerDNS
+# PowerDNS (both nodes, shared PostgreSQL HA backend)
 # ============================================================================
-powerdns_version: "4.9"
-powerdns_docker_image: "powerdns/pdns-auth-49:latest"
-powerdns_api_port: 8081
 # If left undefined, auto-generated and persisted in .generated_secrets/
 powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
-powerdns_api_url: "http://<NS1_NETBIRD_IP>:8081"
-
-# PowerDNS uses its own PostgreSQL 16 container
-postgres_version: "16-alpine"
-postgres_docker_image: "postgres:16-alpine"
 
 # ============================================================================
-# PostgreSQL HA (for NetBird)
+# PostgreSQL HA (shared by PowerDNS + NetBird)
 # ============================================================================
 # Which node is the initial primary (ns1 or ns2)
 # postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml

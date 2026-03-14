@@ -1,0 +1,16 @@
+---
+# Phoenix Host — Deploy PowerDNS
+# Deploys PowerDNS on both nodes with shared PostgreSQL HA backend.
+# Both nodes run as Native (read-write) — zone data replicates via
+# PostgreSQL streaming replication.
+#
+# Prerequisites: PostgreSQL HA cluster must be running (deploy-postgresql.yml)
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
+#   ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit ns1
+
+- name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
+  hosts: dns_servers
+  roles:
+    - powerdns

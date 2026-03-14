@@ -8,6 +8,6 @@
 #   ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit ns2
 
 - name: Deploy standalone Traefik reverse proxy
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - traefik

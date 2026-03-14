@@ -3,13 +3,13 @@
 # Deploys fully redundant DNS + VPN mesh infrastructure on ns1 + ns2
 #
 # Bootstrap order matters:
-#   1. common    -- OS hardening, Docker, nftables, fail2ban
-#   2. powerdns  -- DNS servers (primary on ns1, secondary on ns2)
-#   3. traefik   -- Reverse proxy with DNS-01 ACME (needs PowerDNS API)
-#   4. postgresql -- HA database for NetBird (needs NetBird IPs after first deploy)
-#   5. netbird   -- VPN mesh management (needs Traefik + PostgreSQL)
-#   6. peers     -- Enroll all servers in the VPN mesh
-#   7. backup    -- Restic backup to Hetzner Storagebox
+#   1. common      -- OS hardening, Docker, nftables, fail2ban
+#   2. traefik     -- Reverse proxy (needs to start before NetBird for certs)
+#   3. postgresql  -- HA database (needed by both PowerDNS and NetBird)
+#   4. powerdns    -- DNS servers (both nodes, shared PostgreSQL HA backend)
+#   5. netbird     -- VPN mesh management (needs Traefik + PostgreSQL)
+#   6. peers       -- Enroll all servers in the VPN mesh
+#   7. backup      -- Restic backup to Hetzner Storagebox
 #
 # IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 
@@ -18,29 +18,24 @@
   roles:
     - common
 
-- name: Deploy PowerDNS primary
-  hosts: powerdns_primary
-  roles:
-    - powerdns_master
-
-- name: Deploy PowerDNS secondary
-  hosts: powerdns_secondary
-  roles:
-    - powerdns_slave
-
 - name: Deploy Traefik reverse proxy
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - traefik
 
 - name: Deploy PostgreSQL primary/standby with repmgr
-  hosts: netbird_management
+  hosts: dns_servers
   serial: 1
   roles:
     - postgresql_repmgr
 
+- name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
+  hosts: dns_servers
+  roles:
+    - powerdns
+
 - name: Deploy NetBird management server
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - netbird_management
 

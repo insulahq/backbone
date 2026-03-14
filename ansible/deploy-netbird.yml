@@ -1,8 +1,8 @@
 ---
 # NetBird-only deployment playbook
-# Skips common and PowerDNS plays to avoid timeouts
+# Deploys NetBird management server on both ns1 and ns2
 
 - name: Deploy NetBird management server
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - netbird_management

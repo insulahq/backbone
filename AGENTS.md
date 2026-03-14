@@ -14,8 +14,8 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 
 | Server | Location | Role |
 |--------|----------|------|
-| ns1 | Hetzner Falkenstein | PowerDNS primary, NetBird management, PostgreSQL standby |
-| ns2 | Hetzner Helsinki | PowerDNS secondary, NetBird management, PostgreSQL primary |
+| ns1 | Hetzner Falkenstein | PowerDNS (read-write), NetBird management, PostgreSQL standby |
+| ns2 | Hetzner Helsinki | PowerDNS (read-write), NetBird management, PostgreSQL primary |
 
 PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd promoted NS2).
 
@@ -26,7 +26,7 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | Component | Version | Description |
 |-----------|---------|-------------|
 | OS | Debian 13 | Hardened with nftables + fail2ban |
-| PowerDNS | 4.9.13 | Primary (ns1, PostgreSQL backend) + Secondary (ns2, SQLite, AXFR) |
+| PowerDNS | 4.9 | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
@@ -41,9 +41,10 @@ cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml                 # Everything
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml       # Traefik only
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml    # PostgreSQL HA only
+ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml      # PowerDNS only
 ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
-ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + NetBird
+ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
@@ -91,11 +92,8 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 3 | Zone `kind` must be `Master` (not `Native`) for autosecondary | API zone creation must use `"kind": "Master"` |
 | 29 | `pdns_control ping` is invalid in PowerDNS 4.9 | Use `pdns_control uptime > /dev/null 2>&1` for health checks |
-| 30 | `pdnsutil add-record` does NOT auto-increment SOA serial | Always run `pdnsutil increase-serial` + `pdns_control notify` after |
-| 31 | Autosecondary only registers first notifying IP | Add both public + NetBird IPs as autoprimaries |
-| 32 | Zone deletion does NOT propagate to secondary | Must explicitly delete on NS2 via API or `pdnsutil delete-zone` |
+| 30 | `pdnsutil add-record` does NOT auto-increment SOA serial | Always run `pdnsutil increase-serial` after |
 | 33 | `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0 | Manually increment serial after zone creation |
 
 ### PostgreSQL & repmgr
@@ -168,8 +166,7 @@ hosting-platform/
 │   │   └── ns2.yml
 │   └── roles/
 │       ├── common/            # OS hardening, nftables, Docker, fail2ban
-│       ├── powerdns_master/   # PowerDNS primary + PostgreSQL backend
-│       ├── powerdns_slave/    # PowerDNS secondary + SQLite
+│       ├── powerdns/          # PowerDNS (both nodes, shared PostgreSQL HA)
 │       ├── traefik/           # Traefik v3.6 reverse proxy
 │       ├── postgresql_repmgr/ # PostgreSQL 18 + repmgr HA
 │       ├── netbird_management/# NetBird combined server

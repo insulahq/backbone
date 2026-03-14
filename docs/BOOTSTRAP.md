@@ -30,53 +30,50 @@ Deploy the `common` role to both servers:
 ```bash
 cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml --tags common
-# Or: ansible-playbook -i inventory/hosts.yml -l dns_servers -e role=common site.yml
 ```
 
 This installs Docker, nftables, fail2ban, and hardens SSH.
 
-## Step 3: PowerDNS
+## Step 3: Traefik
 
-Deploy PowerDNS primary (ns1) and secondary (ns2):
+Deploy Traefik on both nodes. It creates the `traefik_public` Docker network needed by NetBird.
 
-```bash
-ansible-playbook -i inventory/hosts.yml site.yml --limit powerdns_primary --tags powerdns
-ansible-playbook -i inventory/hosts.yml site.yml --limit powerdns_secondary --tags powerdns
-```
-
-After deployment, create the DNS A records for your NetBird domain manually:
-
-```bash
-# On ns1:
-docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS1_PUBLIC_IP>
-docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS2_PUBLIC_IP>
-docker exec powerdns-auth pdnsutil increase-serial example.com
-docker exec powerdns-auth pdns_control notify example.com
-```
-
-## Step 4: Traefik
-
-Deploy Traefik on both nodes. It needs the PowerDNS API for DNS-01 ACME challenges.
-
-At this point, the PowerDNS nginx proxy hasn't been deployed yet (it binds to the NetBird IP which doesn't exist). Traefik can still start but cert issuance will fail until NetBird is up.
+At this point, cert issuance via DNS-01 will fail (PowerDNS API not yet available). Traefik starts but certs come later.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 ```
 
-## Step 5: PostgreSQL HA
+## Step 4: PostgreSQL HA
 
-Deploy PostgreSQL on both nodes. The primary node is set by `postgresql_primary_node` in `roles/postgresql_repmgr/defaults/main.yml`.
+Deploy PostgreSQL on both nodes. The primary node is set by `postgresql_primary_node` in `roles/postgresql_repmgr/defaults/main.yml` (default: ns2).
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
 ```
 
-**Important:** The `serial: 1` setting deploys one node at a time. The primary must come up first. If `postgresql_primary_node` is `ns2`, edit the inventory to list ns2 before ns1, or deploy manually:
+**Important:** The `serial: 1` setting deploys one node at a time. The primary must come up first. If `postgresql_primary_node` is `ns2`, the playbook should be run with ns2 listed first in inventory, or deploy manually:
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns2
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns1
+```
+
+## Step 5: PowerDNS
+
+Deploy PowerDNS on both nodes. Both connect to the shared PostgreSQL HA cluster (Native mode — both read-write). No AXFR/NOTIFY needed; zone data replicates via PostgreSQL streaming replication.
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
+```
+
+After deployment, create the DNS A records for your NetBird domain:
+
+```bash
+# On either node (both have write access):
+docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS1_PUBLIC_IP>
+docker exec powerdns-auth pdnsutil add-record example.com netbird A <NS2_PUBLIC_IP>
+docker exec powerdns-auth pdnsutil increase-serial example.com
 ```
 
 ## Step 6: NetBird Management Server
@@ -116,43 +113,24 @@ ssh root@<NS2_IP> "netbird status --json | python3 -c 'import json,sys; print(js
 
 ## Step 8: Redeploy with NetBird IPs
 
-Now that NetBird IPs are known, redeploy components that depend on them:
+Now that NetBird IPs are known, redeploy components that bind to them:
 
 ```bash
-# PowerDNS nginx proxy (binds to NetBird IP)
-ansible-playbook -i inventory/hosts.yml site.yml --limit powerdns_primary --tags powerdns
-ansible-playbook -i inventory/hosts.yml site.yml --limit powerdns_secondary --tags powerdns
-
-# Traefik (uses PowerDNS API via NetBird IP for ACME)
-ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
-
-# Force-recreate containers to pick up new network bindings
-ssh root@<NS1_IP> "cd /opt/powerdns && docker compose up -d --force-recreate nginx"
-ssh root@<NS2_IP> "cd /opt/powerdns && docker compose up -d --force-recreate nginx"
+# Full redeploy (PowerDNS nginx binds to NetBird IP, Traefik uses PowerDNS API via NetBird IP, PostgreSQL binds to NetBird IP)
+ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml
 ```
 
-## Step 9: Verify DNS Replication
+## Step 9: Verify Everything
 
 ```bash
+# PowerDNS (both nodes serve DNS)
 dig @<NS1_IP> example.com SOA +short
 dig @<NS2_IP> example.com SOA +short
-# Both should return the same serial number
-```
+# Both should return the same SOA (shared database)
 
-## Step 10: Deploy Backups
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-backup.yml
-```
-
-**Manual step:** Register the SSH public key with your Hetzner Storagebox before the first backup run.
-
-## Step 11: Verify Everything
-
-```bash
-# PowerDNS
-dig @<NS1_IP> netbird.example.com A +short
-dig @<NS2_IP> netbird.example.com A +short
+# PowerDNS API (both nodes have write access)
+curl -s -H "X-API-Key: $KEY" http://<NS1_NETBIRD_IP>:8081/api/v1/servers/localhost/zones
+curl -s -H "X-API-Key: $KEY" http://<NS2_NETBIRD_IP>:8081/api/v1/servers/localhost/zones
 
 # Traefik (valid TLS cert)
 curl -I https://netbird.example.com
@@ -167,6 +145,14 @@ ssh root@<NS2_IP> "netbird status"
 # Backup
 ssh root@<NS1_IP> "systemctl status restic-backup.timer"
 ```
+
+## Step 10: Deploy Backups
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-backup.yml
+```
+
+**Manual step:** Register the SSH public key with your Hetzner Storagebox before the first backup run.
 
 ---
 

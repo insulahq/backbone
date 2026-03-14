@@ -21,12 +21,10 @@ traefik_acme_challenge: dns-01
 traefik_acme_dns_provider: pdns
 
 # PowerDNS API URL for DNS-01 challenge.
-# DNS-01 requires writing TXT records, which only the PRIMARY PowerDNS (ns1) supports.
-# ns2's secondary PowerDNS is read-only (AXFR), so ns2 must also use ns1's API.
-# On ns1: uses local nginx proxy (NetBird IP). On ns2: reaches ns1 via NetBird mesh.
-# Note: ns2 cert renewal depends on ns1 being reachable. Certs are valid 90 days,
-# so ns1 would need to be down for >60 days before ns2 certs expire.
-traefik_pdns_api_url: "http://{{ hostvars['ns1']['netbird_ip'] | default('127.0.0.1') }}:8081"
+# Both nodes run PowerDNS with shared PostgreSQL HA backend (Native mode),
+# so each node uses its OWN local PowerDNS API for ACME challenges.
+# No single point of failure: if one node is down, the other renews certs independently.
+traefik_pdns_api_url: "http://{{ netbird_ip | default('127.0.0.1') }}:8081"
 
 # Logging
 traefik_log_level: INFO

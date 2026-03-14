@@ -1,38 +1,19 @@
 ---
-# PowerDNS Master — Docker Compose
-# Runs on ns1 as primary DNS server with PostgreSQL backend
-# Uses internal Docker network + nginx proxy for security
+# PowerDNS — Docker Compose ({{ inventory_hostname }})
+# Runs PowerDNS authoritative server with PostgreSQL HA backend.
+# Both ns1 and ns2 run this same stack — zone data replicates via PostgreSQL
+# streaming replication (repmgr), NOT AXFR.
+#
+# The standalone PostgreSQL container is gone — PowerDNS connects to the
+# shared postgresql_default Docker network where the HA cluster runs.
 
 services:
-  # PostgreSQL — Database backend for PowerDNS and PowerDNS-Admin
-  postgres:
-    image: {{ postgres_image }}
-    container_name: powerdns-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: {{ powerdns_db_name }}
-      POSTGRES_USER: {{ powerdns_db_user }}
-      POSTGRES_PASSWORD: {{ powerdns_db_password }}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - {{ powerdns_install_dir }}/init-schema.sql:/docker-entrypoint-initdb.d/init-schema.sql:ro
-    networks:
-      - powerdns_internal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U {{ powerdns_db_user }}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # PowerDNS Authoritative Server
   pdns:
     image: {{ powerdns_image }}
     container_name: powerdns-auth
     restart: unless-stopped
-    hostname: ns1.{{ platform_domain }}
-    depends_on:
-      postgres:
-        condition: service_healthy
+    hostname: {{ inventory_hostname }}.{{ platform_domain }}
     volumes:
       - {{ powerdns_install_dir }}/pdns.conf:/etc/powerdns/pdns.conf:ro
     ports:
@@ -40,7 +21,7 @@ services:
       - "0.0.0.0:53:53/udp"
     networks:
       - powerdns_internal
-      - powerdns_external  # Needed for public DNS port binding
+      - postgresql_default  # Connect to HA PostgreSQL cluster via Docker DNS
     healthcheck:
       test: ["CMD-SHELL", "pdns_control uptime > /dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -48,21 +29,19 @@ services:
       retries: 3
 
 {% if powerdns_admin_enabled %}
-  # PowerDNS-Admin — Web UI for managing PowerDNS
+  # PowerDNS-Admin — Web UI for managing PowerDNS ({{ powerdns_admin_node }} only)
   pdns-admin:
     image: {{ powerdns_admin_image }}
     container_name: powerdns-admin
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       pdns:
         condition: service_started
     environment:
       SECRET_KEY: {{ powerdns_admin_secret_key }}
       BIND_ADDRESS: 0.0.0.0
       PORT: {{ powerdns_admin_port }}
-      SQLA_DB_HOST: postgres
+      SQLA_DB_HOST: postgresql
       SQLA_DB_PORT: 5432
       SQLA_DB_NAME: {{ powerdns_admin_sqla_db_name }}
       SQLA_DB_USER: {{ powerdns_admin_sqla_db_user }}
@@ -74,6 +53,7 @@ services:
       - pdns_admin_data:/data
     networks:
       - powerdns_internal
+      - postgresql_default  # For PowerDNS-Admin database
 {% endif %}
 
   # Nginx Proxy — Exposes PowerDNS API + Admin UI on NetBird interface only
@@ -95,7 +75,6 @@ services:
 {% endif %}
     networks:
       - powerdns_internal
-      - powerdns_external  # Needed for host port mapping
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/v1/servers/localhost || exit 1"]
       interval: 10s
@@ -105,10 +84,10 @@ services:
 networks:
   powerdns_internal:
     driver: bridge
-    internal: true  # No external access (isolated backend network)
-  powerdns_external:
-    driver: bridge  # Non-internal network for nginx host port binding
+  postgresql_default:
+    external: true
 
+{% if powerdns_admin_enabled %}
 volumes:
-  postgres_data:
   pdns_admin_data:
+{% endif %}

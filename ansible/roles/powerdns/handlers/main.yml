@@ -1,5 +1,5 @@
 ---
-# PowerDNS Slave Role — Handlers
+# PowerDNS Role — Handlers
 
 - name: restart powerdns
   community.docker.docker_compose_v2:

@@ -1,0 +1,54 @@
+---
+# PowerDNS Role — Default Variables
+# Deploys PowerDNS on BOTH ns1 and ns2 using the shared PostgreSQL HA cluster.
+# Both nodes run as Native (read-write) — zone data replicates via PostgreSQL
+# streaming replication, NOT AXFR. No primary/secondary distinction for DNS.
+#
+# PowerDNS-Admin (web UI) runs on ns1 only.
+
+# PowerDNS versions — pin to specific tags
+powerdns_version: "4.9"
+powerdns_image: "powerdns/pdns-auth-49:latest"
+powerdns_admin_version: "0.4.1"
+powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.1"
+
+# Nginx proxy
+nginx_image: "nginx:alpine"
+
+# Installation directory
+powerdns_install_dir: /opt/powerdns
+
+# PowerDNS configuration
+powerdns_api_enabled: yes
+powerdns_webserver_enabled: yes
+powerdns_webserver_port: 8081
+powerdns_dns_port: 53
+
+# DNSSEC
+powerdns_dnssec_enabled: yes
+
+# Nginx proxy — exposes API on NetBird interface only
+powerdns_nginx_api_port: 8081
+powerdns_nginx_admin_port: 8080
+powerdns_bind_interface: "{{ netbird_ip | default('127.0.0.1') }}"
+
+# PowerDNS-Admin — web UI for managing PowerDNS (ns1 only)
+powerdns_admin_enabled: "{{ inventory_hostname == powerdns_admin_node }}"
+powerdns_admin_node: "ns1"
+powerdns_admin_port: 9191
+powerdns_admin_secret_key: ""  # Generated if not set
+powerdns_admin_sqla_db_name: pdnsadmin
+powerdns_admin_sqla_db_user: pdnsadmin
+# powerdns_admin_sqla_db_password: <set in vault or group_vars>
+
+# PostgreSQL connection — uses the HA cluster (deployed by postgresql_repmgr role)
+# PowerDNS connects via Docker network to the local postgresql container.
+powerdns_db_name: powerdns
+powerdns_db_user: pdns
+# powerdns_db_password: <set in vault or group_vars>
+
+# API security
+# powerdns_api_key: <set in vault or group_vars>
+
+# Logging
+powerdns_log_level: "4"  # 0=nothing, 9=very verbose

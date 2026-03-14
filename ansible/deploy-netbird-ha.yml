@@ -2,32 +2,30 @@
 # Phoenix Host — Deploy NetBird HA Stack
 # Full deployment sequence for NetBird high-availability on ns1 + ns2:
 #   1. Standalone Traefik (creates traefik_public Docker network, handles TLS)
-#   2. PostgreSQL HA (primary on ns1, standby on ns2, repmgr automatic failover)
-#   3. NetBird Management (both ns1 and ns2, uses PostgreSQL multi-host DSN)
+#   2. PostgreSQL HA (repmgr automatic failover)
+#   3. PowerDNS (both nodes, Native mode, shared PostgreSQL HA backend)
+#   4. NetBird Management (both nodes, uses PostgreSQL multi-host DSN)
 #
-# WARNING: Running this on ns1 will restart the NetBird stack (brief ~30s downtime
-# while Traefik migrates from the embedded NetBird stack to the standalone stack).
-# Run on ns2 first to verify the setup before touching ns1.
-#
-# Recommended initial run (ns2 first, ns1 second):
-#   ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml --limit ns2
-#   ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml --limit ns1
-#
-# Full deployment (both at once — only safe after initial verification):
+# Usage:
 #   ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml
 
 - name: Deploy standalone Traefik reverse proxy
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - traefik
 
 - name: Deploy PostgreSQL primary/standby with repmgr
-  hosts: netbird_management
+  hosts: dns_servers
   serial: 1
   roles:
     - postgresql_repmgr
 
+- name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
+  hosts: dns_servers
+  roles:
+    - powerdns
+
 - name: Deploy NetBird management server
-  hosts: netbird_management
+  hosts: dns_servers
   roles:
     - netbird_management

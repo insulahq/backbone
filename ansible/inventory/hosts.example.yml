@@ -22,22 +22,9 @@ all:
           location: hetzner_helsinki
           netbird_ip: <NS2_NETBIRD_IP>   # Assigned after NetBird enrollment
 
-    netbird_management:
-      hosts:
-        ns1:
-        ns2:
-
     netbird_peers:
       hosts:
         ns1:
-        ns2:
-
-    powerdns_primary:
-      hosts:
-        ns1:
-
-    powerdns_secondary:
-      hosts:
         ns2:
 
     backup_targets:

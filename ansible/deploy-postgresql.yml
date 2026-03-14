@@ -1,18 +1,18 @@
 ---
 # Phoenix Host — Deploy PostgreSQL HA (repmgr primary/standby)
-# Deploys PostgreSQL 16 with repmgr on ns1 (primary) and ns2 (standby)
-# ns1 hosts the write-capable primary; ns2 follows as hot standby
-# Both NetBird instances connect via multi-host DSN with target_session_attrs=read-write
+# Deploys PostgreSQL 18 with repmgr on both nodes.
+# The primary node is set by postgresql_primary_node in defaults.
+# Both NetBird and PowerDNS use this shared HA cluster.
 #
-# IMPORTANT: Deploy primary (ns1) first, then standby (ns2).
-# The playbook handles ordering via serial: 1 to ensure ns1 starts before ns2.
+# IMPORTANT: Deploy primary first, then standby.
+# The playbook handles ordering via serial: 1.
 #
 # Usage:
 #   ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
-#   ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns1
+#   ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns2
 
 - name: Deploy PostgreSQL primary/standby with repmgr
-  hosts: netbird_management
+  hosts: dns_servers
   serial: 1
   roles:
     - postgresql_repmgr

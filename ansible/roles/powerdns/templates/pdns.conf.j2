@@ -1,19 +1,23 @@
-# PowerDNS Authoritative Server Configuration (Primary)
-# PowerDNS 4.9 — Docker deployment on ns1
-# Backend: PostgreSQL
+# PowerDNS Authoritative Server Configuration
+# PowerDNS 4.9 — Docker deployment on {{ inventory_hostname }}
+# Backend: PostgreSQL HA cluster (shared between ns1 and ns2)
+#
+# Both nodes run as Native (read-write). Zone data replicates via
+# PostgreSQL streaming replication, NOT AXFR/NOTIFY.
 
 ####################
 # Server Settings
 ####################
 
 # Server identity
-server-id=ns1.{{ platform_domain }}
+server-id={{ inventory_hostname }}.{{ platform_domain }}
 local-address=0.0.0.0
 local-port={{ powerdns_dns_port }}
 
-# Primary/Secondary mode (4.9 terminology)
-primary={{ 'yes' if powerdns_primary else 'no' }}
-secondary={{ 'yes' if powerdns_secondary else 'no' }}
+# Native mode — both nodes can read and write zones.
+# No primary/secondary distinction; replication happens at the database level.
+primary=no
+secondary=no
 
 ####################
 # Zone Defaults
@@ -24,16 +28,6 @@ secondary={{ 'yes' if powerdns_secondary else 'no' }}
 # Format: <primary-ns> <hostmaster-email> <serial> <refresh> <retry> <expire> <minimum-ttl>
 # Serial 0 triggers INCEPTION-INCREMENT on first edit when soa_edit_api is set.
 default-soa-content=ns1.{{ platform_domain }}. hostmaster.{{ platform_domain }}. 0 10800 3600 604800 3600
-
-####################
-# Zone Replication (AXFR/NOTIFY)
-####################
-
-# Allow zone transfers only from ns2
-allow-axfr-ips={{ powerdns_allow_axfr_ips | join(',') }}
-
-# Notify ns2 on zone changes
-also-notify={{ powerdns_also_notify | join(',') }}
 
 ####################
 # API & Web Server
@@ -48,13 +42,14 @@ webserver-port={{ powerdns_webserver_port }}
 webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8
 
 ####################
-# Database Backend (PostgreSQL)
+# Database Backend (PostgreSQL HA Cluster)
 ####################
 
 launch=gpgsql
 
-# PostgreSQL connection (Docker service name)
-gpgsql-host=postgres
+# Connect to the local PostgreSQL container via Docker network.
+# 'postgresql' resolves via Docker DNS on the shared postgresql_default network.
+gpgsql-host=postgresql
 gpgsql-port=5432
 gpgsql-dbname={{ powerdns_db_name }}
 gpgsql-user={{ powerdns_db_user }}

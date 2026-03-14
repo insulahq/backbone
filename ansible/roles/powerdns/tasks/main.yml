@@ -1,0 +1,210 @@
+---
+# PowerDNS Role — Main Tasks
+# Deploys PowerDNS on both ns1 and ns2 with shared PostgreSQL HA backend.
+# Both nodes run as Native (read-write) — zone data replicates via
+# PostgreSQL streaming replication, NOT AXFR.
+
+- name: Check if NetBird IP is available
+  set_fact:
+    has_netbird_ip: "{{ netbird_ip is defined and netbird_ip | length > 0 }}"
+
+- name: Display binding interface
+  debug:
+    msg: "PowerDNS on {{ inventory_hostname }} will bind API to: {{ powerdns_bind_interface }} ({{ 'NetBird mesh' if has_netbird_ip else 'localhost - will reconfigure after NetBird deployment' }})"
+
+- name: Create PowerDNS installation directory
+  file:
+    path: "{{ powerdns_install_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate PowerDNS API key if not set
+  set_fact:
+    powerdns_api_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_api_key length=64 chars=ascii_letters,digits') }}"
+  when: powerdns_api_key is not defined or powerdns_api_key | length == 0
+  run_once: true
+  no_log: true
+
+- name: Generate PowerDNS DB password if not set
+  set_fact:
+    powerdns_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_db_password length=32 chars=ascii_letters,digits') }}"
+  when: powerdns_db_password is not defined or powerdns_db_password | length == 0
+  run_once: true
+  no_log: true
+
+- name: Generate PowerDNS-Admin database password if not set
+  set_fact:
+    powerdns_admin_sqla_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_admin_sqla_db_password length=32 chars=ascii_letters,digits') }}"
+  when: powerdns_admin_sqla_db_password is not defined or powerdns_admin_sqla_db_password | length == 0
+  run_once: true
+  no_log: true
+
+- name: Generate PowerDNS-Admin secret key if not set
+  set_fact:
+    powerdns_admin_secret_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_admin_secret_key length=64 chars=ascii_letters,digits') }}"
+  when: powerdns_admin_secret_key is not defined or powerdns_admin_secret_key | length == 0
+  run_once: true
+  no_log: true
+
+# --- Database setup (on PostgreSQL HA primary only) ---
+# PowerDNS and PowerDNS-Admin databases live in the HA cluster.
+# Schema is created on the primary and replicated to standby automatically.
+
+- name: Create PowerDNS database user and database
+  when: inventory_hostname == postgresql_primary_node
+  run_once: true
+  block:
+    - name: Create PowerDNS database user if not exists
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          bash -c "psql -U postgres -tc \"SELECT 1 FROM pg_roles WHERE rolname='{{ powerdns_db_user }}'\" | grep -q 1 ||
+                   psql -U postgres -c \"CREATE USER {{ powerdns_db_user }} WITH PASSWORD '{{ powerdns_db_password }}'\""
+      changed_when: false
+      no_log: true
+
+    - name: Create PowerDNS database if not exists
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          bash -c "psql -U postgres -tc \"SELECT 1 FROM pg_database WHERE datname='{{ powerdns_db_name }}'\" | grep -q 1 ||
+                   createdb -U postgres -O {{ powerdns_db_user }} {{ powerdns_db_name }}"
+      changed_when: false
+
+    - name: Check if PowerDNS schema exists
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -d {{ powerdns_db_name }} -tc
+          "SELECT 1 FROM information_schema.tables WHERE table_name='domains'"
+      register: schema_check
+      changed_when: false
+
+    - name: Deploy schema init script to host
+      template:
+        src: init-schema.sql.j2
+        dest: "{{ powerdns_install_dir }}/init-schema.sql"
+        mode: '0600'
+      when: schema_check.stdout | trim == ""
+
+    - name: Copy schema init script into PostgreSQL container
+      shell: docker cp {{ powerdns_install_dir }}/init-schema.sql postgresql:/tmp/init-schema.sql
+      when: schema_check.stdout | trim == ""
+
+    - name: Initialize PowerDNS schema
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -d {{ powerdns_db_name }} -f /tmp/init-schema.sql
+      when: schema_check.stdout | trim == ""
+
+- name: Create PowerDNS-Admin database and user
+  when: inventory_hostname == postgresql_primary_node
+  run_once: true
+  block:
+    - name: Create PowerDNS-Admin database user if not exists
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          bash -c "psql -U postgres -tc \"SELECT 1 FROM pg_roles WHERE rolname='{{ powerdns_admin_sqla_db_user }}'\" | grep -q 1 ||
+                   psql -U postgres -c \"CREATE USER {{ powerdns_admin_sqla_db_user }} WITH PASSWORD '{{ powerdns_admin_sqla_db_password }}'\""
+      changed_when: false
+      no_log: true
+
+    - name: Create PowerDNS-Admin database if not exists
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          bash -c "psql -U postgres -tc \"SELECT 1 FROM pg_database WHERE datname='{{ powerdns_admin_sqla_db_name }}'\" | grep -q 1 ||
+                   createdb -U postgres -O {{ powerdns_admin_sqla_db_user }} {{ powerdns_admin_sqla_db_name }}"
+      changed_when: false
+
+# --- Deploy PowerDNS stack ---
+
+- name: Deploy PowerDNS configuration
+  template:
+    src: pdns.conf.j2
+    dest: "{{ powerdns_install_dir }}/pdns.conf"
+    mode: '0600'
+  notify: restart powerdns
+
+- name: Deploy nginx proxy configuration
+  template:
+    src: nginx.conf.j2
+    dest: "{{ powerdns_install_dir }}/nginx.conf"
+    mode: '0644'
+  notify: restart powerdns
+
+- name: Deploy docker-compose.yml for PowerDNS
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ powerdns_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart powerdns
+
+- name: Start PowerDNS services
+  community.docker.docker_compose_v2:
+    project_src: "{{ powerdns_install_dir }}"
+    state: present
+
+- name: Wait for PowerDNS to be ready
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost"
+    method: GET
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+    status_code: 200
+  retries: 30
+  delay: 2
+  register: pdns_ready
+  until: pdns_ready.status == 200
+
+# --- Platform zone creation (run once on any node) ---
+
+- name: Create platform zone ({{ platform_domain }})
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones"
+    method: POST
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "{{ platform_domain }}."
+      kind: "Native"
+      nameservers:
+        - "ns1.{{ platform_domain }}."
+        - "ns2.{{ platform_domain }}."
+      soa_edit_api: "INCEPTION-INCREMENT"
+    status_code: [201, 409]  # 409 = already exists
+  register: zone_create_result
+  run_once: true
+  ignore_errors: yes
+
+- name: Increment SOA serial after zone creation (gotcha 33)
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  when: zone_create_result.status == 201
+  run_once: true
+  changed_when: true
+
+# --- Status display ---
+
+- name: Display PowerDNS deployment status
+  debug:
+    msg:
+      - "PowerDNS deployed on {{ inventory_hostname }}"
+      - "Mode: Native (read-write, shared PostgreSQL HA backend)"
+      - "DNS Server: {{ ansible_default_ipv4.address }}:53 (public)"
+      - "PowerDNS API: http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }} (NetBird only)"
+      - "{{ 'PowerDNS-Admin UI: http://' + powerdns_bind_interface + ':' + powerdns_nginx_admin_port | string + ' (NetBird only)' if powerdns_admin_enabled else 'PowerDNS-Admin: disabled on this node (runs on ' + powerdns_admin_node + ')' }}"
+      - "Platform zone: {{ platform_domain }}"
