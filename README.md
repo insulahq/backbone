@@ -8,7 +8,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
 
 | Component | Description |
 |-----------|-------------|
-| **PowerDNS 4.9** | Primary (ns1, PostgreSQL backend) + Secondary (ns2, SQLite, AXFR replication) |
+| **PowerDNS 4.9** | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | **Traefik 3.6** | Reverse proxy with automatic TLS via DNS-01 ACME |
 | **PostgreSQL 18** | Streaming replication with repmgr 5.5 and auto-failover |
 | **NetBird** | WireGuard VPN mesh with management, signal, and relay on both nodes |
@@ -26,15 +26,17 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
    │      ns1        │  │      ns2        │
    │  Falkenstein    │  │   Helsinki      │
    ├─────────────────┤  ├─────────────────┤
-   │ PowerDNS (pri)  │  │ PowerDNS (sec)  │
+   │ PowerDNS (r/w)  │  │ PowerDNS (r/w)  │
    │ Traefik         │  │ Traefik         │
-   │ PostgreSQL (sb) │  │ PostgreSQL (pri)│
+   │ PostgreSQL (HA) │  │ PostgreSQL (HA) │
    │ NetBird mgmt    │  │ NetBird mgmt    │
    │ Restic backup   │  │ Restic backup   │
    └────────┬────────┘  └────────┬────────┘
             │    WireGuard mesh   │
             └─────────────────────┘
 ```
+
+Both PowerDNS nodes run in **Native mode** (read-write). Zone data replicates via PostgreSQL streaming replication, not AXFR. DNS API writes only succeed on the node running the PostgreSQL HA primary.
 
 ## Prerequisites
 
@@ -68,9 +70,10 @@ ansible-playbook -i inventory/hosts.yml site.yml
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml       # Traefik only
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml    # PostgreSQL HA
+ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml      # PowerDNS (both nodes)
 ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
-ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + NetBird
+ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
@@ -85,9 +88,8 @@ ansible/
 ├── host_vars/               # Per-host overrides
 └── roles/
     ├── common/              # OS hardening, nftables, Docker, fail2ban
-    ├── powerdns_master/     # PowerDNS primary + PostgreSQL backend
-    ├── powerdns_slave/      # PowerDNS secondary + SQLite
-    ├── traefik/             # Traefik v3.6, DNS-01 ACME
+    ├── powerdns/            # PowerDNS 4.9 (both nodes, shared PostgreSQL HA backend)
+    ├── traefik/             # Traefik v3.6, DNS-01 ACME via local PowerDNS
     ├── postgresql_repmgr/   # PostgreSQL 18 + repmgr 5.5 HA
     ├── netbird_management/  # NetBird combined server
     ├── netbird_peer/        # NetBird peer enrollment
@@ -101,7 +103,7 @@ docs/                        # Architecture and operations documentation
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | Agent/developer handoff with gotchas and instructions |
 | [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) | Step-by-step fresh deployment procedure |
-| [docs/DISPERSED_DNS_ARCHITECTURE.md](docs/DISPERSED_DNS_ARCHITECTURE.md) | PowerDNS primary/secondary architecture |
+| [docs/DISPERSED_DNS_ARCHITECTURE.md](docs/DISPERSED_DNS_ARCHITECTURE.md) | PowerDNS dual-primary Native mode architecture |
 | [docs/NETBIRD_CERTIFICATE_BOOTSTRAP.md](docs/NETBIRD_CERTIFICATE_BOOTSTRAP.md) | NetBird TLS certificate bootstrap procedure |
 | [docs/NETBIRD_SIGNAL_CORRECTION.md](docs/NETBIRD_SIGNAL_CORRECTION.md) | NetBird signal server configuration fix |
 

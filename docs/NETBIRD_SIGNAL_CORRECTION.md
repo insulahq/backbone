@@ -120,7 +120,7 @@ cat /opt/netbird/acme.json | python3 -c 'import json, sys; data=json.load(sys.st
 
 ## For Future Deployments
 
-**When deploying NetBird on additional servers (ns2, admin1):**
+**When deploying NetBird on additional servers (ns2):**
 1. Only request certificate for `netbird.domain.com`
 2. Signal endpoint: Use direct IP:10000
 3. No Traefik configuration for signal service

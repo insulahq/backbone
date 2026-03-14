@@ -3,25 +3,19 @@
 
 ## Type
 - [ ] Infrastructure / Ansible
-- [ ] Backend API
-- [ ] Frontend (admin panel)
-- [ ] Frontend (client panel)
-- [ ] Kubernetes manifests
-- [ ] Terraform
 - [ ] Documentation
 - [ ] Bug fix
 
 ## Testing
-- [ ] Tested locally (Docker Compose / minikube / kind)
-- [ ] Tested on staging cluster
 - [ ] Ansible playbook run with `--check` first
+- [ ] Deployed to test server
+- [ ] `ansible-lint` passes
 
 ## Rollback Plan
 <!-- How do we undo this if it breaks production? -->
 
 ## Checklist
-- [ ] No secrets committed (use Sealed Secrets / ansible-vault)
-- [ ] `terraform fmt` run (if Terraform change)
+- [ ] No secrets committed (use ansible-vault or `.generated_secrets/`)
 - [ ] `ansible-lint` passes (if Ansible change)
-- [ ] Tests pass
+- [ ] Docker images pinned to specific versions (no `:latest`)
 - [ ] Docs updated if behaviour changed

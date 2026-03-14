@@ -11,12 +11,7 @@ labels: enhancement
 <!-- Why is this needed? What problem does it solve? -->
 
 ## Proposed Solution
-<!-- How should it work? Include API changes, UI changes, DB schema if relevant. -->
-
-## Phase
-- [ ] Phase 1 (MVP)
-- [ ] Phase 1.5
-- [ ] Phase 2+
+<!-- How should it work? Include config changes, architecture impact if relevant. -->
 
 ## Acceptance Criteria
 - [ ] 

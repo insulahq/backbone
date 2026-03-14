@@ -135,7 +135,8 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 44 | `lookup('password', '/dev/null')` regenerates secrets each run | Use `lookup('password', 'path/to/file')` to persist generated secrets |
 | 45 | PowerDNS `.secrets` file and API key in debug output | Removed .secrets file; removed API key from debug msg; pdns.conf mode 0600 |
 | 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
-| 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2` |
+| 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
+| 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
 
 ---
 

@@ -19,6 +19,6 @@ labels: bug
 <!-- What happened instead? -->
 
 ## Environment
-- Component: (backend / admin-panel / client-panel / ansible / k8s)
+- Component: (ansible / powerdns / postgresql / netbird / traefik / backup)
 - Version / commit:
 - Server / node affected:

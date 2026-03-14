@@ -26,7 +26,7 @@ table inet filter {
     udp dport 53 accept
 {% endif %}
     
-{% if 'netbird_management' in group_names %}
+{% if 'dns_servers' in group_names %}
     # NetBird management server — allow HTTPS (management UI + signal server)
     tcp dport 443 accept
     
