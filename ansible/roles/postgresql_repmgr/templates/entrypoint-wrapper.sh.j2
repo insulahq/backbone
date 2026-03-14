@@ -291,9 +291,11 @@ init_primary() {
   echo "==> Initializing new primary node..."
   initdb -U "$POSTGRES_USER" -D "$PGDATA"
 
-  # WAL and replication settings
+  # WAL, replication, and performance settings
   cat >> "$PGDATA/postgresql.conf" <<CONF
 shared_preload_libraries = 'repmgr'
+
+# WAL and replication
 wal_level = replica
 wal_log_hints = on
 max_wal_senders = 10
@@ -301,6 +303,25 @@ max_replication_slots = 10
 hot_standby = on
 archive_mode = on
 archive_command = '/bin/true'
+
+# WAL size and checkpoint tuning
+max_wal_size = '{{ postgresql_max_wal_size }}'
+min_wal_size = '{{ postgresql_min_wal_size }}'
+# CRITICAL: Cap WAL retained by replication slots. Without this, an offline
+# standby causes unbounded WAL growth on primary until disk fills.
+# Standby must re-clone if it falls behind this limit.
+max_slot_wal_keep_size = '{{ postgresql_max_slot_wal_keep_size }}'
+
+# Memory tuning
+shared_buffers = '{{ postgresql_shared_buffers }}'
+work_mem = '{{ postgresql_work_mem }}'
+maintenance_work_mem = '{{ postgresql_maintenance_work_mem }}'
+
+# Autovacuum tuning (more aggressive for event-sourced workloads like Zitadel)
+autovacuum_vacuum_scale_factor = {{ postgresql_autovacuum_vacuum_scale_factor }}
+autovacuum_analyze_scale_factor = {{ postgresql_autovacuum_analyze_scale_factor }}
+autovacuum_max_workers = {{ postgresql_autovacuum_max_workers }}
+autovacuum_naptime = '{{ postgresql_autovacuum_naptime }}'
 CONF
 
   # pg_hba.conf — replication + app access

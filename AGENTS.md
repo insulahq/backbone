@@ -33,6 +33,16 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
+### Maintenance Automation
+
+| Component | Schedule | Description |
+|-----------|----------|-------------|
+| Docker cleanup | Weekly (Sun 4AM) | Prunes unused images, containers, networks, build cache |
+| PostgreSQL maintenance | Weekly (Sun 3AM) | VACUUM ANALYZE + REINDEX SYSTEM on all databases |
+| Disk monitoring | Hourly | Checks disk usage, alerts via webhook at 80%/90% thresholds |
+| Restic cache cleanup | Weekly (Sun, with backup) | Cleans stale Restic cache entries |
+| Journal rotation | Automatic | systemd journal capped at 500MB, 4-week retention |
+
 ---
 
 ## 3. How to Deploy
@@ -141,6 +151,19 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
 | 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
 
+### Disk & Data Growth
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 57 | Replication slots hold WAL indefinitely when standby offline | `max_slot_wal_keep_size = 10GB` caps WAL per slot; standby re-clones if behind |
+| 58 | PowerDNS containers (pdns, nginx, pdns-admin) had no log limits | Added `json-file` driver with `max-size: 100m, max-file: 2` to all containers |
+| 59 | No Docker daemon.json — new containers get unlimited logs | Deploy `daemon.json` with default `max-size: 100m, max-file: 3` |
+| 60 | No Docker image/container cleanup — old images accumulate | Weekly `docker-cleanup.timer` prunes images >7d, stopped containers, build cache |
+| 61 | systemd journal grows unbounded (Debian default ~10% of disk) | `journald.conf.d/size-limit.conf`: `SystemMaxUse=500M`, `MaxRetentionSec=4week` |
+| 62 | No disk space alerting — discover full disk when services crash | `disk-monitor.timer` (hourly): warns at 80%, critical at 90%, webhook alerts |
+| 63 | Zitadel event store (append-only) + all DB tables lack scheduled maintenance | Weekly `pg-maintenance.timer`: VACUUM ANALYZE + REINDEX SYSTEM on all databases |
+| 64 | Restic cache (`/var/cache/restic`) grows indefinitely | Weekly `restic cache --cleanup` runs after integrity check in backup script |
+
 ### IPv6
 
 | # | Issue | Fix |
@@ -219,7 +242,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 
 # Other available tags: traefik, postgresql, powerdns, dns,
 #   netbird, netbird_management, netbird_peer, zitadel, backup,
-#   security, ssh, fail2ban, packages
+#   security, ssh, fail2ban, packages, maintenance
 ```
 
 ---

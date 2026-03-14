@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly disk space monitor timer
+
+[Timer]
+OnCalendar={{ disk_monitor_schedule }}
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

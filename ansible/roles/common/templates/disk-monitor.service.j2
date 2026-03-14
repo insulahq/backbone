@@ -1,0 +1,8 @@
+[Unit]
+Description=Disk space monitor — check usage and alert on thresholds
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disk-monitor.sh
+StandardOutput=journal
+StandardError=journal

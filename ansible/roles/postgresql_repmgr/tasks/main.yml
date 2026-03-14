@@ -109,6 +109,40 @@
     seconds: 15
   when: not postgresql_is_primary
 
+# PostgreSQL scheduled maintenance — VACUUM ANALYZE + REINDEX
+- name: Deploy PostgreSQL maintenance script
+  template:
+    src: pg-maintenance.sh.j2
+    dest: /usr/local/bin/pg-maintenance.sh
+    mode: '0755'
+  when: postgresql_maintenance_enabled
+  tags: [postgresql, maintenance]
+
+- name: Deploy PostgreSQL maintenance systemd service
+  template:
+    src: pg-maintenance.service.j2
+    dest: /etc/systemd/system/pg-maintenance.service
+    mode: '0644'
+  when: postgresql_maintenance_enabled
+  tags: [postgresql, maintenance]
+
+- name: Deploy PostgreSQL maintenance systemd timer
+  template:
+    src: pg-maintenance.timer.j2
+    dest: /etc/systemd/system/pg-maintenance.timer
+    mode: '0644'
+  when: postgresql_maintenance_enabled
+  tags: [postgresql, maintenance]
+
+- name: Enable and start PostgreSQL maintenance timer
+  systemd:
+    name: pg-maintenance.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: postgresql_maintenance_enabled
+  tags: [postgresql, maintenance]
+
 - name: Display PostgreSQL deployment status
   debug:
     msg:

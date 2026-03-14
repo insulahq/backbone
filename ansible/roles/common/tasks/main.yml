@@ -110,12 +110,56 @@
     update_cache: yes
   tags: [common, docker]
 
+- name: Deploy Docker daemon.json (default log limits for all containers)
+  template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: '0644'
+  notify: restart docker
+  tags: [common, docker]
+
 - name: Start and enable Docker
   systemd:
     name: docker
     state: started
     enabled: yes
   tags: [common, docker]
+
+# Docker cleanup — weekly prune of unused images, containers, networks, build cache
+- name: Deploy Docker cleanup script
+  template:
+    src: docker-cleanup.sh.j2
+    dest: /usr/local/bin/docker-cleanup.sh
+    mode: '0755'
+  when: docker_cleanup_enabled
+  tags: [common, docker, maintenance]
+
+- name: Deploy Docker cleanup systemd service
+  template:
+    src: docker-cleanup.service.j2
+    dest: /etc/systemd/system/docker-cleanup.service
+    mode: '0644'
+  when: docker_cleanup_enabled
+  notify: reload systemd
+  tags: [common, docker, maintenance]
+
+- name: Deploy Docker cleanup systemd timer
+  template:
+    src: docker-cleanup.timer.j2
+    dest: /etc/systemd/system/docker-cleanup.timer
+    mode: '0644'
+  when: docker_cleanup_enabled
+  notify: reload systemd
+  tags: [common, docker, maintenance]
+
+- name: Enable and start Docker cleanup timer
+  systemd:
+    name: docker-cleanup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: docker_cleanup_enabled
+  tags: [common, docker, maintenance]
 
 - name: Add root to docker group (for convenience)
   user:
@@ -134,6 +178,58 @@
   debug:
     msg: "Docker installed: {{ docker_version_output.stdout }}"
   tags: [common, docker]
+
+# systemd journal size limits
+- name: Create journald.conf.d directory
+  file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: '0755'
+  tags: [common, maintenance]
+
+- name: Deploy journal size limits
+  template:
+    src: journald-size-limit.conf.j2
+    dest: /etc/systemd/journald.conf.d/size-limit.conf
+    mode: '0644'
+  notify: restart journald
+  tags: [common, maintenance]
+
+# Disk monitoring — hourly check with webhook alerts
+- name: Deploy disk monitoring script
+  template:
+    src: disk-monitor.sh.j2
+    dest: /usr/local/bin/disk-monitor.sh
+    mode: '0755'
+  when: disk_monitor_enabled
+  tags: [common, maintenance]
+
+- name: Deploy disk monitor systemd service
+  template:
+    src: disk-monitor.service.j2
+    dest: /etc/systemd/system/disk-monitor.service
+    mode: '0644'
+  when: disk_monitor_enabled
+  notify: reload systemd
+  tags: [common, maintenance]
+
+- name: Deploy disk monitor systemd timer
+  template:
+    src: disk-monitor.timer.j2
+    dest: /etc/systemd/system/disk-monitor.timer
+    mode: '0644'
+  when: disk_monitor_enabled
+  notify: reload systemd
+  tags: [common, maintenance]
+
+- name: Enable and start disk monitor timer
+  systemd:
+    name: disk-monitor.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: disk_monitor_enabled
+  tags: [common, maintenance]
 
 # SSH hardening
 - name: Harden SSH configuration

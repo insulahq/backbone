@@ -1,0 +1,39 @@
+#!/bin/bash
+# Docker cleanup script — removes unused images, containers, networks, build cache.
+# Deployed by Ansible (common role). Runs weekly via systemd timer.
+# Does NOT prune named volumes (those hold PostgreSQL data, etc.).
+
+set -euo pipefail
+
+log() {
+    echo "[$(date -Iseconds)] DOCKER-CLEANUP: $*"
+}
+
+log "Starting Docker cleanup"
+
+# Remove stopped containers (older than 24h)
+CONTAINERS=$(docker container prune -f --filter "until=24h" 2>&1)
+log "Containers: $CONTAINERS"
+
+# Remove dangling images (untagged, no container reference)
+DANGLING=$(docker image prune -f 2>&1)
+log "Dangling images: $DANGLING"
+
+# Remove unused images not referenced by any container (older than 7 days)
+# This catches old pinned versions after an upgrade
+UNUSED=$(docker image prune -af --filter "until={{ docker_cleanup_image_age }}" 2>&1)
+log "Unused images: $UNUSED"
+
+# Remove unused networks (not attached to any running container)
+NETWORKS=$(docker network prune -f 2>&1)
+log "Networks: $NETWORKS"
+
+# Remove build cache older than 7 days
+BUILDCACHE=$(docker builder prune -f --filter "until={{ docker_cleanup_image_age }}" 2>&1)
+log "Build cache: $BUILDCACHE"
+
+# Report final disk usage
+log "Current Docker disk usage:"
+docker system df 2>&1
+
+log "Docker cleanup completed"

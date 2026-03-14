@@ -117,6 +117,12 @@ restic "${RESTIC_OPTS[@]}" forget \
 if [ "$(date +%u)" -eq 7 ]; then
     log "Running weekly repository check"
     restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"
+
+    # Clean up stale Restic cache entries (prevents unbounded cache growth)
+    log "Cleaning up Restic cache"
+    restic "${RESTIC_OPTS[@]}" cache --cleanup 2>&1 | tee -a "$LOG_FILE" || {
+        log "WARNING: Restic cache cleanup failed (non-fatal)"
+    }
 fi
 
 # Post-backup hook

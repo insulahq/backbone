@@ -42,3 +42,26 @@ postgresql_databases:
 
 # Data directory inside container
 postgresql_data_dir: /var/lib/postgresql/data
+
+# WAL and checkpoint tuning
+postgresql_max_wal_size: "2GB"              # Checkpoint target (default 1GB)
+postgresql_min_wal_size: "80MB"             # Minimum WAL size (default 80MB)
+postgresql_max_slot_wal_keep_size: "10GB"   # Cap WAL retained by replication slots
+                                            # Prevents unbounded WAL growth when standby
+                                            # is offline. Standby must re-clone if it falls
+                                            # behind this limit.
+
+# Memory tuning (safe defaults for 4-8GB servers)
+postgresql_shared_buffers: "256MB"          # Shared memory (default 128MB)
+postgresql_work_mem: "8MB"                  # Per-sort/hash memory (default 4MB)
+postgresql_maintenance_work_mem: "128MB"    # VACUUM/CREATE INDEX memory (default 64MB)
+
+# Autovacuum tuning (more aggressive than defaults for event-sourced workloads)
+postgresql_autovacuum_vacuum_scale_factor: "0.05"   # VACUUM after 5% of rows changed (default 0.2)
+postgresql_autovacuum_analyze_scale_factor: "0.02"  # ANALYZE after 2% of rows changed (default 0.1)
+postgresql_autovacuum_max_workers: 3                # Max parallel autovacuum workers (default 3)
+postgresql_autovacuum_naptime: "30s"                # Check interval (default 1min)
+
+# Scheduled maintenance (VACUUM FULL + REINDEX on all databases)
+postgresql_maintenance_enabled: true
+postgresql_maintenance_schedule: "Sun *-*-* 03:00:00"  # Weekly Sunday 3 AM

@@ -1,0 +1,10 @@
+[Unit]
+Description=PostgreSQL weekly maintenance — VACUUM ANALYZE + REINDEX
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pg-maintenance.sh
+StandardOutput=journal
+StandardError=journal

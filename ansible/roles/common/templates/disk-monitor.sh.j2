@@ -1,0 +1,63 @@
+#!/bin/bash
+# Disk space monitor — deployed by Ansible (common role).
+# Checks disk usage on all mounted filesystems and alerts when thresholds are exceeded.
+# Runs hourly via systemd timer.
+
+set -euo pipefail
+
+HOSTNAME="{{ inventory_hostname }}"
+WARN_PERCENT={{ disk_monitor_warn_percent }}
+CRIT_PERCENT={{ disk_monitor_crit_percent }}
+WEBHOOK_URL="{{ disk_monitor_webhook_url }}"
+
+log() {
+    echo "[$(date -Iseconds)] DISK-MONITOR: $*"
+}
+
+send_alert() {
+    local level="$1"
+    local mount="$2"
+    local usage="$3"
+    local avail="$4"
+
+    log "${level}: ${mount} is ${usage}% full (${avail} available)"
+
+    if [ -n "$WEBHOOK_URL" ]; then
+        curl -fsS --retry 3 --max-time 10 -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"host\": \"${HOSTNAME}\", \"level\": \"${level}\", \"mount\": \"${mount}\", \"usage_percent\": ${usage}, \"available\": \"${avail}\", \"timestamp\": \"$(date -Iseconds)\"}" \
+            "$WEBHOOK_URL" > /dev/null 2>&1 || log "WARNING: Failed to send webhook alert"
+    fi
+}
+
+ALERT_COUNT=0
+
+# Check all real mounted filesystems (skip tmpfs, devtmpfs, overlay internals)
+while IFS= read -r line; do
+    USAGE=$(echo "$line" | awk '{print $5}' | tr -d '%')
+    MOUNT=$(echo "$line" | awk '{print $6}')
+    AVAIL=$(echo "$line" | awk '{print $4}')
+
+    if [ "$USAGE" -ge "$CRIT_PERCENT" ]; then
+        send_alert "CRITICAL" "$MOUNT" "$USAGE" "$AVAIL"
+        ALERT_COUNT=$((ALERT_COUNT + 1))
+    elif [ "$USAGE" -ge "$WARN_PERCENT" ]; then
+        send_alert "WARNING" "$MOUNT" "$USAGE" "$AVAIL"
+        ALERT_COUNT=$((ALERT_COUNT + 1))
+    fi
+done < <(df -h -t ext4 -t xfs -t btrfs -t ext3 2>/dev/null || df -h --exclude-type=tmpfs --exclude-type=devtmpfs --exclude-type=overlay --exclude-type=squashfs 2>/dev/null)
+
+# Also check Docker disk usage if docker is running
+if command -v docker &> /dev/null && docker info &> /dev/null; then
+    DOCKER_USAGE=$(docker system df --format '{% raw %}{{.Type}}\t{{.Size}}\t{{.Reclaimable}}{% endraw %}' 2>/dev/null || true)
+    if [ -n "$DOCKER_USAGE" ]; then
+        log "Docker disk usage:"
+        echo "$DOCKER_USAGE" | while IFS=$'\t' read -r dtype dsize dreclaim; do
+            log "  ${dtype}: ${dsize} (reclaimable: ${dreclaim})"
+        done
+    fi
+fi
+
+if [ "$ALERT_COUNT" -eq 0 ]; then
+    log "All filesystems within thresholds (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
+fi

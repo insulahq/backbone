@@ -1,0 +1,78 @@
+#!/bin/bash
+# PostgreSQL scheduled maintenance — deployed by Ansible.
+# Runs VACUUM ANALYZE on all databases and REINDEX on system catalogs.
+# Only runs on the PRIMARY node (skips if this node is in recovery).
+# Runs weekly via systemd timer.
+
+set -euo pipefail
+
+CONTAINER="postgresql"
+
+log() {
+    echo "[$(date -Iseconds)] PG-MAINTENANCE: $*"
+}
+
+# Check if PostgreSQL is running
+if ! docker exec "$CONTAINER" pg_isready -U postgres -q 2>/dev/null; then
+    log "PostgreSQL not ready — skipping maintenance"
+    exit 0
+fi
+
+# Only run on primary (not in recovery mode)
+IS_RECOVERY=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
+if [ "$IS_RECOVERY" != "f" ]; then
+    log "This node is standby (in recovery) — skipping maintenance"
+    exit 0
+fi
+
+log "Starting PostgreSQL maintenance on primary"
+
+# Get list of all non-template databases
+DATABASES=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true" 2>/dev/null)
+
+for DB in $DATABASES; do
+    log "Running VACUUM ANALYZE on database: $DB"
+    docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1 || {
+        log "WARNING: VACUUM ANALYZE failed on $DB"
+    }
+
+    # Reindex system catalogs (prevents index bloat on heavily-written databases like Zitadel)
+    log "Running REINDEX SYSTEM on database: $DB"
+    docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM $DB" 2>&1 || {
+        log "WARNING: REINDEX SYSTEM failed on $DB"
+    }
+done
+
+# Check and report replication slot status (warn about lagging slots)
+log "Checking replication slot status:"
+SLOT_INFO=$(docker exec "$CONTAINER" psql -U postgres -tAc "
+    SELECT slot_name, active,
+           pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS lag_bytes
+    FROM pg_replication_slots" 2>/dev/null || echo "")
+if [ -n "$SLOT_INFO" ]; then
+    echo "$SLOT_INFO" | while IFS='|' read -r name active lag; do
+        name=$(echo "$name" | xargs)
+        active=$(echo "$active" | xargs)
+        lag=$(echo "$lag" | xargs)
+        if [ -n "$name" ]; then
+            lag_mb=$((${lag:-0} / 1048576))
+            log "  Slot: $name | Active: $active | WAL lag: ${lag_mb}MB"
+            if [ "${lag_mb}" -gt 5120 ]; then
+                log "  WARNING: Slot $name has ${lag_mb}MB WAL lag (>5GB). Consider dropping if standby is permanently offline."
+            fi
+        fi
+    done
+else
+    log "  No replication slots found"
+fi
+
+# Report database sizes
+log "Database sizes:"
+docker exec "$CONTAINER" psql -U postgres -c "
+    SELECT datname,
+           pg_size_pretty(pg_database_size(datname)) AS size
+    FROM pg_database
+    WHERE datistemplate = false
+    ORDER BY pg_database_size(datname) DESC" 2>&1
+
+log "PostgreSQL maintenance completed"

@@ -24,3 +24,17 @@
   systemd:
     name: ssh
     state: restarted
+
+- name: restart docker
+  systemd:
+    name: docker
+    state: restarted
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart journald
+  systemd:
+    name: systemd-journald
+    state: restarted

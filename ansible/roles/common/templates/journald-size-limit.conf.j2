@@ -1,0 +1,6 @@
+# systemd journal size limits — deployed by Ansible (common role)
+# Prevents journal from consuming unbounded disk space.
+[Journal]
+SystemMaxUse={{ journal_max_use }}
+SystemMaxFileSize={{ journal_max_file_size }}
+MaxRetentionSec={{ journal_max_retention }}

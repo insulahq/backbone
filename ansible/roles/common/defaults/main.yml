@@ -7,3 +7,25 @@ timezone: UTC
 
 # SSH
 ssh_port: 22
+
+# Docker daemon defaults (daemon.json)
+# Applied globally — containers without explicit logging config inherit these limits
+docker_log_max_size: "100m"
+docker_log_max_file: "3"
+
+# Docker cleanup (weekly prune of unused images, containers, networks, build cache)
+docker_cleanup_enabled: true
+docker_cleanup_schedule: "Sun *-*-* 04:00:00"  # Weekly Sunday 4 AM
+docker_cleanup_image_age: "168h"                # Remove unused images older than 7 days
+
+# systemd journal limits
+journal_max_use: "500M"          # Max disk space for journal
+journal_max_file_size: "50M"     # Max size per journal file
+journal_max_retention: "4week"   # Max retention period
+
+# Disk monitoring
+disk_monitor_enabled: true
+disk_monitor_schedule: "*-*-* *:00:00"    # Every hour
+disk_monitor_warn_percent: 80             # Warn at 80% disk usage
+disk_monitor_crit_percent: 90             # Critical at 90% disk usage
+disk_monitor_webhook_url: ""              # POST JSON alert (Slack, Discord, ntfy, etc.)

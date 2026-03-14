@@ -29,6 +29,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
 
 {% if powerdns_admin_enabled %}
   # PowerDNS-Admin — Web UI for managing PowerDNS ({{ powerdns_admin_node }} only)
@@ -56,6 +61,11 @@ services:
     networks:
       - powerdns_internal
       - postgresql_default  # For PowerDNS-Admin database
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
 {% endif %}
 
   # Nginx Proxy — Exposes PowerDNS API + Admin UI on NetBird interface only
@@ -82,6 +92,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
 
 networks:
   powerdns_internal:
