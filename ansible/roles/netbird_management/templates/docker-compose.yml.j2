@@ -43,16 +43,16 @@ services:
       #   netbird-server needs PG → PG needs WireGuard IP → WireGuard needs netbird-server
       - postgresql_default
     environment:
-{% if inventory_hostname == 'ns1' %}
-      # NS1: use Docker container hostname for local PostgreSQL, then NS2 NetBird IP as fallback.
-      # 'postgresql' resolves via Docker DNS on the shared postgresql_default network.
-      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'], 'host=postgresql') }}"
+{% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
+{% set peer_ip = hostvars[peer]['netbird_ip'] | default('') %}
+{% if peer_ip %}
+      # Multi-host DSN: local PostgreSQL via Docker DNS first, peer via NetBird IP as fallback.
+      # Local-first ordering avoids 30s timeout when the peer is unreachable (gotcha 38).
+      NB_STORE_ENGINE_POSTGRES_DSN: "host=postgresql,{{ peer_ip }} port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
 {% else %}
-      # NS2: use Docker container hostname for local PostgreSQL, then NS1 NetBird IP as fallback.
-      # 'postgresql' resolves via Docker DNS on the shared postgresql_default network — no WireGuard needed.
-      # NS2-local listed first so when NS1 is down and NS2 is promoted, the driver connects immediately
-      # without timing out on the unreachable NS1 first.
-      NB_STORE_ENGINE_POSTGRES_DSN: "{{ netbird_postgres_dsn | regex_replace('host=' + hostvars['ns1']['netbird_ip'] + ',' + hostvars['ns2']['netbird_ip'], 'host=postgresql,' + hostvars['ns1']['netbird_ip']) }}"
+      # Bootstrap mode: NetBird IPs not yet assigned. Local PostgreSQL only via Docker DNS.
+      # After NetBird enrollment + redeploy (Step 8), the multi-host DSN is used.
+      NB_STORE_ENGINE_POSTGRES_DSN: "host=postgresql port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
 {% endif %}
     ports:
       - '0.0.0.0:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'

@@ -53,7 +53,7 @@ services:
 {% endif %}
     environment:
       PDNS_API_URL: "{{ traefik_pdns_api_url }}"
-      PDNS_API_KEY: "{{ powerdns_api_key }}"
+      PDNS_API_KEY: "{{ powerdns_api_key | default('') }}"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s

@@ -43,7 +43,7 @@ This installs Docker, nftables, fail2ban, and hardens SSH.
 
 Deploy Traefik on both nodes. It creates the `traefik_public` Docker network needed by NetBird.
 
-At this point, cert issuance via DNS-01 will fail (PowerDNS API not yet available). Traefik starts but certs come later.
+> **What to expect:** DNS-01 cert issuance will fail because PowerDNS isn't running yet and Traefik can't reach the API from inside its container (127.0.0.1 is the container, not the host). Traefik starts with a **self-signed default certificate**. All HTTPS services will work but browsers will show security warnings until Step 8 when Traefik is redeployed with the correct PowerDNS API URL.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
@@ -52,6 +52,8 @@ ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 ## Step 4: PostgreSQL HA
 
 Deploy PostgreSQL on both nodes. The primary node is set by `postgresql_primary_node` in `roles/postgresql_repmgr/defaults/main.yml` (default: ns2).
+
+> **What to expect:** Without NetBird IPs, PostgreSQL binds to 127.0.0.1 (local only) and the peer's `extra_hosts` entry falls back to its public IP. Cross-node replication won't work until Step 8 when NetBird IPs are assigned. The primary starts standalone; the standby starts but can't stream from the primary yet. This is expected.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
@@ -87,7 +89,9 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
 
 ### Manual Step: Initial NetBird Setup
 
-After the first deployment, open `https://netbird.<your-domain>` in a browser to complete the setup wizard. This creates the admin user and Dex credentials.
+> **What to expect:** The browser will show a self-signed certificate warning (Traefik doesn't have valid certs yet). Accept the warning and proceed.
+
+After the first deployment, open `https://netbird.<your-domain>` in a browser to complete the setup wizard. This creates the admin user.
 
 Then:
 
@@ -114,7 +118,9 @@ ssh root@<NS2_IP> "netbird status --json | python3 -c 'import json,sys; print(js
 
 ## Step 8: Redeploy with NetBird IPs
 
-Now that NetBird IPs are known, redeploy components that bind to them:
+Now that NetBird IPs are known, redeploy components that bind to them. This is the step where everything comes together: PostgreSQL binds to NetBird IPs (replication starts), Traefik gets the correct PowerDNS API URL (Let's Encrypt certs are issued), and PowerDNS nginx binds to NetBird IPs.
+
+> **What to expect:** After this step, valid TLS certificates should be issued within a few minutes. Browser security warnings should disappear. PostgreSQL replication between nodes should begin.
 
 ```bash
 # Full redeploy (PowerDNS nginx binds to NetBird IP, Traefik uses PowerDNS API via NetBird IP, PostgreSQL binds to NetBird IP)
@@ -174,12 +180,7 @@ curl -I https://status.example.com
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
 ```
 
-After deploying Gatus, restart PostgreSQL containers so they can reach Gatus for alert delivery:
-
-```bash
-ssh root@<NS1_IP> "cd /opt/postgresql && docker compose up -d --force-recreate"
-ssh root@<NS2_IP> "cd /opt/postgresql && docker compose up -d --force-recreate"
-```
+The Gatus role automatically restarts PostgreSQL containers so they can deliver alerts to the Gatus endpoint.
 
 ## Step 11: Deploy Portainer
 
@@ -191,9 +192,9 @@ ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
 
 Access via NetBird mesh: `http://<netbird-ip>:9000`
 
-## Step 12: Zitadel Service Account (enables OIDC for Gatus + Portainer)
+## Step 12: Zitadel Service Account (enables OIDC for all services)
 
-Create a service account in Zitadel for API access. This enables automated OIDC application creation for Gatus and Portainer.
+Create a service account in Zitadel for API access. This enables automated OIDC application creation for Gatus, Portainer, PowerDNS Admin, and NetBird.
 
 1. Open `https://auth.example.com/ui/console` in a browser
 2. Go to **Users** → **Service Users** → **New**
@@ -203,13 +204,17 @@ Create a service account in Zitadel for API access. This enables automated OIDC 
    ```yaml
    zitadel_service_pat: "<paste token here>"
    ```
-6. Re-deploy Gatus and Portainer to enable OIDC:
+6. Re-deploy all OIDC-enabled services:
    ```bash
    ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
    ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
+   ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
+   ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
    ```
 
-The roles auto-create OIDC applications in Zitadel and configure SSO.
+The roles auto-create OIDC applications in Zitadel ("Phoenix Host" project) and configure SSO. Each service's login page shows a "Platform OIDC" button alongside local auth.
+
+**Zitadel token settings:** For each OIDC application created in Zitadel (visible in the Phoenix Host project), navigate to **Token Settings** and enable **"Include user's profile info in the ID Token"**. This ensures claim mapping (name, email) works correctly in PowerDNS Admin and NetBird.
 
 ## Step 13: Verify Everything
 
@@ -262,7 +267,8 @@ These steps cannot be automated and must be done manually:
 
 1. **NetBird setup wizard** -- browser-based first-user setup
 2. **PAT and setup key creation** -- via NetBird dashboard
-3. **Zitadel service account + PAT** -- via Zitadel Console (enables OIDC for Gatus + Portainer)
+3. **Zitadel service account + PAT** -- via Zitadel Console (enables OIDC for all services)
+7. **Zitadel token settings** -- enable "Include user's profile info in the ID Token" per OIDC app
 4. **Storagebox SSH key registration** -- via Hetzner Robot panel
 5. **NetBird IP discovery** -- IPs are assigned dynamically on enrollment
 6. **DNS NS records** -- must be set at your domain registrar

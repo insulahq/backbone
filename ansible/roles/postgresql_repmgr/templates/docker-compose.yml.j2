@@ -12,9 +12,10 @@ services:
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real NetBird IP: WAL streaming replication + cross-wire repmgrd
     # monitoring use this to reach the other node.
+    # During bootstrap (no NetBird IPs yet), falls back to peer's public IP.
     extra_hosts:
-      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] }}"
-      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] }}"
+      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host']) }}"
+      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] | default(hostvars['ns2']['ansible_host']) }}"
     environment:
       # Data directory — must match the volume mount target.
       # Explicit because the custom entrypoint replaces the image default.

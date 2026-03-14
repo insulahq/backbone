@@ -103,6 +103,23 @@
   register: result
   until: result.status == 200
 
+# Auto-detect valid TLS certs — if Let's Encrypt issued a cert, enable validation
+# for all subsequent API calls in this run. Avoids forgetting to flip the variable.
+- name: Check if NetBird TLS certificate is valid (auto-detect)
+  uri:
+    url: "https://{{ netbird_dashboard_domain }}/api/instance"
+    status_code: 200
+    validate_certs: true
+  register: netbird_cert_check
+  ignore_errors: true
+  run_once: true
+
+- name: Auto-enable certificate validation (valid cert detected)
+  set_fact:
+    netbird_validate_certs: true
+  when: netbird_cert_check is success
+  run_once: true
+
 - name: Configure internal peer DNS domain (requires netbird_admin_pat)
   when:
     - netbird_admin_pat is defined

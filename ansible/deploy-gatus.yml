@@ -1,6 +1,10 @@
 ---
 # Deploy Gatus monitoring dashboard
 # Deployed with serial: 1 — first node creates DB before second starts.
+# IMPORTANT: Do not remove serial: 1. DB creation uses
+# "when: inventory_hostname == postgresql_primary_node" (not run_once).
+# Without serial:1, both hosts run in parallel and the non-primary would
+# start Gatus before the DB exists, causing connection failures.
 - name: Deploy Gatus monitoring
   hosts: dns_servers
   serial: 1
