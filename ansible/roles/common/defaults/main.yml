@@ -23,6 +23,13 @@ ssh_break_glass_enabled: true
 # Set in group_vars/all.yml. Leave empty to disable webhook alerts.
 alert_webhook_url: ""
 
+# DNS health-check failover (PowerDNS LUA records)
+# When enabled, round-robin DNS records use ifportup() to exclude dead servers.
+# Each PowerDNS instance checks TCP connectivity and only returns healthy IPs.
+dns_health_check_enabled: true
+dns_health_check_port: 443    # Port to check (HTTPS for Traefik-fronted services)
+dns_health_check_ttl: 30      # Short TTL for fast failover (seconds)
+
 # Docker daemon defaults (daemon.json)
 # Applied globally — containers without explicit logging config inherit these limits
 docker_log_max_size: "100m"

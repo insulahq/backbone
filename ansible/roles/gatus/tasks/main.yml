@@ -245,10 +245,58 @@
 
 # --- DNS record creation (optional, via PowerDNS API) ---
 
-- name: Create DNS A records for Gatus dashboard
+- name: Build LUA health-check DNS records for Gatus
+  set_fact:
+    _gatus_lua_records: >-
+      {{ [{'content': 'A "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+          (groups['dns_servers'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+          "}, {selector='all'})\"", 'disabled': false}] +
+         ([] if (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length == 0) else
+          [{'content': 'AAAA "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+            (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+            "}, {selector='all'})\"", 'disabled': false}])
+      }}
+  run_once: true
+  when:
+    - gatus_create_dns_records | default(true)
+    - dns_health_check_enabled | default(false) | bool
+  tags: [gatus, dns]
+
+- name: Create DNS records for Gatus dashboard (health-checked LUA)
   when:
     - gatus_create_dns_records | default(true)
     - powerdns_api_key is defined
+    - dns_health_check_enabled | default(false) | bool
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ gatus_domain }}."
+          type: A
+          changetype: DELETE
+        - name: "{{ gatus_domain }}."
+          type: AAAA
+          changetype: DELETE
+        - name: "{{ gatus_domain }}."
+          type: LUA
+          ttl: "{{ dns_health_check_ttl | default(30) }}"
+          changetype: REPLACE
+          records: "{{ _gatus_lua_records }}"
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [gatus, dns]
+
+- name: Create DNS A records for Gatus dashboard (static round-robin)
+  when:
+    - gatus_create_dns_records | default(true)
+    - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
   run_once: true
   uri:
     url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
@@ -275,10 +323,11 @@
   ignore_errors: true
   tags: [gatus, dns]
 
-- name: Create DNS AAAA records for Gatus dashboard
+- name: Create DNS AAAA records for Gatus dashboard (static round-robin)
   when:
     - gatus_create_dns_records | default(true)
     - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
     - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
   run_once: true
   uri:
