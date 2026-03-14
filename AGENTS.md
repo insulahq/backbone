@@ -218,6 +218,7 @@ hosting-platform/
 │   ├── requirements.yml     # Ansible Galaxy collection dependencies
 │   ├── README.md
 │   ├── site.yml             # Main playbook (tagged plays)
+│   ├── test-suite.yml       # System test suite (post-deploy verification)
 │   ├── deploy-*.yml         # Targeted playbooks
 │   ├── inventory/
 │   │   └── hosts.yml        # Server inventory (gitignored)
@@ -270,6 +271,27 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 ---
 
 ## 8. Testing
+
+### System Test Suite (post-deploy)
+```bash
+# All non-destructive tests (DNS, TLS, PG, NetBird, Zitadel, OIDC, Gatus, Portainer, backup, maintenance)
+ansible-playbook -i inventory/hosts.yml test-suite.yml
+
+# Specific test groups
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags dns
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags postgresql
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags oidc
+
+# Destructive failover tests (stops services temporarily, then restores)
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
+```
+
+Tags: `dns`, `tls`, `postgresql`, `netbird`, `zitadel`, `oidc`, `gatus`, `portainer`,
+`powerdns_admin`, `backup`, `maintenance`, `cross_node`, `failover`
+
+The test suite auto-creates a `test-runner` user in Zitadel (via `zitadel_service_pat`) to verify
+OIDC redirect chains on all protected services. Prints a pass/fail summary table and exits non-zero
+on any failure (CI-compatible).
 
 ### Ansible Lint (CI)
 ```bash

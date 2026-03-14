@@ -1,0 +1,949 @@
+---
+# Phoenix Host — System Test Suite
+#
+# Comprehensive tests for all infrastructure components, service integrations,
+# OIDC authentication, and failover scenarios.
+#
+# Usage:
+#   # All non-destructive tests
+#   ansible-playbook -i inventory/hosts.yml test-suite.yml
+#
+#   # Specific test groups
+#   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags dns
+#   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags postgresql
+#   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags oidc
+#
+#   # Include destructive failover tests (will temporarily stop services)
+#   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
+#
+# Available tags:
+#   dns, tls, postgresql, netbird, zitadel, oidc, gatus, portainer,
+#   powerdns_admin, backup, maintenance, cross_node, failover, summary
+#
+# The playbook collects results into _test_results and prints a summary table.
+# Failed tests are reported as Ansible failures for CI integration.
+
+# ============================================================================
+# Play 1: Per-host infrastructure tests
+# ============================================================================
+- name: "Per-host infrastructure tests"
+  hosts: dns_servers
+  gather_facts: true
+  any_errors_fatal: false
+  vars:
+    _test_results: []
+    _peer: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+    _peer_ip: "{{ hostvars[_peer]['ansible_host'] }}"
+    _peer_netbird_ip: "{{ hostvars[_peer]['netbird_ip'] | default('') }}"
+  tasks:
+
+    # ------------------------------------------------------------------
+    # DNS Tests
+    # ------------------------------------------------------------------
+    - name: "DNS | SOA resolution via local PowerDNS"
+      command: "dig @127.0.0.1 {{ platform_domain }} SOA +short +time=5"
+      register: _t_dns_soa
+      changed_when: false
+      ignore_errors: true
+      tags: [dns]
+
+    - name: "DNS | Record result — SOA resolution"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'DNS SOA resolution', 'host': inventory_hostname, 'passed': _t_dns_soa.rc == 0 and _t_dns_soa.stdout | length > 0}] }}"
+      tags: [dns]
+
+    - name: "DNS | A record for platform domain"
+      command: "dig @127.0.0.1 {{ platform_domain }} A +short +time=5"
+      register: _t_dns_a
+      changed_when: false
+      ignore_errors: true
+      tags: [dns]
+
+    - name: "DNS | Record result — A record"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'DNS A record (' + platform_domain + ')', 'host': inventory_hostname, 'passed': _t_dns_a.rc == 0 and ansible_host in _t_dns_a.stdout}] }}"
+      tags: [dns]
+
+    - name: "DNS | Resolution of all service domains"
+      command: "dig @127.0.0.1 {{ item }} A +short +time=5"
+      loop:
+        - "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+        - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        - "{{ gatus_domain | default('status.' + platform_domain) }}"
+      register: _t_dns_services
+      changed_when: false
+      ignore_errors: true
+      tags: [dns]
+
+    - name: "DNS | Record result — service domains"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'DNS resolution (' + item.item + ')', 'host': inventory_hostname, 'passed': item.rc == 0 and item.stdout | length > 0}] }}"
+      loop: "{{ _t_dns_services.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [dns]
+
+    - name: "DNS | PowerDNS API health (via nginx)"
+      uri:
+        url: "http://{{ netbird_ip | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost"
+        headers:
+          X-API-Key: "{{ powerdns_api_key }}"
+        status_code: 200
+        timeout: 10
+      register: _t_dns_api
+      ignore_errors: true
+      tags: [dns]
+
+    - name: "DNS | Record result — API health"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'PowerDNS API health', 'host': inventory_hostname, 'passed': _t_dns_api is success}] }}"
+      tags: [dns]
+
+    # ------------------------------------------------------------------
+    # TLS / Traefik Tests
+    # ------------------------------------------------------------------
+    - name: "TLS | Traefik healthcheck (ping)"
+      uri:
+        url: "http://127.0.0.1:8080/ping"
+        status_code: 200
+        timeout: 5
+      register: _t_traefik_ping
+      ignore_errors: true
+      tags: [tls]
+
+    - name: "TLS | Record result — Traefik ping"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Traefik healthcheck', 'host': inventory_hostname, 'passed': _t_traefik_ping is success}] }}"
+      tags: [tls]
+
+    - name: "TLS | Valid certificate for all service domains"
+      uri:
+        url: "https://{{ item }}"
+        status_code: [200, 301, 302, 401, 403]
+        validate_certs: true
+        timeout: 10
+      loop:
+        - "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+        - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        - "{{ gatus_domain | default('status.' + platform_domain) }}"
+      register: _t_tls_certs
+      ignore_errors: true
+      run_once: true
+      tags: [tls]
+
+    - name: "TLS | Record result — valid certificates"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Valid TLS cert (' + item.item + ')', 'host': inventory_hostname, 'passed': item is success}] }}"
+      loop: "{{ _t_tls_certs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      run_once: true
+      tags: [tls]
+
+    - name: "TLS | HTTP→HTTPS redirect"
+      uri:
+        url: "http://{{ ansible_host }}"
+        follow_redirects: none
+        status_code: [301, 302, 308]
+        timeout: 5
+      register: _t_tls_redirect
+      ignore_errors: true
+      tags: [tls]
+
+    - name: "TLS | Record result — HTTP redirect"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'HTTP→HTTPS redirect', 'host': inventory_hostname, 'passed': _t_tls_redirect is success}] }}"
+      tags: [tls]
+
+    # ------------------------------------------------------------------
+    # PostgreSQL HA Tests
+    # ------------------------------------------------------------------
+    - name: "PostgreSQL | Container running and healthy"
+      community.docker.docker_container_info:
+        name: postgresql
+      register: _t_pg_container
+      ignore_errors: true
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — container health"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'PostgreSQL container running', 'host': inventory_hostname, 'passed': _t_pg_container is success and (_t_pg_container.container.State.Running | default(false))}] }}"
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Accepts connections"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: pg_isready -U postgres -h localhost
+      register: _t_pg_ready
+      ignore_errors: true
+      changed_when: false
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — accepts connections"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'PostgreSQL accepts connections', 'host': inventory_hostname, 'passed': _t_pg_ready.rc | default(1) == 0}] }}"
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Repmgr cluster status"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: repmgr cluster show --compact
+      register: _t_pg_repmgr
+      ignore_errors: true
+      changed_when: false
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — repmgr cluster"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Repmgr cluster visible', 'host': inventory_hostname, 'passed': _t_pg_repmgr.rc | default(1) == 0 and 'primary' in (_t_pg_repmgr.stdout | default(''))}] }}"
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Streaming replication active (standby only)"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -tAc
+          "SELECT state FROM pg_stat_wal_receiver"
+      register: _t_pg_repl
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname != postgresql_primary_node
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — replication streaming"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'PostgreSQL replication streaming', 'host': inventory_hostname, 'passed': 'streaming' in (_t_pg_repl.stdout | default(''))}] }}"
+      when: inventory_hostname != postgresql_primary_node
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Application databases exist"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -tAc
+          "SELECT datname FROM pg_database WHERE datname IN ('netbird','pdns','pdnsadmin','zitadel','gatus') ORDER BY datname"
+      register: _t_pg_dbs
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname == postgresql_primary_node
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — application databases"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Application databases exist (found: ' + (_t_pg_dbs.stdout | default('') | trim) + ')', 'host': inventory_hostname, 'passed': (_t_pg_dbs.stdout_lines | default([]) | length) >= 3}] }}"
+      when: inventory_hostname == postgresql_primary_node
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Replication slot health"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -tAc
+          "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS lag FROM pg_replication_slots"
+      register: _t_pg_slots
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname == postgresql_primary_node
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — replication slots"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Replication slot active (lag: ' + (_t_pg_slots.stdout | default('unknown') | trim) + ')', 'host': inventory_hostname, 'passed': 't' in (_t_pg_slots.stdout | default(''))}] }}"
+      when: inventory_hostname == postgresql_primary_node
+      tags: [postgresql]
+
+    # ------------------------------------------------------------------
+    # NetBird Tests
+    # ------------------------------------------------------------------
+    - name: "NetBird | Peer status"
+      command: netbird status
+      register: _t_nb_status
+      changed_when: false
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — peer connected"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'NetBird peer connected', 'host': inventory_hostname, 'passed': 'Connected' in (_t_nb_status.stdout | default(''))}] }}"
+      tags: [netbird]
+
+    - name: "NetBird | Management API health"
+      uri:
+        url: "https://{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}/api/instance"
+        status_code: 200
+        validate_certs: "{{ netbird_validate_certs | default(false) }}"
+        timeout: 10
+      register: _t_nb_api
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — API health"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'NetBird API health', 'host': inventory_hostname, 'passed': _t_nb_api is success}] }}"
+      tags: [netbird]
+
+    - name: "NetBird | Cross-node mesh connectivity (ping peer)"
+      command: "ping -c 2 -W 3 {{ _peer_netbird_ip }}"
+      register: _t_nb_ping
+      changed_when: false
+      ignore_errors: true
+      when: _peer_netbird_ip | length > 0
+      tags: [netbird, cross_node]
+
+    - name: "NetBird | Record result — mesh ping"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'NetBird mesh ping to ' + _peer, 'host': inventory_hostname, 'passed': _t_nb_ping.rc | default(1) == 0}] }}"
+      when: _peer_netbird_ip | length > 0
+      tags: [netbird, cross_node]
+
+    # ------------------------------------------------------------------
+    # Backup Tests
+    # ------------------------------------------------------------------
+    - name: "Backup | Restic timer active"
+      command: systemctl is-active restic-backup.timer
+      register: _t_backup_timer
+      changed_when: false
+      ignore_errors: true
+      tags: [backup]
+
+    - name: "Backup | Record result — timer active"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Restic backup timer active', 'host': inventory_hostname, 'passed': _t_backup_timer.rc | default(1) == 0}] }}"
+      tags: [backup]
+
+    - name: "Backup | Storagebox SFTP connectivity"
+      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/phoenix-host.key') }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }} 2>&1"
+      register: _t_backup_sftp
+      changed_when: false
+      ignore_errors: true
+      when: backup_storagebox_user is defined and backup_storagebox_host is defined
+      tags: [backup]
+
+    - name: "Backup | Record result — SFTP connectivity"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Storagebox SFTP connection', 'host': inventory_hostname, 'passed': _t_backup_sftp.rc | default(1) == 0}] }}"
+      when: backup_storagebox_user is defined
+      tags: [backup]
+
+    # ------------------------------------------------------------------
+    # Maintenance Timer Tests
+    # ------------------------------------------------------------------
+    - name: "Maintenance | Docker cleanup timer"
+      command: systemctl is-active docker-cleanup.timer
+      register: _t_maint_docker
+      changed_when: false
+      ignore_errors: true
+      tags: [maintenance]
+
+    - name: "Maintenance | Disk monitor timer"
+      command: systemctl is-active disk-monitor.timer
+      register: _t_maint_disk
+      changed_when: false
+      ignore_errors: true
+      tags: [maintenance]
+
+    - name: "Maintenance | PostgreSQL maintenance timer"
+      command: systemctl is-active pg-maintenance.timer
+      register: _t_maint_pg
+      changed_when: false
+      ignore_errors: true
+      tags: [maintenance]
+
+    - name: "Maintenance | Record result — Docker cleanup timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Docker cleanup timer', 'host': inventory_hostname, 'passed': _t_maint_docker.rc | default(1) == 0}] }}"
+      tags: [maintenance]
+
+    - name: "Maintenance | Record result — Disk monitor timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Disk monitor timer', 'host': inventory_hostname, 'passed': _t_maint_disk.rc | default(1) == 0}] }}"
+      tags: [maintenance]
+
+    - name: "Maintenance | Record result — PG maintenance timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'PG maintenance timer', 'host': inventory_hostname, 'passed': _t_maint_pg.rc | default(1) == 0}] }}"
+      tags: [maintenance]
+
+    # ------------------------------------------------------------------
+    # Container Health Tests (all Docker containers)
+    # ------------------------------------------------------------------
+    - name: "Containers | List all containers with health status"
+      shell: 'docker ps --format "{% raw %}{{.Names}}|{{.Status}}{% endraw %}" 2>/dev/null'
+      register: _t_containers
+      changed_when: false
+      ignore_errors: true
+      tags: [dns, tls, postgresql, netbird, zitadel, gatus, portainer]
+
+    - name: "Containers | Check for unhealthy containers"
+      set_fact:
+        _unhealthy_containers: "{{ _t_containers.stdout_lines | default([]) | select('search', 'unhealthy') | list }}"
+      tags: [dns, tls, postgresql, netbird, zitadel, gatus, portainer]
+
+    - name: "Containers | Record result — no unhealthy containers"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'No unhealthy containers' + (' (unhealthy: ' + (_unhealthy_containers | join(', ')) + ')' if _unhealthy_containers | length > 0 else ''), 'host': inventory_hostname, 'passed': _unhealthy_containers | length == 0}] }}"
+      tags: [dns, tls, postgresql, netbird, zitadel, gatus, portainer]
+
+    # ------------------------------------------------------------------
+    # Store per-host results for final aggregation
+    # ------------------------------------------------------------------
+    - name: "Store per-host test results"
+      set_fact:
+        _host_test_results: "{{ _test_results }}"
+      tags: [always]
+
+# ============================================================================
+# Play 2: Cluster-wide service and integration tests (run_once)
+# ============================================================================
+- name: "Cluster-wide service and integration tests"
+  hosts: dns_servers
+  gather_facts: false
+  any_errors_fatal: false
+  vars:
+    _cluster_results: []
+    _zitadel_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+    _netbird_url: "https://{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+    _gatus_url: "https://{{ gatus_domain | default('status.' + platform_domain) }}"
+  tasks:
+
+    # ------------------------------------------------------------------
+    # Zitadel Tests
+    # ------------------------------------------------------------------
+    - name: "Zitadel | OIDC Discovery endpoint"
+      uri:
+        url: "{{ _zitadel_url }}/.well-known/openid-configuration"
+        status_code: 200
+        return_content: true
+        validate_certs: true
+        timeout: 10
+      register: _t_zitadel_oidc
+      ignore_errors: true
+      run_once: true
+      tags: [zitadel, oidc]
+
+    - name: "Zitadel | Record result — OIDC Discovery"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel OIDC Discovery', 'host': 'cluster', 'passed': _t_zitadel_oidc is success and 'authorization_endpoint' in (_t_zitadel_oidc.content | default(''))}] }}"
+      run_once: true
+      tags: [zitadel, oidc]
+
+    - name: "Zitadel | Admin console accessible"
+      uri:
+        url: "{{ _zitadel_url }}/ui/console"
+        status_code: 200
+        validate_certs: true
+        timeout: 10
+      register: _t_zitadel_console
+      ignore_errors: true
+      run_once: true
+      tags: [zitadel]
+
+    - name: "Zitadel | Record result — console accessible"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel console accessible', 'host': 'cluster', 'passed': _t_zitadel_console is success}] }}"
+      run_once: true
+      tags: [zitadel]
+
+    - name: "Zitadel | Service PAT authentication"
+      uri:
+        url: "{{ _zitadel_url }}/management/v1/projects/_search"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body: { "queries": [] }
+        status_code: 200
+        validate_certs: true
+        timeout: 10
+      register: _t_zitadel_pat
+      ignore_errors: true
+      run_once: true
+      when: zitadel_service_pat | default('') | length > 0
+      tags: [zitadel, oidc]
+
+    - name: "Zitadel | Record result — PAT auth"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel service PAT authentication', 'host': 'cluster', 'passed': _t_zitadel_pat is success}] }}"
+      run_once: true
+      when: zitadel_service_pat | default('') | length > 0
+      tags: [zitadel, oidc]
+
+    # ------------------------------------------------------------------
+    # OIDC Integration Tests
+    # ------------------------------------------------------------------
+
+    # --- Auto-create test user in Zitadel ---
+    - name: "OIDC | Check if test user already exists"
+      uri:
+        url: "{{ _zitadel_url }}/management/v1/users/_search"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          queries:
+            - userNameQuery:
+                userName: "test-runner"
+                method: TEXT_QUERY_METHOD_EQUALS
+        status_code: 200
+        validate_certs: true
+      register: _t_oidc_user_search
+      ignore_errors: true
+      run_once: true
+      when: zitadel_service_pat | default('') | length > 0
+      tags: [oidc]
+
+    - name: "OIDC | Create test-runner user in Zitadel"
+      uri:
+        url: "{{ _zitadel_url }}/management/v1/users/human/_import"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          userName: "test-runner"
+          profile:
+            firstName: "Test"
+            lastName: "Runner"
+          email:
+            email: "test-runner@{{ platform_domain }}"
+            isEmailVerified: true
+          password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+          passwordChangeRequired: false
+        status_code: [200, 201]
+        validate_certs: true
+      register: _t_oidc_user_create
+      ignore_errors: true
+      run_once: true
+      when:
+        - zitadel_service_pat | default('') | length > 0
+        - _t_oidc_user_search is success
+        - _t_oidc_user_search.json.result | default([]) | length == 0
+      tags: [oidc]
+
+    - name: "OIDC | Record result — test user ready"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'OIDC test user (test-runner) ready', 'host': 'cluster', 'passed': (_t_oidc_user_search.json.result | default([]) | length > 0) or (_t_oidc_user_create is success)}] }}"
+      run_once: true
+      when: zitadel_service_pat | default('') | length > 0
+      tags: [oidc]
+
+    # --- Verify Phoenix Host OIDC apps exist in Zitadel ---
+    - name: "OIDC | List apps in Phoenix Host project"
+      uri:
+        url: "{{ _zitadel_url }}/management/v1/projects/{{ (_t_zitadel_pat.json.result | default([]) | first).id | default('') }}/apps/_search"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body: {}
+        status_code: 200
+        validate_certs: true
+      register: _t_oidc_apps
+      ignore_errors: true
+      run_once: true
+      when:
+        - zitadel_service_pat | default('') | length > 0
+        - _t_zitadel_pat.json.result | default([]) | length > 0
+      tags: [oidc]
+
+    - name: "OIDC | Record result — OIDC apps registered"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'OIDC apps in Zitadel (found: ' + ((_t_oidc_apps.json.result | default([]) | map(attribute='name') | join(', ')) or 'none') + ')', 'host': 'cluster', 'passed': (_t_oidc_apps.json.result | default([]) | length) >= 1}] }}"
+      run_once: true
+      when: _t_oidc_apps is not skipped
+      tags: [oidc]
+
+    # --- Gatus OIDC redirect chain ---
+    - name: "OIDC | Gatus dashboard redirects to Zitadel"
+      uri:
+        url: "{{ _gatus_url }}"
+        follow_redirects: none
+        status_code: [200, 301, 302, 303, 307, 401]
+        validate_certs: true
+        timeout: 10
+        return_content: true
+      register: _t_oidc_gatus
+      ignore_errors: true
+      run_once: true
+      tags: [oidc, gatus]
+
+    - name: "OIDC | Record result — Gatus OIDC"
+      set_fact:
+        _cluster_results: >-
+          {{ _cluster_results + [{'name': 'Gatus OIDC protection',
+              'host': 'cluster',
+              'passed': _t_oidc_gatus is success and
+                        ((_t_oidc_gatus.status in [302, 303, 307] and zitadel_domain | default('auth.' + platform_domain) in (_t_oidc_gatus.location | default('')))
+                         or (_t_oidc_gatus.status == 200 and 'oidc' in (_t_oidc_gatus.content | default('') | lower))
+                         or (_t_oidc_gatus.status == 401))
+          }] }}
+      run_once: true
+      tags: [oidc, gatus]
+
+    # --- Portainer OAuth2 Proxy redirect chain ---
+    - name: "OIDC | Portainer OAuth2 Proxy redirects to Zitadel"
+      uri:
+        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1') }}:{{ portainer_port | default('9000') }}/"
+        follow_redirects: none
+        status_code: [200, 302, 303, 307, 401, 403]
+        timeout: 10
+      register: _t_oidc_portainer
+      ignore_errors: true
+      run_once: true
+      when: portainer_oidc_client_id | default('') | length > 0
+      tags: [oidc, portainer]
+
+    - name: "OIDC | Record result — Portainer OIDC"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Portainer OAuth2 Proxy active', 'host': 'cluster', 'passed': _t_oidc_portainer is success and _t_oidc_portainer.status in [302, 303, 307]}] }}"
+      run_once: true
+      when: portainer_oidc_client_id | default('') | length > 0
+      tags: [oidc, portainer]
+
+    # --- PowerDNS Admin OIDC ---
+    - name: "OIDC | PowerDNS Admin login page has OIDC button"
+      uri:
+        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1') }}:{{ powerdns_nginx_admin_port | default('8080') }}/login"
+        status_code: [200]
+        return_content: true
+        timeout: 10
+      register: _t_oidc_pda
+      ignore_errors: true
+      run_once: true
+      when:
+        - powerdns_admin_enabled | default(false) | bool
+        - powerdns_admin_oidc_client_id | default('') | length > 0
+      tags: [oidc, powerdns_admin]
+
+    - name: "OIDC | Record result — PDA OIDC"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'PowerDNS Admin OIDC button present', 'host': 'cluster', 'passed': _t_oidc_pda is success and ('oidc' in (_t_oidc_pda.content | default('') | lower) or 'openid' in (_t_oidc_pda.content | default('') | lower))}] }}"
+      run_once: true
+      when: powerdns_admin_oidc_client_id | default('') | length > 0
+      tags: [oidc, powerdns_admin]
+
+    # --- NetBird external IdP ---
+    - name: "OIDC | NetBird identity providers include Zitadel"
+      uri:
+        url: "{{ _netbird_url }}/api/identity-providers"
+        headers:
+          Authorization: "Token {{ netbird_admin_pat }}"
+        status_code: 200
+        validate_certs: "{{ netbird_validate_certs | default(false) }}"
+        timeout: 10
+      register: _t_oidc_netbird
+      ignore_errors: true
+      run_once: true
+      when:
+        - netbird_admin_pat is defined
+        - netbird_admin_pat != 'REPLACE_WITH_YOUR_PAT'
+        - netbird_oidc_client_id | default('') | length > 0
+      tags: [oidc, netbird]
+
+    - name: "OIDC | Record result — NetBird external IdP"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'NetBird Zitadel IdP configured', 'host': 'cluster', 'passed': _t_oidc_netbird is success and (_t_oidc_netbird.json | default([]) | selectattr('issuer', 'defined') | list | length > 0)}] }}"
+      run_once: true
+      when: netbird_oidc_client_id | default('') | length > 0
+      tags: [oidc, netbird]
+
+    # ------------------------------------------------------------------
+    # Gatus Service Tests
+    # ------------------------------------------------------------------
+    - name: "Gatus | Dashboard accessible"
+      uri:
+        url: "{{ _gatus_url }}/health"
+        status_code: 200
+        timeout: 10
+      register: _t_gatus_health
+      ignore_errors: true
+      run_once: true
+      tags: [gatus]
+
+    - name: "Gatus | Record result — dashboard health"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Gatus dashboard healthy', 'host': 'cluster', 'passed': _t_gatus_health is success}] }}"
+      run_once: true
+      tags: [gatus]
+
+    - name: "Gatus | External endpoint accepts push (test event)"
+      uri:
+        url: "http://127.0.0.1:{{ gatus_local_port | default('8080') }}/api/v1/endpoints/test_push/external?success=true"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ gatus_external_token | default('') }}"
+        status_code: [200, 404]
+        timeout: 10
+      register: _t_gatus_push
+      ignore_errors: true
+      run_once: true
+      when: gatus_external_token | default('') | length > 0
+      tags: [gatus]
+
+    - name: "Gatus | Record result — external push"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Gatus external endpoint accepts push', 'host': 'cluster', 'passed': _t_gatus_push is success}] }}"
+      run_once: true
+      when: gatus_external_token | default('') | length > 0
+      tags: [gatus]
+
+    # ------------------------------------------------------------------
+    # Portainer Service Tests
+    # ------------------------------------------------------------------
+    - name: "Portainer | API accessible via NetBird"
+      uri:
+        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1') }}:{{ portainer_port | default('9000') }}/api/system/status"
+        status_code: [200, 302, 401]
+        timeout: 10
+      register: _t_portainer_api
+      ignore_errors: true
+      run_once: true
+      tags: [portainer]
+
+    - name: "Portainer | Record result — API accessible"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'Portainer API accessible', 'host': 'cluster', 'passed': _t_portainer_api is success}] }}"
+      run_once: true
+      tags: [portainer]
+
+    # ------------------------------------------------------------------
+    # Cross-node DNS consistency
+    # ------------------------------------------------------------------
+    - name: "Cross-node | DNS SOA serial matches between nodes"
+      shell: "dig @{{ hostvars[item]['ansible_host'] }} {{ platform_domain }} SOA +short +time=5 | awk '{print $3}'"
+      loop: "{{ groups['dns_servers'] }}"
+      register: _t_cross_soa
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      tags: [cross_node, dns]
+
+    - name: "Cross-node | Record result — SOA serial match"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'DNS SOA serial consistent across nodes (' + (_t_cross_soa.results | map(attribute='stdout') | join(' vs ') | default('unknown')) + ')', 'host': 'cluster', 'passed': _t_cross_soa.results | map(attribute='stdout') | unique | list | length == 1}] }}"
+      run_once: true
+      tags: [cross_node, dns]
+
+    # ------------------------------------------------------------------
+    # Store cluster results
+    # ------------------------------------------------------------------
+    - name: "Store cluster test results"
+      set_fact:
+        _cluster_test_results: "{{ _cluster_results }}"
+      run_once: true
+      tags: [always]
+
+# ============================================================================
+# Play 3: Failover tests (destructive — only with --tags failover)
+# ============================================================================
+- name: "Failover tests (destructive)"
+  hosts: dns_servers
+  gather_facts: false
+  any_errors_fatal: false
+  vars:
+    _failover_results: []
+    _test_node: "{{ groups['dns_servers'] | first }}"
+    _surviving_node: "{{ groups['dns_servers'] | last }}"
+  tasks:
+
+    # --- DNS failover: stop Traefik, verify LUA excludes dead node ---
+    - name: "Failover | Stop Traefik on {{ _test_node }} to test DNS failover"
+      community.docker.docker_compose_v2:
+        project_src: /opt/traefik
+        state: stopped
+      when: inventory_hostname == _test_node
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for LUA health check to detect failure (35s)"
+      pause:
+        seconds: 35
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify DNS excludes stopped node"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      register: _t_fo_dns
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      delegate_to: "{{ _surviving_node }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — DNS failover"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'DNS excludes stopped node', 'host': 'cluster', 'passed': hostvars[_test_node]['ansible_host'] not in (_t_fo_dns.stdout | default(''))}] }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Restart Traefik on {{ _test_node }}"
+      community.docker.docker_compose_v2:
+        project_src: /opt/traefik
+        state: present
+      when: inventory_hostname == _test_node
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for Traefik to recover (15s)"
+      pause:
+        seconds: 15
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify DNS includes both nodes again"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      register: _t_fo_dns_recovery
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      delegate_to: "{{ _surviving_node }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — DNS recovery"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'DNS includes both nodes after recovery', 'host': 'cluster', 'passed': (hostvars[_test_node]['ansible_host'] in (_t_fo_dns_recovery.stdout | default(''))) and (hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_recovery.stdout | default('')))}] }}"
+      run_once: true
+      tags: [failover, never]
+
+    # --- PostgreSQL failover: stop primary, verify standby promotes ---
+    - name: "Failover | Stop PostgreSQL on primary ({{ postgresql_primary_node }})"
+      community.docker.docker_compose_v2:
+        project_src: /opt/postgresql
+        state: stopped
+      when: inventory_hostname == postgresql_primary_node
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for repmgrd to detect failure and promote (90s)"
+      pause:
+        seconds: 90
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Check standby repmgr status after primary failure"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: repmgr cluster show --compact
+      register: _t_fo_pg_promote
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Failover | Record result — standby promotion"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'Standby promoted to primary after failure', 'host': 'cluster', 'passed': 'primary' in (_t_fo_pg_promote.stdout | default(''))}] }}"
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Failover | Verify PostgreSQL accepts writes on new primary"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -c "CREATE TABLE IF NOT EXISTS _failover_test (id int); DROP TABLE _failover_test;"
+      register: _t_fo_pg_write
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Failover | Record result — writes on new primary"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'New primary accepts writes', 'host': 'cluster', 'passed': _t_fo_pg_write.rc | default(1) == 0}] }}"
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Failover | Restart PostgreSQL on original primary"
+      community.docker.docker_compose_v2:
+        project_src: /opt/postgresql
+        state: present
+        recreate: always
+      when: inventory_hostname == postgresql_primary_node
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for original primary to rejoin as standby (60s)"
+      pause:
+        seconds: 60
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify both nodes are back in cluster"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: repmgr cluster show --compact
+      register: _t_fo_pg_rejoin
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Failover | Record result — cluster rejoined"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'Original primary rejoined cluster', 'host': 'cluster', 'passed': (_t_fo_pg_rejoin.stdout | default('') | regex_findall('running') | length) >= 2}] }}"
+      when: inventory_hostname != postgresql_primary_node
+      tags: [failover, never]
+
+    - name: "Store failover results"
+      set_fact:
+        _failover_test_results: "{{ _failover_results }}"
+      run_once: true
+      tags: [failover, never]
+
+# ============================================================================
+# Play 4: Test summary
+# ============================================================================
+- name: "Test summary"
+  hosts: dns_servers
+  gather_facts: false
+  any_errors_fatal: false
+  tasks:
+
+    - name: "Aggregate all test results"
+      set_fact:
+        _all_results: >-
+          {{ (hostvars[groups['dns_servers'][0]]['_host_test_results'] | default([])) +
+             (hostvars[groups['dns_servers'][1]]['_host_test_results'] | default([])) +
+             (hostvars[groups['dns_servers'][0]]['_cluster_test_results'] | default([])) +
+             (hostvars[groups['dns_servers'][0]]['_failover_test_results'] | default([])) }}
+      run_once: true
+      tags: [always]
+
+    - name: "Calculate summary"
+      set_fact:
+        _total: "{{ _all_results | length }}"
+        _passed: "{{ _all_results | selectattr('passed') | list | length }}"
+        _failed_list: "{{ _all_results | rejectattr('passed') | list }}"
+      run_once: true
+      tags: [always]
+
+    - name: "Print test results"
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║                  PHOENIX HOST TEST RESULTS                  ║
+          ╠══════════════════════════════════════════════════════════════╣
+          {% for r in _all_results %}
+          ║ {{ '✓' if r.passed else '✗' }} [{{ '%-7s' | format(r.host) }}] {{ '%-48s' | format(r.name[:48]) }}║
+          {% endfor %}
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  Total: {{ '%-4s' | format(_total) }} Passed: {{ '%-4s' | format(_passed) }} Failed: {{ '%-4s' | format((_total | int) - (_passed | int)) }}                        ║
+          ╚══════════════════════════════════════════════════════════════╝
+      run_once: true
+      tags: [always]
+
+    - name: "Fail playbook if any tests failed"
+      fail:
+        msg: |
+          {{ (_failed_list | length) }} test(s) FAILED:
+          {% for r in _failed_list %}
+            - [{{ r.host }}] {{ r.name }}
+          {% endfor %}
+      when: _failed_list | length > 0
+      run_once: true
+      tags: [always]

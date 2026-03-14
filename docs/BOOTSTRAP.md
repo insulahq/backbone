@@ -216,39 +216,40 @@ The roles auto-create OIDC applications in Zitadel ("Phoenix Host" project) and 
 
 **Zitadel token settings:** For each OIDC application created in Zitadel (visible in the Phoenix Host project), navigate to **Token Settings** and enable **"Include user's profile info in the ID Token"**. This ensures claim mapping (name, email) works correctly in PowerDNS Admin and NetBird.
 
-## Step 13: Verify Everything
+## Step 13: Run System Test Suite
+
+Run the comprehensive test suite to verify all components:
 
 ```bash
-# PowerDNS (both nodes serve DNS)
-dig @<NS1_IP> example.com SOA +short
-dig @<NS2_IP> example.com SOA +short
-# Both should return the same SOA (shared database)
+# Full test suite (DNS, TLS, PostgreSQL, NetBird, Zitadel, OIDC, Gatus, Portainer, backup, maintenance)
+ansible-playbook -i inventory/hosts.yml test-suite.yml
+```
 
-# PowerDNS API (both nodes have write access)
-curl -s -H "X-API-Key: $KEY" http://<NS1_NETBIRD_IP>:8081/api/v1/servers/localhost/zones
-curl -s -H "X-API-Key: $KEY" http://<NS2_NETBIRD_IP>:8081/api/v1/servers/localhost/zones
+The test suite verifies:
+- DNS resolution and SOA consistency across both nodes
+- Valid TLS certificates for all public domains
+- PostgreSQL HA replication status and application databases
+- NetBird peer connectivity and mesh health
+- Zitadel OIDC discovery and PAT authentication
+- OIDC redirect chains on Gatus, Portainer, PowerDNS Admin, NetBird
+- Gatus dashboard health and external push endpoints
+- Portainer API accessibility via NetBird
+- Backup timer and Storagebox connectivity
+- All maintenance timers (Docker cleanup, disk monitor, PG maintenance)
+- Container health status (no unhealthy containers)
 
-# Traefik (valid TLS cert)
-curl -I https://netbird.example.com
+It prints a pass/fail summary table and exits non-zero on any failure.
 
-# Zitadel OIDC
-curl -s https://auth.example.com/.well-known/openid-configuration | python3 -m json.tool
+To run only specific test groups:
+```bash
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags dns
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags postgresql
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags oidc
+```
 
-# PostgreSQL replication
-ssh root@<NS1_IP> "docker exec postgresql repmgr cluster show"
-
-# NetBird mesh
-ssh root@<NS1_IP> "netbird status"
-ssh root@<NS2_IP> "netbird status"
-
-# Gatus monitoring dashboard
-curl -I https://status.example.com
-
-# Portainer (via NetBird)
-curl -s http://<NS1_NETBIRD_IP>:9000/api/system/status
-
-# Backup
-ssh root@<NS1_IP> "systemctl status restic-backup.timer"
+For destructive failover tests (temporarily stops services, then restores):
+```bash
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 ```
 
 ## Step 14: Deploy Backups
