@@ -132,6 +132,128 @@
       debug:
         msg: "NetBird peer DNS domain set to: {{ nb_account_update.json.settings.dns_domain }}"
 
+# --- DNS record creation (via PowerDNS API) ---
+
+- name: Build LUA health-check DNS records for NetBird domain
+  set_fact:
+    _netbird_lua_records: >-
+      {{ [{'content': 'A "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+          (groups['dns_servers'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+          "}, {selector='all'})\"", 'disabled': false}] +
+         ([] if (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length == 0) else
+          [{'content': 'AAAA "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+            (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+            "}, {selector='all'})\"", 'disabled': false}])
+      }}
+  run_once: true
+  when:
+    - powerdns_api_key is defined
+    - dns_health_check_enabled | default(false) | bool
+  tags: [netbird, netbird_management, dns]
+
+- name: Create DNS records for NetBird domain (health-checked LUA)
+  when:
+    - powerdns_api_key is defined
+    - dns_health_check_enabled | default(false) | bool
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ netbird_dashboard_domain }}."
+          type: A
+          changetype: DELETE
+        - name: "{{ netbird_dashboard_domain }}."
+          type: AAAA
+          changetype: DELETE
+        - name: "{{ netbird_dashboard_domain }}."
+          type: LUA
+          ttl: "{{ dns_health_check_ttl | default(30) }}"
+          changetype: REPLACE
+          records: "{{ _netbird_lua_records }}"
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [netbird, netbird_management, dns]
+
+- name: Create DNS A records for NetBird domain (static round-robin)
+  when:
+    - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ netbird_dashboard_domain }}."
+          type: A
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'ansible_host')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [netbird, netbird_management, dns]
+
+- name: Create DNS AAAA records for NetBird domain (static round-robin)
+  when:
+    - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
+    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ netbird_dashboard_domain }}."
+          type: AAAA
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'public_ipv6')
+              | select('defined')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [netbird, netbird_management, dns]
+
+- name: Increment SOA serial after NetBird DNS record changes
+  when: powerdns_api_key is defined
+  run_once: true
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  changed_when: true
+  ignore_errors: true
+  tags: [netbird, netbird_management, dns]
+
+# --- Status display ---
+
 - name: Display NetBird deployment status
   debug:
     msg:

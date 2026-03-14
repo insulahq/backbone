@@ -197,6 +197,156 @@
   run_once: true
   changed_when: true
 
+# --- Platform base domain DNS records ---
+# Creates A/AAAA records for the base domain (e.g., example.com) pointing to both servers.
+# Also creates NS glue records (ns1/ns2.example.com).
+
+- name: Build LUA health-check records for base domain
+  set_fact:
+    _platform_lua_records: >-
+      {{ [{'content': 'A "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+          (groups['dns_servers'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+          "}, {selector='all'})\"", 'disabled': false}] +
+         ([] if (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length == 0) else
+          [{'content': 'AAAA "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
+            (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
+            "}, {selector='all'})\"", 'disabled': false}])
+      }}
+  run_once: true
+  when: dns_health_check_enabled | default(false) | bool
+  tags: [powerdns, dns]
+
+- name: Create base domain DNS records (health-checked LUA)
+  when:
+    - powerdns_api_key is defined
+    - dns_health_check_enabled | default(false) | bool
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ platform_domain }}."
+          type: A
+          changetype: DELETE
+        - name: "{{ platform_domain }}."
+          type: AAAA
+          changetype: DELETE
+        - name: "{{ platform_domain }}."
+          type: LUA
+          ttl: "{{ dns_health_check_ttl | default(30) }}"
+          changetype: REPLACE
+          records: "{{ _platform_lua_records }}"
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [powerdns, dns]
+
+- name: Create base domain DNS records (static round-robin)
+  when:
+    - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ platform_domain }}."
+          type: A
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'ansible_host')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [powerdns, dns]
+
+- name: Create base domain AAAA records (static round-robin)
+  when:
+    - powerdns_api_key is defined
+    - not (dns_health_check_enabled | default(false) | bool)
+    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ platform_domain }}."
+          type: AAAA
+          ttl: 300
+          changetype: REPLACE
+          records: >-
+            {{
+              groups['dns_servers']
+              | map('extract', hostvars, 'public_ipv6')
+              | select('defined')
+              | map('community.general.dict_kv', 'content')
+              | map('combine', {'disabled': false})
+              | list
+            }}
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [powerdns, dns]
+
+- name: Create NS glue records (ns1/ns2 A records)
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "ns1.{{ platform_domain }}."
+          type: A
+          ttl: 3600
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars['ns1']['ansible_host'] }}"
+              disabled: false
+        - name: "ns2.{{ platform_domain }}."
+          type: A
+          ttl: 3600
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars['ns2']['ansible_host'] }}"
+              disabled: false
+    status_code: [200, 204]
+  run_once: true
+  when: powerdns_api_key is defined
+  ignore_errors: true
+  tags: [powerdns, dns]
+
+- name: Increment SOA serial after base domain record changes
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  run_once: true
+  changed_when: true
+  when: powerdns_api_key is defined
+  ignore_errors: true
+  tags: [powerdns, dns]
+
 # --- Status display ---
 
 - name: Display PowerDNS deployment status
