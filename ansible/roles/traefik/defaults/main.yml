@@ -25,6 +25,12 @@ traefik_acme_email: "admin@{{ platform_domain }}"
 traefik_acme_challenge: dns-01
 traefik_acme_dns_provider: pdns
 
+# Wildcard certificate for *.{{ platform_domain }}
+# Covers all subdomains automatically — no per-service ACME challenge needed.
+# Requires DNS-01 (already configured above). Individual services no longer
+# need certresolver labels; they inherit the wildcard via the default TLS store.
+traefik_wildcard_cert: true
+
 # PowerDNS API URL for DNS-01 challenge.
 # Both nodes run PowerDNS with shared PostgreSQL HA backend (Native mode),
 # so each node uses its OWN local PowerDNS API for ACME challenges.

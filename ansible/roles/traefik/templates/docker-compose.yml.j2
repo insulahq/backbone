@@ -27,11 +27,17 @@ services:
       - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=0"
       - "--serverstransport.forwardingtimeouts.responseheadertimeout=0s"
       - "--serverstransport.forwardingtimeouts.idleconntimeout=0s"
-      # DNS-01 ACME via PowerDNS (ns1 primary)
+      # DNS-01 ACME via PowerDNS
       - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider={{ traefik_acme_dns_provider }}"
       - "--certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+{% if traefik_wildcard_cert | default(true) %}
+      # Wildcard certificate: *.{{ platform_domain }} + {{ platform_domain }}
+      # All subdomains covered automatically — services don't need individual certresolver labels.
+      # Uses a file provider to define the wildcard TLS configuration.
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+{% endif %}
     ports:
       - '0.0.0.0:80:80'
       - '0.0.0.0:443:443'
@@ -40,6 +46,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - {{ traefik_install_dir }}/acme.json:/letsencrypt/acme.json
+{% if traefik_wildcard_cert | default(true) %}
+      - {{ traefik_install_dir }}/dynamic.yml:/etc/traefik/dynamic.yml:ro
+{% endif %}
     environment:
       PDNS_API_URL: "{{ traefik_pdns_api_url }}"
       PDNS_API_KEY: "{{ powerdns_api_key }}"

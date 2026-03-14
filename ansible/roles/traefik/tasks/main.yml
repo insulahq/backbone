@@ -31,6 +31,15 @@
     state: present
   tags: [traefik]
 
+- name: Deploy wildcard TLS dynamic config
+  template:
+    src: dynamic.yml.j2
+    dest: "{{ traefik_install_dir }}/dynamic.yml"
+    mode: '0644'
+  when: traefik_wildcard_cert | default(true)
+  notify: restart traefik
+  tags: [traefik]
+
 - name: Deploy Traefik docker-compose.yml
   template:
     src: docker-compose.yml.j2

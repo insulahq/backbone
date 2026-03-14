@@ -23,7 +23,8 @@ netbird_stun_port: 3478
 netbird_dashboard_domain: "netbird.{{ platform_domain }}"
 
 # Internal peer DNS domain
-netbird_peer_dns_domain: "netbird.internal"
+# Peers are reachable as <hostname>.netbird (e.g., ns1.netbird, ns2.netbird)
+netbird_peer_dns_domain: "netbird"
 
 # Traefik reverse proxy (for HTTPS endpoints)
 netbird_traefik_enabled: true

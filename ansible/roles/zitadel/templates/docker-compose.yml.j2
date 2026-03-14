@@ -26,7 +26,6 @@ services:
       - traefik.http.routers.zitadel.rule=Host(`{{ zitadel_domain }}`)
       - traefik.http.routers.zitadel.entrypoints=websecure
       - traefik.http.routers.zitadel.tls=true
-      - traefik.http.routers.zitadel.tls.certresolver=letsencrypt
       - traefik.http.routers.zitadel.service=zitadel
       # Backend service — h2c for gRPC support
       - traefik.http.services.zitadel.loadbalancer.server.port={{ zitadel_port }}
