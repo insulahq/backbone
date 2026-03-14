@@ -14,6 +14,13 @@ timezone: UTC
 ssh_port: 22
 ssh_break_glass_enabled: true
 
+# Per-server SSH keypairs — auto-generated in .generated_secrets/ssh/ on first run.
+# Each server gets its own ED25519 keypair. The public key is deployed to
+# authorized_keys by the common role. For bootstrap (first deploy), override
+# with your provisioning key:
+#   ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
+
 # ============================================================================
 # NetBird VPN Mesh
 # ============================================================================

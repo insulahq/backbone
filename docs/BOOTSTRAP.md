@@ -9,7 +9,7 @@ A single `site.yml` run will **not** work from scratch due to circular dependenc
 ## Prerequisites
 
 1. Two Hetzner VPS with Debian 13 installed
-2. Root SSH access to both servers
+2. Root SSH access to both servers (via a provisioning key, e.g., `~/hosting-platform.key`)
 3. DNS zone for your domain (e.g., `example.com`) with NS records pointing to your servers
 4. Hetzner Storagebox for backups
 5. Ansible 2.15+ on your control machine
@@ -28,16 +28,29 @@ cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
 
 Edit both files with your server IPs, domain, and generated secrets. Leave `netbird_ip` fields empty for now -- they will be assigned after NetBird enrollment.
 
+> **SSH keys:** The `ansible_ssh_private_key_file` in `group_vars/all.yml` points to auto-generated per-server keys in `.generated_secrets/ssh/`. These are created on first run. For this initial bootstrap, you must override with your provisioning key using `-e` (see Step 2).
+
 ## Step 2: OS Hardening + Docker
 
-Deploy the `common` role to both servers:
+Deploy the `common` role to both servers. Use `-e` to override the SSH key with your provisioning key (the per-server keys don't exist on the servers yet):
 
 ```bash
 cd ansible
-ansible-playbook -i inventory/hosts.yml site.yml --tags common
+ansible-playbook -i inventory/hosts.yml site.yml --tags common \
+  -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 ```
 
-This installs Docker, nftables, fail2ban, and hardens SSH.
+This run:
+1. **Generates per-server ED25519 keypairs** locally in `.generated_secrets/ssh/` (idempotent)
+2. **Deploys each server's public key** to `/root/.ssh/authorized_keys`
+3. Installs Docker, nftables, fail2ban, and hardens SSH
+
+After this step, all subsequent `ansible-playbook` commands use the per-server keys automatically -- no more `-e` override needed.
+
+> **Verify:** Confirm the per-server key works before proceeding:
+> ```bash
+> ansible -i inventory/hosts.yml all -m ping
+> ```
 
 ## Step 3: Traefik
 

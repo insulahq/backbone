@@ -239,6 +239,27 @@
   when: disk_monitor_enabled
   tags: [common, maintenance]
 
+# Per-server SSH key -- deploy the generated public key so subsequent Ansible runs
+# use the per-server key instead of the bootstrap key.
+# The keypair is generated locally by the pre-play in site.yml.
+- name: Ensure .ssh directory exists for root
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [common, security, ssh]
+
+- name: Deploy per-server SSH public key to authorized_keys
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ lookup('file', playbook_dir + '/.generated_secrets/ssh/' + inventory_hostname + '.pub') }}"
+    state: present
+    exclusive: false
+    comment: "ansible@{{ inventory_hostname }}"
+  tags: [common, security, ssh]
+
 # SSH hardening
 - name: Harden SSH configuration
   lineinfile:
