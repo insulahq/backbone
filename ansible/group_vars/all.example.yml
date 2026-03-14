@@ -33,6 +33,13 @@ netbird_redundancy: dns_round_robin
 netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
 netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
+# NetBird external OIDC — add Zitadel as identity provider alongside local auth.
+# Requires zitadel_service_pat (below) + netbird_admin_pat (above).
+# After bootstrap, re-deploy NetBird to enable: deploy-netbird.yml
+# netbird_oidc_provider_name: "Platform OIDC"  # Login button text
+# netbird_oidc_client_id: "<CLIENT_ID>"         # Auto-created if zitadel_service_pat is set
+# netbird_oidc_client_secret: "<CLIENT_SECRET>"
+
 # DNS records for NetBird (round-robin on both servers)
 netbird_dns_records:
   - name: netbird.example.com
@@ -51,6 +58,12 @@ netbird_dns_records:
 # ============================================================================
 # If left undefined, auto-generated and persisted in .generated_secrets/
 powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
+
+# PowerDNS-Admin OIDC — protect the web UI via Zitadel login.
+# Uses PDA's native OIDC support (env vars always override DB settings).
+# Same automated/manual options as Gatus — requires zitadel_service_pat (above).
+# powerdns_admin_oidc_client_id: "<CLIENT_ID>"
+# powerdns_admin_oidc_client_secret: "<CLIENT_SECRET>"
 
 # ============================================================================
 # Zitadel IAM (central identity provider)

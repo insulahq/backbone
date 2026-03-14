@@ -125,6 +125,161 @@
                    createdb -U postgres -O {{ powerdns_admin_sqla_db_user }} {{ powerdns_admin_sqla_db_name }}"
       changed_when: false
 
+# --- OIDC application creation in Zitadel (automated, requires PAT) ---
+# Creates an OIDC application for PowerDNS-Admin in Zitadel if:
+#   1. powerdns_admin_enabled is true (PDA runs on this node)
+#   2. zitadel_service_pat is set (admin created a service account PAT)
+#   3. powerdns_admin_oidc_client_id is NOT already set (app not yet created)
+# The client_id and client_secret are persisted to .generated_secrets/
+
+- name: Load persisted PowerDNS-Admin OIDC client_id if available
+  set_fact:
+    powerdns_admin_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/powerdns_admin_oidc_client_id', errors='ignore') | default('', true) }}"
+  when: powerdns_admin_oidc_client_id is not defined or powerdns_admin_oidc_client_id | length == 0
+  run_once: true
+  tags: [powerdns, dns]
+
+- name: Load persisted PowerDNS-Admin OIDC client_secret if available
+  set_fact:
+    powerdns_admin_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/powerdns_admin_oidc_client_secret', errors='ignore') | default('', true) }}"
+  when: powerdns_admin_oidc_client_secret is not defined or powerdns_admin_oidc_client_secret | length == 0
+  run_once: true
+  no_log: true
+  tags: [powerdns, dns]
+
+- name: Search for Phoenix Host project in Zitadel
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      queries:
+        - nameQuery:
+            name: "Phoenix Host"
+            method: TEXT_QUERY_METHOD_EQUALS
+    status_code: 200
+    validate_certs: "{{ powerdns_admin_validate_certs | default(false) }}"
+  register: pdnsadmin_project_search
+  run_once: true
+  when:
+    - powerdns_admin_enabled | bool
+    - zitadel_service_pat | default('') | length > 0
+    - powerdns_admin_oidc_client_id | default('') | length == 0
+  tags: [powerdns, dns]
+
+- name: Create Phoenix Host project if not exists
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "Phoenix Host"
+    status_code: [200]
+    validate_certs: "{{ powerdns_admin_validate_certs | default(false) }}"
+  register: pdnsadmin_project_created
+  run_once: true
+  when:
+    - powerdns_admin_enabled | bool
+    - zitadel_service_pat | default('') | length > 0
+    - powerdns_admin_oidc_client_id | default('') | length == 0
+    - pdnsadmin_project_search.json.result | default([]) | length == 0
+  tags: [powerdns, dns]
+
+- name: Set Zitadel project ID for PowerDNS-Admin
+  set_fact:
+    pdnsadmin_zitadel_project_id: >-
+      {{ (pdnsadmin_project_search.json.result[0].id)
+         if (pdnsadmin_project_search.json.result | default([]) | length > 0)
+         else (pdnsadmin_project_created.json.id | default('')) }}
+  run_once: true
+  when:
+    - powerdns_admin_enabled | bool
+    - zitadel_service_pat | default('') | length > 0
+    - powerdns_admin_oidc_client_id | default('') | length == 0
+  tags: [powerdns, dns]
+
+- name: Create PowerDNS-Admin OIDC application in Zitadel
+  uri:
+    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ pdnsadmin_zitadel_project_id }}/apps/oidc"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ zitadel_service_pat }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "PowerDNS Admin"
+      redirectUris: >-
+        {{
+          groups['dns_servers']
+          | map('extract', hostvars, 'netbird_ip')
+          | select('defined')
+          | map('regex_replace', '(.*)', 'http://\1:' + (powerdns_nginx_admin_port | string) + '/oidc/authorized')
+          | list
+        }}
+      postLogoutRedirectUris: >-
+        {{
+          groups['dns_servers']
+          | map('extract', hostvars, 'netbird_ip')
+          | select('defined')
+          | map('regex_replace', '(.*)', 'http://\1:' + (powerdns_nginx_admin_port | string))
+          | list
+        }}
+      responseTypes:
+        - "OIDC_RESPONSE_TYPE_CODE"
+      grantTypes:
+        - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
+      appType: "OIDC_APP_TYPE_WEB"
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
+      devMode: true
+    status_code: [200]
+    validate_certs: "{{ powerdns_admin_validate_certs | default(false) }}"
+  register: pdnsadmin_oidc_app
+  run_once: true
+  when:
+    - powerdns_admin_enabled | bool
+    - zitadel_service_pat | default('') | length > 0
+    - powerdns_admin_oidc_client_id | default('') | length == 0
+    - pdnsadmin_zitadel_project_id | default('') | length > 0
+  tags: [powerdns, dns]
+
+- name: Persist PowerDNS-Admin OIDC client_id
+  copy:
+    content: "{{ pdnsadmin_oidc_app.json.clientId }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/powerdns_admin_oidc_client_id"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: pdnsadmin_oidc_app is changed
+  tags: [powerdns, dns]
+
+- name: Persist PowerDNS-Admin OIDC client_secret
+  copy:
+    content: "{{ pdnsadmin_oidc_app.json.clientSecret }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/powerdns_admin_oidc_client_secret"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: pdnsadmin_oidc_app is changed
+  tags: [powerdns, dns]
+
+- name: Set PowerDNS-Admin OIDC client credentials from Zitadel API response
+  set_fact:
+    powerdns_admin_oidc_client_id: "{{ pdnsadmin_oidc_app.json.clientId }}"
+    powerdns_admin_oidc_client_secret: "{{ pdnsadmin_oidc_app.json.clientSecret }}"
+  run_once: true
+  no_log: true
+  when: pdnsadmin_oidc_app is changed
+  tags: [powerdns, dns]
+
 # --- Deploy PowerDNS stack ---
 
 - name: Deploy PowerDNS configuration
@@ -355,4 +510,5 @@
       - "DNS Server: {{ ansible_default_ipv4.address }}:53 (IPv4+IPv6 dual-stack)"
       - "PowerDNS API: http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }} (NetBird only)"
       - "{{ 'PowerDNS-Admin UI: http://' + powerdns_bind_interface + ':' + powerdns_nginx_admin_port | string + ' (NetBird only)' if powerdns_admin_enabled else 'PowerDNS-Admin: disabled on this node (runs on ' + powerdns_admin_node + ')' }}"
+      - "{{ 'PowerDNS-Admin OIDC: enabled (Zitadel)' if (powerdns_admin_enabled | bool and powerdns_admin_oidc_client_id) else ('PowerDNS-Admin OIDC: disabled — set zitadel_service_pat to enable' if powerdns_admin_enabled | bool else '') }}"
       - "Platform zone: {{ platform_domain }}"

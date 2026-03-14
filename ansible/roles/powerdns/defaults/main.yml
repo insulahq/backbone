@@ -55,5 +55,14 @@ powerdns_db_user: pdns
 # API security
 # powerdns_api_key: <set in vault or group_vars>
 
+# PowerDNS-Admin OIDC via Zitadel (native support)
+# PDA has built-in OIDC — env vars always take precedence over DB-stored settings.
+# When client_id is non-empty, OIDC is enabled and local signup is disabled.
+# Credentials are auto-created via Zitadel Management API when zitadel_service_pat is set.
+powerdns_admin_oidc_client_id: ""
+powerdns_admin_oidc_client_secret: ""
+powerdns_admin_oidc_issuer_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+powerdns_admin_oidc_scopes: "openid email profile"
+
 # Logging
 powerdns_log_level: "4"  # 0=nothing, 9=very verbose
