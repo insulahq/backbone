@@ -1,20 +1,79 @@
 ---
 # Portainer CE — Docker Management ({{ inventory_hostname }})
-# Bound to NetBird IP only — access via http://{{ portainer_bind_interface }}:{{ portainer_port }}
-# No TLS — WireGuard tunnel encrypts traffic. Avoids self-signed cert browser warnings.
+# OAuth2 Proxy handles Zitadel OIDC → proxies to Portainer.
+# Bound to NetBird IP only — not publicly accessible.
+# No TLS — WireGuard tunnel encrypts traffic.
 
 services:
+{% if portainer_oidc_client_id %}
+  # OAuth2 Proxy — Zitadel OIDC authentication gateway
+  oauth2-proxy:
+    image: {{ oauth2_proxy_image }}
+    container_name: portainer-auth
+    restart: unless-stopped
+    depends_on:
+      portainer:
+        condition: service_healthy
+    ports:
+      # User-facing port on NetBird IP — this is what the admin connects to
+      - "{{ portainer_bind_interface }}:{{ portainer_port }}:4180"
+    environment:
+      OAUTH2_PROXY_PROVIDER: "oidc"
+      OAUTH2_PROXY_OIDC_ISSUER_URL: "{{ portainer_oidc_issuer_url }}"
+      OAUTH2_PROXY_CLIENT_ID: "{{ portainer_oidc_client_id }}"
+      OAUTH2_PROXY_CLIENT_SECRET: "{{ portainer_oidc_client_secret }}"
+      OAUTH2_PROXY_COOKIE_SECRET: "{{ portainer_oidc_cookie_secret }}"
+      OAUTH2_PROXY_REDIRECT_URL: "http://{{ portainer_bind_interface }}:{{ portainer_port }}/oauth2/callback"
+      OAUTH2_PROXY_UPSTREAMS: "http://portainer:9000"
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
+      # Allow all authenticated Zitadel users (no role restriction)
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # HTTP — no TLS (WireGuard encrypts transit)
+      OAUTH2_PROXY_COOKIE_SECURE: "false"
+      OAUTH2_PROXY_COOKIE_SAMESITE: "lax"
+      # Skip the "Sign in with..." button — go straight to Zitadel
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      # Pass user info headers to Portainer
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+      # Zitadel OIDC scopes
+      OAUTH2_PROXY_SCOPE: "openid profile email"
+      # Allow Portainer websocket connections (exec, logs)
+      OAUTH2_PROXY_PROXY_WEBSOCKETS: "true"
+    networks:
+      - portainer_internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4180/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+{% endif %}
+
+  # Portainer CE — Docker management UI
   portainer:
     image: {{ portainer_image }}
     container_name: portainer
     restart: unless-stopped
     command: --http-disabled=false --tunnel-server-addr=
+{% if portainer_oidc_client_id %}
+    # No host port — only reachable via oauth2-proxy
+{% else %}
     ports:
-      # Bind to NetBird WireGuard IP only — not reachable from the public internet
       - "{{ portainer_bind_interface }}:{{ portainer_port }}:9000"
+{% endif %}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
+{% if portainer_oidc_client_id %}
+    networks:
+      - portainer_internal
+{% endif %}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/api/system/status"]
       interval: 30s
@@ -29,3 +88,9 @@ services:
 
 volumes:
   portainer_data:
+
+{% if portainer_oidc_client_id %}
+networks:
+  portainer_internal:
+    driver: bridge
+{% endif %}
