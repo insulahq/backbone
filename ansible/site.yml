@@ -21,36 +21,8 @@
 # First run (bootstrapping SSH key): ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 # Subsequent runs use the per-server keys automatically (configured in group_vars/all.yml).
 
-# Pre-play: Generate per-server SSH keypairs locally (no server connection needed).
-# Tags: [always] ensures this runs regardless of --tags filtering.
-# Idempotent: skips generation if key files already exist.
-- name: Generate per-server SSH keypairs (local only)
-  hosts: all
-  gather_facts: false
-  tags: [always]
-  tasks:
-    - name: Create SSH key directory on control machine
-      delegate_to: localhost
-      run_once: true
-      ansible.builtin.file:
-        path: "{{ playbook_dir }}/.generated_secrets/ssh"
-        state: directory
-        mode: '0700'
-
-    - name: Generate ED25519 keypair for {{ inventory_hostname }}
-      delegate_to: localhost
-      ansible.builtin.command: >
-        ssh-keygen -t ed25519
-        -f "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
-        -N "" -C "ansible@{{ inventory_hostname }}"
-      args:
-        creates: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
-
-    - name: Set correct permissions on private key
-      delegate_to: localhost
-      ansible.builtin.file:
-        path: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
-        mode: '0600'
+# Pre-play: Generate per-server SSH keypairs (shared across all playbooks)
+- import_playbook: _ssh-keys.yml
 
 - name: Apply common configuration to all servers
   hosts: all

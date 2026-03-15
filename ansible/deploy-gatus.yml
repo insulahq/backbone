@@ -5,6 +5,9 @@
 # "when: inventory_hostname == postgresql_primary_node" (not run_once).
 # Without serial:1, both hosts run in parallel and the non-primary would
 # start Gatus before the DB exists, causing connection failures.
+
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy Gatus monitoring
   hosts: dns_servers
   serial: 1

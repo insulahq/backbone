@@ -9,6 +9,8 @@
 # Usage:
 #   ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy PostgreSQL primary node first
   hosts: dns_servers
   serial: 1

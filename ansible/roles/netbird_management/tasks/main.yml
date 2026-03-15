@@ -22,14 +22,12 @@
   set_fact:
     netbird_relay_auth_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/netbird_relay_auth_secret length=64 chars=hexdigits') }}"
   when: netbird_relay_auth_secret is not defined
-  run_once: true
   no_log: true
 
 - name: Generate datastore encryption key (once per play)
   set_fact:
     netbird_datastore_encryption_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/netbird_datastore_encryption_key length=32 chars=ascii_letters,digits') }}"
   when: netbird_datastore_encryption_key is not defined
-  run_once: true
   no_log: true
 
 - name: Deploy docker-compose.yml
@@ -164,14 +162,12 @@
   set_fact:
     netbird_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/netbird_oidc_client_id', errors='ignore') | default('', true) }}"
   when: netbird_oidc_client_id is not defined or netbird_oidc_client_id | length == 0
-  run_once: true
   tags: [netbird, netbird_management]
 
 - name: Load persisted NetBird OIDC client_secret if available
   set_fact:
     netbird_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/netbird_oidc_client_secret', errors='ignore') | default('', true) }}"
   when: netbird_oidc_client_secret is not defined or netbird_oidc_client_secret | length == 0
-  run_once: true
   no_log: true
   tags: [netbird, netbird_management]
 

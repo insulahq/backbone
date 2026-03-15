@@ -9,6 +9,8 @@
 #      https://robot.hetzner.com → Storage Box → SSH keys
 #   4. Run without tags to complete deployment
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy backup configuration
   hosts: backup_targets
   tags: [backup]

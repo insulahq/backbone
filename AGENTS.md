@@ -226,6 +226,7 @@ hosting-platform/
 │   ├── README.md
 │   ├── site.yml             # Main playbook (tagged plays)
 │   ├── test-suite.yml       # System test suite (post-deploy verification)
+│   ├── _ssh-keys.yml        # Shared SSH key generation pre-play (imported by all playbooks)
 │   ├── deploy-*.yml         # Targeted playbooks
 │   ├── inventory/
 │   │   └── hosts.yml        # Server inventory (gitignored)
@@ -335,3 +336,4 @@ pre-commit run --all-files
 - Do not force-push to `main` without explicit user approval
 - Do not use `pull: always` in docker_compose_v2 tasks — use `pull: missing` (wasteful re-downloads)
 - Do not change the Zitadel masterkey after initialization — it cannot be rotated (encrypted data becomes inaccessible)
+- Do not remove stale keys from `authorized_keys` during bootstrap — the bootstrapping SSH key and any Hetzner-provisioned keys must remain as recovery fallbacks; per-server keys are added alongside existing keys (`exclusive: false`)

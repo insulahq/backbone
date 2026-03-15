@@ -23,6 +23,8 @@
 # The playbook collects results into _test_results and prints a summary table.
 # Failed tests are reported as Ansible failures for CI integration.
 
+- import_playbook: _ssh-keys.yml
+
 # ============================================================================
 # Play 1: Per-host infrastructure tests
 # ============================================================================

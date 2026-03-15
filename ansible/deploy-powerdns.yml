@@ -10,6 +10,8 @@
 #   ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
 #   ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit ns1
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers
   tags: [powerdns, dns]

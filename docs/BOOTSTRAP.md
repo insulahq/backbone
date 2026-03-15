@@ -47,6 +47,8 @@ This run:
 
 After this step, all subsequent `ansible-playbook` commands use the per-server keys automatically -- no more `-e` override needed.
 
+> **Note:** The bootstrapping SSH key is NOT removed from `authorized_keys` — it remains as a recovery fallback alongside the per-server key (`exclusive: false`). Do not manually remove old keys from `authorized_keys` during bootstrap; the bootstrapping SSH key and any Hetzner-provisioned keys are needed for disaster recovery (see `docs/RECOVERY.md`).
+
 > **Verify:** Confirm the per-server key works before proceeding:
 > ```bash
 > ansible -i inventory/hosts.yml all -m ping
@@ -123,8 +125,8 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
 After enrollment, check the assigned NetBird IPs:
 
 ```bash
-ssh root@<NS1_IP> "netbird status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"localPeerState\"][\"fqdn\"], json.load(sys.stdin)[\"localPeerState\"][\"ip\"])'"
-ssh root@<NS2_IP> "netbird status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"localPeerState\"][\"fqdn\"], json.load(sys.stdin)[\"localPeerState\"][\"ip\"])'"
+ssh root@<NS1_IP> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"fqdn\"], d[\"localPeerState\"][\"ip\"])'"
+ssh root@<NS2_IP> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"fqdn\"], d[\"localPeerState\"][\"ip\"])'"
 ```
 
 **Update** `inventory/hosts.yml` with the assigned `netbird_ip` values for both nodes, and update all NetBird IP references in `group_vars/all.yml`.
@@ -229,7 +231,17 @@ The roles auto-create OIDC applications in Zitadel ("Hosting Platform" project) 
 
 **Zitadel token settings:** For each OIDC application created in Zitadel (visible in the Hosting Platform project), navigate to **Token Settings** and enable **"Include user's profile info in the ID Token"**. This ensures claim mapping (name, email) works correctly in PowerDNS Admin and NetBird.
 
-## Step 13: Run System Test Suite
+## Step 13: Deploy Backups
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-backup.yml
+```
+
+**Manual step:** Register the SSH public key with your Hetzner Storagebox before the first backup run.
+
+> **Important:** The Storagebox SSH key (`restic_ssh_key_src` in `group_vars/all.yml`) is separate from the per-server Ansible SSH keys. By default it points to `~/hosting-platform.key`. If your Storagebox uses a different key, set `restic_ssh_key_src` in `group_vars/all.yml`.
+
+## Step 14: Run System Test Suite
 
 Run the comprehensive test suite to verify all components:
 
@@ -265,14 +277,6 @@ For destructive failover tests (temporarily stops services, then restores):
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 ```
 
-## Step 14: Deploy Backups
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-backup.yml
-```
-
-**Manual step:** Register the SSH public key with your Hetzner Storagebox before the first backup run.
-
 ---
 
 ## Known Manual Steps
@@ -282,7 +286,7 @@ These steps cannot be automated and must be done manually:
 1. **NetBird setup wizard** -- browser-based first-user setup
 2. **PAT and setup key creation** -- via NetBird dashboard
 3. **Zitadel service account + PAT** -- via Zitadel Console (enables OIDC for all services)
-7. **Zitadel token settings** -- enable "Include user's profile info in the ID Token" per OIDC app
-4. **Storagebox SSH key registration** -- via Hetzner Robot panel
-5. **NetBird IP discovery** -- IPs are assigned dynamically on enrollment
-6. **DNS NS records** -- must be set at your domain registrar
+4. **Zitadel token settings** -- enable "Include user's profile info in the ID Token" per OIDC app
+5. **Storagebox SSH key registration** -- via Hetzner Robot panel
+6. **NetBird IP discovery** -- IPs are assigned dynamically on enrollment
+7. **DNS NS records** -- must be set at your domain registrar

@@ -27,7 +27,6 @@
   set_fact:
     zitadel_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_db_password length=32 chars=ascii_letters,digits') }}"
   when: zitadel_db_password is not defined or zitadel_db_password | length == 0
-  run_once: true
   no_log: true
   tags: [zitadel]
 
@@ -36,7 +35,6 @@
   set_fact:
     zitadel_masterkey: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_masterkey length=32 chars=ascii_letters,digits') }}"
   when: zitadel_masterkey is not defined or zitadel_masterkey | length == 0
-  run_once: true
   no_log: true
   tags: [zitadel]
 
@@ -44,7 +42,6 @@
   set_fact:
     zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=24 chars=ascii_letters,digits') }}"
   when: zitadel_admin_password is not defined or zitadel_admin_password | length == 0
-  run_once: true
   no_log: true
   tags: [zitadel]
 

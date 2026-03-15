@@ -115,7 +115,10 @@ restic ls latest --host <DEAD_NODE>
 cd ansible
 
 # 1. Deploy base OS hardening + Docker
-ansible-playbook -i inventory/hosts.yml site.yml --tags common --limit <DEAD_NODE>
+ansible-playbook -i inventory/hosts.yml site.yml --tags common --limit <DEAD_NODE> \
+  -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+# The `-e` override is needed because the re-provisioned server does not
+# have the per-server SSH public key in its `authorized_keys` yet.
 
 # 2. Deploy Traefik
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <DEAD_NODE>
@@ -141,7 +144,13 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml --limit <DEAD_NODE
 # 9. Deploy Zitadel (stateless — just starts and connects to existing PG data)
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml --limit <DEAD_NODE>
 
-# 10. Deploy backups
+# 10. Deploy Gatus monitoring
+ansible-playbook -i inventory/hosts.yml deploy-gatus.yml --limit <DEAD_NODE>
+
+# 11. Deploy Portainer
+ansible-playbook -i inventory/hosts.yml deploy-portainer.yml --limit <DEAD_NODE>
+
+# 12. Deploy backups
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml --limit <DEAD_NODE>
 ```
 
@@ -172,6 +181,9 @@ docker restart netbird-server
 1. Provision two new Debian 13 servers on Hetzner
 2. Update `inventory/hosts.yml` with new IPs
 3. Follow `docs/BOOTSTRAP.md` for a fresh deployment
+
+   > **Remember:** Fresh servers require the bootstrapping SSH key override. See BOOTSTRAP.md Step 2 for the `-e` flag.
+
 4. After PostgreSQL is running on the new primary, restore data from backup:
 
 ```bash

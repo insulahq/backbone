@@ -7,6 +7,8 @@
 #   ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 #   ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit ns2
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy standalone Traefik reverse proxy
   hosts: dns_servers
   tags: [traefik]

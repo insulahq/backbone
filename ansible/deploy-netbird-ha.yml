@@ -9,6 +9,8 @@
 # Usage:
 #   ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy standalone Traefik reverse proxy
   hosts: dns_servers
   tags: [traefik]

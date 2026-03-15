@@ -35,7 +35,7 @@ traefik_wildcard_cert: true
 # Both nodes run PowerDNS with shared PostgreSQL HA backend (Native mode),
 # so each node uses its OWN local PowerDNS API for ACME challenges.
 # No single point of failure: if one node is down, the other renews certs independently.
-traefik_pdns_api_url: "http://{{ netbird_ip | default('127.0.0.1') }}:8081"
+traefik_pdns_api_url: "http://{{ netbird_ip | default('127.0.0.1', true) }}:8081"
 
 # Logging
 traefik_log_level: INFO

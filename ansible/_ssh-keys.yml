@@ -1,0 +1,39 @@
+---
+# Shared pre-play: Generate per-server SSH keypairs locally.
+# Imported by site.yml and all deploy-*.yml playbooks.
+#
+# - Tags: [always] ensures this runs regardless of --tags filtering.
+# - become: false prevents sudo on the control machine (global become: true in ansible.cfg).
+# - Idempotent: skips generation if key files already exist.
+#
+# On first run (bootstrap), override the SSH key:
+#   ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+
+- name: Generate per-server SSH keypairs (local only)
+  hosts: all
+  gather_facts: false
+  become: false
+  tags: [always]
+  tasks:
+    - name: Create SSH key directory on control machine
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.generated_secrets/ssh"
+        state: directory
+        mode: '0700'
+
+    - name: Generate ED25519 keypair for {{ inventory_hostname }}
+      delegate_to: localhost
+      ansible.builtin.command: >
+        ssh-keygen -t ed25519
+        -f "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
+        -N "" -C "ansible@{{ inventory_hostname }}"
+      args:
+        creates: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
+
+    - name: Set correct permissions on private key
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
+        mode: '0600'

@@ -26,7 +26,6 @@
   set_fact:
     portainer_oidc_cookie_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/portainer_oidc_cookie_secret length=32 chars=ascii_letters,digits') }}"
   when: portainer_oidc_cookie_secret is not defined or portainer_oidc_cookie_secret | length == 0
-  run_once: true
   no_log: true
   tags: [portainer]
 
@@ -36,14 +35,12 @@
   set_fact:
     portainer_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/portainer_oidc_client_id', errors='ignore') | default('', true) }}"
   when: portainer_oidc_client_id is not defined or portainer_oidc_client_id | length == 0
-  run_once: true
   tags: [portainer]
 
 - name: Load persisted Portainer OIDC client_secret if available
   set_fact:
     portainer_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/portainer_oidc_client_secret', errors='ignore') | default('', true) }}"
   when: portainer_oidc_client_secret is not defined or portainer_oidc_client_secret | length == 0
-  run_once: true
   no_log: true
   tags: [portainer]
 

@@ -1,6 +1,9 @@
 ---
 # Deploy Zitadel IAM
 # Deployed with serial: 1 — first node runs DB migrations before second starts.
+
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy Zitadel IAM
   hosts: dns_servers
   serial: 1

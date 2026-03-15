@@ -2,6 +2,8 @@
 # Deploy NetBird peer client to all mesh nodes
 # Usage: ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy NetBird peers
   hosts: netbird_peers
   tags: [netbird, netbird_peer]

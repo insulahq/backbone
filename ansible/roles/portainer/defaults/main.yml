@@ -17,7 +17,7 @@ oauth2_proxy_image: "quay.io/oauth2-proxy/oauth2-proxy:{{ oauth2_proxy_version }
 portainer_install_dir: /opt/portainer
 
 # Bind interface — NetBird WireGuard IP only (not public)
-portainer_bind_interface: "{{ netbird_ip | default('127.0.0.1') }}"
+portainer_bind_interface: "{{ netbird_ip | default('127.0.0.1', true) }}"
 
 # Port exposed on the NetBird interface (oauth2-proxy listens here)
 portainer_port: 9000

@@ -27,7 +27,6 @@
   set_fact:
     gatus_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/gatus_db_password length=32 chars=ascii_letters,digits') }}"
   when: gatus_db_password is not defined or gatus_db_password | length == 0
-  run_once: true
   no_log: true
   tags: [gatus]
 
@@ -35,7 +34,6 @@
   set_fact:
     gatus_external_token: "{{ lookup('password', playbook_dir + '/.generated_secrets/gatus_external_token length=48 chars=ascii_letters,digits') }}"
   when: gatus_external_token is not defined or gatus_external_token | length == 0
-  run_once: true
   no_log: true
   tags: [gatus]
 
@@ -83,14 +81,12 @@
   set_fact:
     gatus_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_id', errors='ignore') | default('', true) }}"
   when: gatus_oidc_client_id is not defined or gatus_oidc_client_id | length == 0
-  run_once: true
   tags: [gatus]
 
 - name: Load persisted Gatus OIDC client_secret if available
   set_fact:
     gatus_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_secret', errors='ignore') | default('', true) }}"
   when: gatus_oidc_client_secret is not defined or gatus_oidc_client_secret | length == 0
-  run_once: true
   no_log: true
   tags: [gatus]
 

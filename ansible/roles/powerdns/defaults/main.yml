@@ -35,7 +35,7 @@ powerdns_lua_records_enabled: yes
 # Nginx proxy — exposes API on NetBird interface only
 powerdns_nginx_api_port: 8081
 powerdns_nginx_admin_port: 8080
-powerdns_bind_interface: "{{ netbird_ip | default('127.0.0.1') }}"
+powerdns_bind_interface: "{{ netbird_ip | default('127.0.0.1', true) }}"
 
 # PowerDNS-Admin — web UI for managing PowerDNS (ns1 only)
 powerdns_admin_enabled: "{{ inventory_hostname == powerdns_admin_node }}"

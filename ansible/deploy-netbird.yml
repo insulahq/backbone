@@ -2,6 +2,8 @@
 # NetBird-only deployment playbook
 # Deploys NetBird management server on both ns1 and ns2
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy NetBird management server
   hosts: dns_servers
   tags: [netbird, netbird_management]

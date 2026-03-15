@@ -3,6 +3,8 @@
 # Bound to NetBird IP only (not publicly accessible)
 # Usage: ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
 
+- import_playbook: _ssh-keys.yml
+
 - name: Deploy Portainer Docker management
   hosts: dns_servers
   tags: [portainer]

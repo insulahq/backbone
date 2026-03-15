@@ -4,7 +4,7 @@ services:
     container_name: postgresql
     restart: unless-stopped
     ports:
-      - '{{ netbird_ip | default("127.0.0.1") }}:{{ postgresql_port }}:{{ postgresql_port }}'
+      - '{{ netbird_ip | default("127.0.0.1", true) }}:{{ postgresql_port }}:{{ postgresql_port }}'
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
@@ -14,8 +14,8 @@ services:
     # monitoring use this to reach the other node.
     # During bootstrap (no NetBird IPs yet), falls back to peer's public IP.
     extra_hosts:
-      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host']) }}"
-      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] | default(hostvars['ns2']['ansible_host']) }}"
+      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['netbird_ip'] | default(hostvars['ns1']['ansible_host'], true) }}"
+      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['netbird_ip'] | default(hostvars['ns2']['ansible_host'], true) }}"
     environment:
       # Data directory — must match the volume mount target.
       # Explicit because the custom entrypoint replaces the image default.

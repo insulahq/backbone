@@ -107,6 +107,8 @@ zitadel_admin_email: "admin@example.com"
 # ============================================================================
 # Which node is the initial primary (ns1 or ns2)
 # postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
+# Override here if your primary differs from the role default (ns2).
+# postgresql_primary_node: ns2
 
 # REQUIRED: These must be set before first deploy.
 # Generate once with: openssl rand -base64 22
@@ -125,6 +127,9 @@ postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
 backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
 backup_storagebox_path: /backups
+# SSH key for Storagebox SFTP access (separate from per-server Ansible keys).
+# Default: ~/hosting-platform.key — override if your Storagebox uses a different key.
+# restic_ssh_key_src: "~/hosting-platform.key"
 # If left undefined, auto-generated and persisted in .generated_secrets/
 # WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
 restic_password: "<GENERATE: openssl rand -base64 22>"
