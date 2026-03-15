@@ -40,6 +40,18 @@
   notify: restart traefik
   tags: [traefik]
 
+- name: Check if PowerDNS Docker network exists
+  command: docker network inspect powerdns_powerdns_internal
+  register: _pdns_network_check
+  changed_when: false
+  failed_when: false
+  tags: [traefik]
+
+- name: Set PowerDNS network flag for Traefik
+  set_fact:
+    traefik_pdns_network: "{{ _pdns_network_check.rc == 0 }}"
+  tags: [traefik]
+
 - name: Deploy Traefik docker-compose.yml
   template:
     src: docker-compose.yml.j2
