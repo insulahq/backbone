@@ -80,7 +80,7 @@ services:
       - traefik.http.services.netbird-server-h2c.loadbalancer.server.port=80
       - traefik.http.services.netbird-server-h2c.loadbalancer.server.scheme=h2c
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      test: ["CMD-SHELL", "echo > /dev/tcp/localhost/80 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
