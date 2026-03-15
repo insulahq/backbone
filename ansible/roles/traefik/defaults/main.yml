@@ -17,8 +17,8 @@ traefik_container_ip: "172.31.0.254"  # Fixed IPv4 — used as trustedHTTPProxy 
 
 # IPv6 dual-stack for traefik_public network
 traefik_public_ipv6_enabled: true
-traefik_public_subnet_v6: "fd00:traefik::0/112"
-traefik_container_ipv6: "fd00:traefik::fe"  # Fixed IPv6 — trustedHTTPProxy alongside IPv4
+traefik_public_subnet_v6: "fd00:dead:beef:1::/112"
+traefik_container_ipv6: "fd00:dead:beef:1::fe"  # Fixed IPv6 — trustedHTTPProxy alongside IPv4
 
 # ACME / Let's Encrypt
 traefik_acme_email: "admin@{{ platform_domain }}"

@@ -44,7 +44,7 @@ services:
       # Alerting — Gatus external endpoint + fallback webhook
       GATUS_URL: "http://gatus:{{ gatus_local_port | default('8080') }}"
       GATUS_TOKEN: "{{ gatus_external_token | default('') }}"
-      ALERT_WEBHOOK_URL: "{{ alert_webhook_url }}"
+      ALERT_WEBHOOK_URL: "{{ alert_webhook_url | default('') }}"
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []

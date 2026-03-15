@@ -39,7 +39,7 @@ set -e
 export REPMGR_CONFIG_FILE="${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}"
 export PGPASSWORD="${REPMGR_PASSWORD}"
 
-PROMOTE_CHECK="/usr/local/bin/promote-check.sh"
+PROMOTE_CHECK="/tmp/promote-check.sh"
 DEMOTED_MARKER="${PGDATA}/.demoted"
 
 # PIDs for signal handling
@@ -118,7 +118,10 @@ cleanup_stale_files() {
   for f in /var/run/postgresql/.s.PGSQL.5432.lock \
            /var/run/postgresql/.s.PGSQL.5432 \
            /tmp/repmgrd.pid; do
-    [ -e "$f" ] && { echo "==> Removing stale $f"; rm -f "$f"; }
+    if [ -e "$f" ]; then
+      echo "==> Removing stale $f"
+      rm -f "$f"
+    fi
   done
 }
 
@@ -222,7 +225,7 @@ EOF
 determine_role() {
   # --- Check 1: Demotion marker from split-brain recovery ---
   if [ -f "$DEMOTED_MARKER" ]; then
-    echo "==> Found demotion marker from split-brain recovery — forcing STANDBY"
+    echo "==> Found demotion marker from split-brain recovery — forcing STANDBY" >&2
     rm -f "$DEMOTED_MARKER"
     echo "standby"
     return
@@ -230,7 +233,7 @@ determine_role() {
 
   # --- Check 2: First boot (empty data directory) ---
   if [ ! -s "$PGDATA/PG_VERSION" ]; then
-    echo "==> Fresh data directory — using initial role: $REPMGR_INITIAL_ROLE"
+    echo "==> Fresh data directory — using initial role: $REPMGR_INITIAL_ROLE" >&2
     echo "$REPMGR_INITIAL_ROLE"
     return
   fi
@@ -240,8 +243,8 @@ determine_role() {
   local_timeline=$(pg_controldata "$PGDATA" 2>/dev/null \
     | grep "Latest checkpoint's TimeLineID" | awk '{print $NF}')
   if [ -z "$local_timeline" ]; then
-    echo "==> WARNING: Cannot read pg_controldata — data may be corrupt"
-    echo "==> Falling back to initial role: $REPMGR_INITIAL_ROLE"
+    echo "==> WARNING: Cannot read pg_controldata — data may be corrupt" >&2
+    echo "==> Falling back to initial role: $REPMGR_INITIAL_ROLE" >&2
     echo "$REPMGR_INITIAL_ROLE"
     return
   fi
@@ -257,10 +260,10 @@ determine_role() {
       was_standby=true ;;
   esac
 
-  echo "==> Local state: timeline=$local_timeline, db_state='$db_state', was_standby=$was_standby"
+  echo "==> Local state: timeline=$local_timeline, db_state='$db_state', was_standby=$was_standby" >&2
 
   # --- Check 4: Query peer ---
-  echo "==> Checking peer ($PEER_NAME)..."
+  echo "==> Checking peer ($PEER_NAME)..." >&2
   local peer_reachable=false
   local peer_is_primary=false
 
@@ -269,7 +272,9 @@ determine_role() {
       peer_reachable=true
       break
     fi
-    [ "$attempt" -lt 3 ] && { echo "==> Peer not ready (attempt $attempt/3)..."; sleep 5; }
+    if [ "$attempt" -lt 3 ]; then
+      echo "==> Peer not ready (attempt $attempt/3)..." >&2; sleep 5
+    fi
   done
 
   if $peer_reachable; then
@@ -279,28 +284,28 @@ determine_role() {
 
     if [ "$peer_recovery" = "f" ]; then
       peer_is_primary=true
-      echo "==> Peer ($PEER_NAME) is running as PRIMARY"
+      echo "==> Peer ($PEER_NAME) is running as PRIMARY" >&2
     elif [ "$peer_recovery" = "t" ]; then
-      echo "==> Peer ($PEER_NAME) is running as STANDBY"
+      echo "==> Peer ($PEER_NAME) is running as STANDBY" >&2
     else
-      echo "==> Cannot determine peer role (result: $peer_recovery)"
+      echo "==> Cannot determine peer role (result: $peer_recovery)" >&2
     fi
   else
-    echo "==> Peer ($PEER_NAME) is UNREACHABLE"
+    echo "==> Peer ($PEER_NAME) is UNREACHABLE" >&2
   fi
 
   # --- Decision matrix ---
 
   if $peer_reachable && $peer_is_primary; then
     # Peer is primary → we must be standby (regardless of what we were)
-    echo "==> Decision: STANDBY (peer is primary)"
+    echo "==> Decision: STANDBY (peer is primary)" >&2
     echo "standby"
     return
   fi
 
   if $peer_reachable && ! $peer_is_primary; then
     # Peer is standby or unknown → we should be primary
-    echo "==> Decision: PRIMARY (peer is standby or undetermined)"
+    echo "==> Decision: PRIMARY (peer is standby or undetermined)" >&2
     echo "primary"
     return
   fi
@@ -309,7 +314,7 @@ determine_role() {
 
   if $was_standby; then
     # We were a standby — stay standby, let repmgrd promote if needed
-    echo "==> Decision: STANDBY (was standby, peer unreachable — repmgrd will promote if needed)"
+    echo "==> Decision: STANDBY (was standby, peer unreachable — repmgrd will promote if needed)" >&2
     echo "standby"
     return
   fi
@@ -317,7 +322,7 @@ determine_role() {
   # We were NOT a standby (no standby.signal, primary-like state)
   if [ "$local_timeline" -gt 1 ] 2>/dev/null; then
     # Timeline > 1 = we were promoted at some point → we're the valid primary
-    echo "==> Decision: PRIMARY (was promoted, timeline=$local_timeline > 1)"
+    echo "==> Decision: PRIMARY (was promoted, timeline=$local_timeline > 1)" >&2
     echo "primary"
     return
   fi
@@ -327,28 +332,28 @@ determine_role() {
   # superseded by a promotion on the peer. If both nodes restart
   # simultaneously after a failover, the peer (promoted, TL>1) should
   # win. We wait to give the peer time to start and identify itself.
-  echo "==> Timeline=1, initial primary, peer unreachable — waiting for peer before deciding..."
+  echo "==> Timeline=1, initial primary, peer unreachable — waiting for peer before deciding..." >&2
   for i in $(seq 1 18); do  # 18 × 5s = 90s
     if pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; then
       local pr
       pr=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
         -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
       if [ "$pr" = "f" ]; then
-        echo "==> Peer came up as PRIMARY — Decision: STANDBY"
+        echo "==> Peer came up as PRIMARY — Decision: STANDBY" >&2
         echo "standby"
         return
       else
-        echo "==> Peer came up as STANDBY — Decision: PRIMARY"
+        echo "==> Peer came up as STANDBY — Decision: PRIMARY" >&2
         echo "primary"
         return
       fi
     fi
-    echo "==> Waiting for peer ($i/18)..."
+    echo "==> Waiting for peer ($i/18)..." >&2
     sleep 5
   done
 
   # Peer never appeared after 90s — start as primary (best effort)
-  echo "==> Peer did not appear after 90s — Decision: PRIMARY (initial role, no peer)"
+  echo "==> Peer did not appear after 90s — Decision: PRIMARY (initial role, no peer)" >&2
   echo "primary"
 }
 

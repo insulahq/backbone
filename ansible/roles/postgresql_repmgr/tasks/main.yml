@@ -44,8 +44,9 @@
   register: pg_ready
   retries: 40
   delay: 5
-  until: pg_ready.rc == 0
+  until: pg_ready.rc | default(1) == 0
   changed_when: false
+  ignore_errors: false
 
 # Ensure pg_hba.conf allows connections from Docker bridge networks and NetBird mesh
 # This is set during initdb by the entrypoint-wrapper, but added here for idempotency
@@ -148,5 +149,5 @@
     msg:
       - "PostgreSQL deployed on {{ inventory_hostname }}"
       - "Role: {{ 'PRIMARY (node ' + postgresql_node_id | string + ')' if postgresql_is_primary else 'STANDBY (node ' + postgresql_node_id | string + ')' }}"
-      - "Listening: {{ netbird_ip | default('127.0.0.1') }}:{{ postgresql_port }} (NetBird mesh only)"
+      - "Listening: {{ netbird_ip | default('127.0.0.1', true) }}:{{ postgresql_port }} (NetBird mesh only)"
       - "Application DBs: {{ postgresql_databases | map(attribute='name') | list | join(', ') }}"

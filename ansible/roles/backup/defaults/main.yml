@@ -2,6 +2,9 @@
 # Backup Role — Default Variables
 # Deploys Restic backup to Hetzner Storagebox
 
+# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
+backup_enabled: true
+
 # Restic configuration
 restic_version: "0.16.4"
 restic_install_dir: /usr/local/bin

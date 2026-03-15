@@ -124,6 +124,8 @@ postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 # ============================================================================
 # Backup (Restic to Hetzner Storagebox)
 # ============================================================================
+# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
+backup_enabled: true
 backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
 backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
 backup_storagebox_path: /backups

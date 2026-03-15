@@ -2,6 +2,17 @@
 # Backup Role — Main Tasks
 # Deploys Restic backup to Hetzner Storagebox
 
+- name: Skip backup deployment (backup_enabled is false)
+  debug:
+    msg: "Backup deployment skipped — set backup_enabled: true in group_vars/all.yml when Storagebox credentials are available."
+  when: not (backup_enabled | bool)
+  tags: [backup]
+
+- name: End play for this host if backups disabled
+  meta: end_host
+  when: not (backup_enabled | bool)
+  tags: [backup]
+
 - name: Install required packages
   apt:
     name:

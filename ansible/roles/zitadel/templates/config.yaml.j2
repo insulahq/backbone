@@ -21,12 +21,12 @@ Database:
     MaxConnIdleTime: {{ zitadel_db_max_conn_idle_time }}
     User:
       Username: {{ zitadel_db_user }}
-      Password: {{ zitadel_db_password }}
+      Password: "{{ zitadel_db_password }}"
       SSL:
         Mode: disable
     Admin:
       Username: postgres
-      Password: {{ postgresql_superuser_password }}
+      Password: "{{ postgresql_superuser_password }}"
       SSL:
         Mode: disable
 

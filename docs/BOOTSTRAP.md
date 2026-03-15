@@ -21,12 +21,25 @@ ansible-galaxy install -r ansible/requirements.yml
 
 ## Step 1: Configure Inventory and Variables
 
+Before starting, gather the following information:
+
+- **ns1 public IPv4 and IPv6** addresses (from Hetzner console)
+- **ns2 public IPv4 and IPv6** addresses (from Hetzner console)
+- **Primary domain name** to use for the platform (e.g., `example.com`)
+- **Bootstrapping SSH key** file path (e.g., `~/hosting-platform.key`) — the key provisioned by Hetzner or uploaded during server creation
+- **Backup SFTP/SSH credentials** (optional) — Hetzner Storagebox username, hostname, and path. If not available, the backup role will be skipped during bootstrap and can be enabled later.
+
 ```bash
 cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
 cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
 ```
 
-Edit both files with your server IPs, domain, and generated secrets. Leave `netbird_ip` fields empty for now -- they will be assigned after NetBird enrollment.
+Edit both files:
+- Set `ansible_host` and `public_ipv6` for each server in `inventory/hosts.yml`
+- Set `platform_domain` in `group_vars/all.yml`
+- Update all domain references (e.g., `netbird_dns_records`) to use your domain
+- If you have Storagebox credentials, set `backup_storagebox_user`, `backup_storagebox_host`, and `backup_storagebox_path` in `group_vars/all.yml`. If not, set `backup_enabled: false` to skip the backup role.
+- Leave `netbird_ip` fields empty for now -- they will be assigned after NetBird enrollment
 
 > **SSH keys:** The `ansible_ssh_private_key_file` in `group_vars/all.yml` points to auto-generated per-server keys in `.generated_secrets/ssh/`. These are created on first run. For this initial bootstrap, you must override with your bootstrapping SSH key using `-e` (see Step 2).
 

@@ -302,6 +302,13 @@ The test suite auto-creates a `test-runner` user in Zitadel (via `zitadel_servic
 OIDC redirect chains on all protected services. Prints a pass/fail summary table and exits non-zero
 on any failure (CI-compatible).
 
+Failover tests (destructive, opt-in via `--tags failover`):
+- DNS LUA failover — stops Traefik, verifies `ifportup()` excludes dead node, restores
+- PostgreSQL HA — stops primary, waits for repmgrd promotion, tests writes, verifies rejoin
+- NetBird management — stops management server, verifies API via surviving node, restores
+- Zitadel IAM — stops Zitadel, verifies OIDC discovery via surviving node, restores
+- Full node outage — stops all services on one node, verifies DNS/OIDC/PG/Gatus on survivor, restores all
+
 ### Ansible Lint (CI)
 ```bash
 ansible-lint -c ansible/.ansible-lint ansible/
