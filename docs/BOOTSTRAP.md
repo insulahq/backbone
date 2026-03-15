@@ -85,28 +85,34 @@ ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 
 ## Step 4: PostgreSQL HA
 
-Deploy PostgreSQL on both nodes. The primary node is set by `postgresql_primary_node` in `roles/postgresql_repmgr/defaults/main.yml` (default: ns2).
+Deploy PostgreSQL on the **primary node only** first. The standby cannot start until NetBird IPs are assigned (Step 8).
 
-> **What to expect:** Without NetBird IPs, PostgreSQL binds to 127.0.0.1 (local only) and the peer's `extra_hosts` entry falls back to its public IP. Cross-node replication won't work until Step 8 when NetBird IPs are assigned. The primary starts standalone; the standby starts but can't stream from the primary yet. This is expected.
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
-```
-
-**Important:** The `serial: 1` setting deploys one node at a time. The primary must come up first. If `postgresql_primary_node` is `ns2`, the playbook should be run with ns2 listed first in inventory, or deploy manually:
+> **What to expect:** Without NetBird IPs, PostgreSQL binds to 127.0.0.1 (local only). The standby will fail to connect to the primary. Deploy only the primary now; the standby connects after Step 8.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns2
-ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns1
 ```
+
+> **Bootstrap workaround:** ns1 needs a local PostgreSQL for PowerDNS (Step 5). Since ns1 can't replicate from ns2 yet, temporarily start ns1's PostgreSQL as an independent primary:
+> ```bash
+> # On ns1: override REPMGR_INITIAL_ROLE in /opt/postgresql/docker-compose.yml
+> # Change: REPMGR_INITIAL_ROLE: "standby" → REPMGR_INITIAL_ROLE: "primary"
+> # Then: docker compose up -d
+> # After Step 8, this will be redeployed as a proper standby.
+> ```
 
 ## Step 5: PowerDNS
 
-Deploy PowerDNS on both nodes. Both connect to the shared PostgreSQL HA cluster (Native mode — both read-write). No AXFR/NOTIFY needed; zone data replicates via PostgreSQL streaming replication.
+Deploy PowerDNS on **both nodes**. Each node connects to its own local PostgreSQL. The databases are independent until PG replication is established in Step 8.
+
+> **Important:** Both nodes MUST have PowerDNS running before Traefik can issue ACME certificates. The DNS-01 propagation check queries ALL authoritative nameservers (gotcha #77).
 
 ```bash
-ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
+ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit ns2
+ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit ns1
 ```
+
+> **Bootstrap workaround — ACME TXT record sync (gotcha #78):** Since ns1 and ns2 have independent PostgreSQL databases, ACME TXT records created by Traefik on ns2's PowerDNS won't be visible on ns1. After Traefik creates the challenge, manually sync the `_acme-challenge` TXT records from ns2 to ns1's PowerDNS API before the propagation check times out (4 minutes).
 
 The role automatically creates:
 - Base domain A/AAAA records for `example.com` (both server IPs)
@@ -135,11 +141,19 @@ Then:
 
 ## Step 7: NetBird Peer Enrollment
 
-Enroll both servers as NetBird peers:
+Enroll both servers as NetBird peers. **Enroll ns1 first**, then ns2 with a workaround:
 
 ```bash
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit ns1
 ```
+
+> **Bootstrap workaround for ns2 (gotcha #79):** ns2's NetBird peer can't connect to management when DNS round-robin resolves `netbird.<domain>` to itself (circular dependency). Temporarily force resolution to ns1:
+> ```bash
+> # On ns2:
+> echo '<NS1_PUBLIC_IP> netbird.<your-domain>' >> /etc/hosts
+> netbird up --setup-key <SETUP_KEY> --management-url https://netbird.<your-domain> --hostname ns2
+> sed -i '/netbird\.<your-domain>/d' /etc/hosts
+> ```
 
 After enrollment, check the assigned NetBird IPs:
 

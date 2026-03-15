@@ -231,6 +231,17 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 |---|-------|-----|
 | 73 | `ansible.cfg` silently ignored when working directory is world-writable (Ansible security policy) — SSH multiplexing, callbacks, and all custom config disabled | Ensure `chmod 755` on the project directory; or set `ANSIBLE_CONFIG` env var explicitly |
 
+### Traefik & Docker Health Checks
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 74 | Traefik v3.6 filters unhealthy/starting containers from routing — NetBird server had no working healthcheck (no wget/curl in image, `/dev/tcp` is bash-only), so Traefik permanently excluded it, making management/gRPC/OAuth2 routes invisible | Removed Docker healthcheck from netbird-server; Traefik routes to all containers with `traefik.enable=true` regardless of health |
+| 75 | Traefik PDNS API URL `http://127.0.0.1:8081` unreachable from inside container — localhost in container != host localhost | Traefik joins `powerdns_powerdns_internal` Docker network (conditional); uses `http://powerdns-nginx:8081` via container DNS |
+| 76 | Traefik `dynamic.yml` had both `defaultCertificate` (empty) and `defaultGeneratedCert` — conflict blocked ACME wildcard cert generation | Removed empty `defaultCertificate` block; only `defaultGeneratedCert` remains |
+| 77 | ACME DNS-01 propagation check queries ALL authoritative nameservers — ns1 had no PowerDNS during early bootstrap, causing cert issuance to fail | Deploy PowerDNS on BOTH nodes before Traefik ACME (BOOTSTRAP.md updated) |
+| 78 | ACME TXT records created on ns2's PowerDNS not visible on ns1's independent PG — propagation check fails on ns1 | During bootstrap (before PG replication), manually sync `_acme-challenge` TXT records between nodes |
+| 79 | NetBird peer on ns2 can't connect to management when DNS round-robin resolves to self — circular dependency | During bootstrap, temporarily add `/etc/hosts` entry pointing `netbird.phoenix-host.net` to ns1's IP for ns2 enrollment |
+
 ---
 
 ## 6. Repository Structure
