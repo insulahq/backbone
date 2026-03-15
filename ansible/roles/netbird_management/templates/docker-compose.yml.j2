@@ -102,7 +102,7 @@ networks:
       config:
         - subnet: {{ netbird_docker_subnet }}
           gateway: {{ netbird_docker_gateway }}
-        - subnet: "fd00:netbird::0/112"
+        - subnet: "fd00:dead:beef:2::/112"
   traefik_public:
     external: true
   postgresql_default:

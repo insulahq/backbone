@@ -25,10 +25,37 @@
   no_log: true
 
 - name: Generate datastore encryption key (once per play)
+  # NetBird expects a base64-encoded 32-byte key (44 chars).
+  # The lookup('password') generates alphanumeric which base64-decodes to fewer bytes.
+  # Use a pre-generated key file or override via group_vars.
   set_fact:
-    netbird_datastore_encryption_key: "{{ lookup('password', playbook_dir + '/.generated_secrets/netbird_datastore_encryption_key length=32 chars=ascii_letters,digits') }}"
-  when: netbird_datastore_encryption_key is not defined
+    netbird_datastore_encryption_key: "{{ lookup('file', playbook_dir + '/.generated_secrets/netbird_datastore_encryption_key', errors='ignore') | default('', true) }}"
+  when: netbird_datastore_encryption_key is not defined or netbird_datastore_encryption_key | length == 0
   no_log: true
+
+- name: Auto-generate datastore encryption key if missing
+  when: netbird_datastore_encryption_key | default('') | length == 0
+  block:
+    - name: Generate 32-byte base64 encryption key
+      command: openssl rand -base64 32
+      delegate_to: localhost
+      become: false
+      register: _nb_enc_key
+      changed_when: false
+
+    - name: Persist encryption key
+      copy:
+        content: "{{ _nb_enc_key.stdout | trim }}"
+        dest: "{{ playbook_dir }}/.generated_secrets/netbird_datastore_encryption_key"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Set encryption key fact
+      set_fact:
+        netbird_datastore_encryption_key: "{{ _nb_enc_key.stdout | trim }}"
+      no_log: true
 
 - name: Deploy docker-compose.yml
   template:

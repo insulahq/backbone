@@ -19,6 +19,12 @@ A single `site.yml` run will **not** work from scratch due to circular dependenc
 ansible-galaxy install -r ansible/requirements.yml
 ```
 
+7. Project directory must NOT be world-writable (Ansible ignores `ansible.cfg` otherwise):
+
+```bash
+chmod 755 /path/to/hosting-platform/ansible
+```
+
 ## Step 1: Configure Inventory and Variables
 
 Before starting, gather the following information:

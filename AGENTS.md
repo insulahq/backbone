@@ -172,7 +172,7 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 |---|-------|-----|
 | 43 | PostgreSQL 5432 on `0.0.0.0` with `trust` auth for repmgr | Bind to NetBird IP only, use `scram-sha-256` for all pg_hba entries |
 | 44 | `lookup('password', '/dev/null')` regenerates secrets each run | Use `lookup('password', 'path/to/file')` to persist generated secrets |
-| 45 | PowerDNS `.secrets` file and API key in debug output | Removed .secrets file; removed API key from debug msg; pdns.conf mode 0600 |
+| 45 | PowerDNS `.secrets` file and API key in debug output | Removed .secrets file; removed API key from debug msg; pdns.conf mode 0640 (group: pdns UID 953) |
 | 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
 | 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
 | 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
@@ -202,6 +202,34 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 54 | PostgreSQL promote-check only tested IPv4 DNS resolvers | Added `2001:4860:4860::8888` and `2606:4700:4700::1111` |
 | 55 | NetBird STUN port bound to IPv4 only | Added explicit `[::]:3478` binding |
 | 56 | NetBird trusted proxy list was IPv4 only | Added Traefik IPv6 container address to `trustedHTTPProxies` |
+| 66 | Docker IPv6 ULA subnets used non-hex labels (`fd00:traefik::`, `fd00:netbird::`) — invalid IPv6 | Use proper ULA: `fd00:dead:beef:1::/112` (Traefik), `fd00:dead:beef:2::/112` (NetBird) |
+
+### PostgreSQL Entrypoint
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 67 | `set -e` + `[ -e "$f" ] && { cmd }` — returns exit 1 when test is false, crashing the script | Use `if [ -e "$f" ]; then cmd; fi` instead of `&&` short-circuit |
+| 68 | `determine_role()` debug messages (`echo "==> ..."`) on stdout polluted `$(determine_role)` capture — role resolved as multi-line string, fell through to FATAL | Redirect all debug messages to stderr (`>&2`); only the final `echo "primary"` / `echo "standby"` goes to stdout |
+| 69 | `promote-check.sh` written to `/usr/local/bin/` which is not writable by the postgres user in the container | Changed to `/tmp/promote-check.sh` |
+| 70 | `docker_container_exec` returns a dict without `.rc` when container is still starting — `until: pg_ready.rc == 0` fails with "object has no attribute 'rc'" | Use `pg_ready.rc \| default(1) == 0` |
+
+### PowerDNS Deployment
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 71 | `pdns.conf` deployed with mode `0600` (root-only) — PowerDNS container runs as `pdns` user (UID 953) and cannot read it | Changed to `mode: 0640, group: 953` |
+
+### NetBird Deployment
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 72 | `netbird_datastore_encryption_key` generated as 32 alphanumeric chars — NetBird base64-decodes it, producing only 24 bytes instead of required 32 | Generate with `openssl rand -base64 32` (44 chars that decode to 32 bytes); custom task block replaces `lookup('password')` |
+
+### Ansible Control Machine
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 73 | `ansible.cfg` silently ignored when working directory is world-writable (Ansible security policy) — SSH multiplexing, callbacks, and all custom config disabled | Ensure `chmod 755` on the project directory; or set `ANSIBLE_CONFIG` env var explicitly |
 
 ---
 
