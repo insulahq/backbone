@@ -240,7 +240,7 @@
   tags: [common, maintenance]
 
 # Per-server SSH key -- deploy the generated public key so subsequent Ansible runs
-# use the per-server key instead of the bootstrap key.
+# use the per-server key instead of the bootstrapping SSH key.
 # The keypair is generated locally by the pre-play in site.yml.
 - name: Ensure .ssh directory exists for root
   ansible.builtin.file:

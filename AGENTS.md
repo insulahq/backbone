@@ -82,7 +82,7 @@ ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 
 **Fresh deployment requires multiple runs** due to circular dependencies (NetBird needs Traefik certs, Traefik needs PowerDNS API, PowerDNS nginx binds to NetBird IP). See `docs/BOOTSTRAP.md`.
 
-**SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The provisioning key (`hosting-platform.key`) is only needed for the first run:
+**SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform.key`) is only needed for the first run:
 ```bash
 ansible-playbook -i inventory/hosts.yml site.yml --tags common -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 ```
@@ -176,7 +176,7 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
 | 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
 | 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
-| 65 | Single shared SSH key for all servers — compromise of one key exposes all | Per-server ED25519 keypairs auto-generated in `.generated_secrets/ssh/`; provisioning key (`hosting-platform.key`) used only for bootstrap |
+| 65 | Single shared SSH key for all servers — compromise of one key exposes all | Per-server ED25519 keypairs auto-generated in `.generated_secrets/ssh/`; bootstrapping SSH key (`hosting-platform.key`) used only for initial deploy |
 
 ### Disk & Data Growth
 

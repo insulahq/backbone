@@ -9,7 +9,7 @@ A single `site.yml` run will **not** work from scratch due to circular dependenc
 ## Prerequisites
 
 1. Two Hetzner VPS with Debian 13 installed
-2. Root SSH access to both servers (via a provisioning key, e.g., `~/hosting-platform.key`)
+2. Root SSH access to both servers (via a bootstrapping SSH key, e.g., `~/hosting-platform.key`)
 3. DNS zone for your domain (e.g., `example.com`) with NS records pointing to your servers
 4. Hetzner Storagebox for backups
 5. Ansible 2.15+ on your control machine
@@ -28,11 +28,11 @@ cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
 
 Edit both files with your server IPs, domain, and generated secrets. Leave `netbird_ip` fields empty for now -- they will be assigned after NetBird enrollment.
 
-> **SSH keys:** The `ansible_ssh_private_key_file` in `group_vars/all.yml` points to auto-generated per-server keys in `.generated_secrets/ssh/`. These are created on first run. For this initial bootstrap, you must override with your provisioning key using `-e` (see Step 2).
+> **SSH keys:** The `ansible_ssh_private_key_file` in `group_vars/all.yml` points to auto-generated per-server keys in `.generated_secrets/ssh/`. These are created on first run. For this initial bootstrap, you must override with your bootstrapping SSH key using `-e` (see Step 2).
 
 ## Step 2: OS Hardening + Docker
 
-Deploy the `common` role to both servers. Use `-e` to override the SSH key with your provisioning key (the per-server keys don't exist on the servers yet):
+Deploy the `common` role to both servers. Use `-e` to override the SSH key with your bootstrapping SSH key (the per-server keys don't exist on the servers yet):
 
 ```bash
 cd ansible

@@ -18,7 +18,7 @@
 # IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
 #
 # SSH keys: Per-server ED25519 keypairs are auto-generated in .generated_secrets/ssh/.
-# First run (bootstrap): ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+# First run (bootstrapping SSH key): ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 # Subsequent runs use the per-server keys automatically (configured in group_vars/all.yml).
 
 # Pre-play: Generate per-server SSH keypairs locally (no server connection needed).
