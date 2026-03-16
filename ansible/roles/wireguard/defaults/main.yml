@@ -1,0 +1,23 @@
+---
+# WireGuard Role — Default Variables
+# Deploys a simple WireGuard point-to-point tunnel between infrastructure servers.
+# This provides the private backbone for PostgreSQL replication, PowerDNS API,
+# and all internal service communication — with zero external dependencies.
+
+# WireGuard interface name
+wireguard_interface: wg0
+
+# WireGuard listen port (UDP)
+wireguard_port: 51820
+
+# Subnet for WireGuard tunnel (all nodes share this subnet)
+wireguard_subnet: "10.100.0.0/24"
+
+# Installation directory for generated configs
+wireguard_install_dir: /etc/wireguard
+
+# Directory for auto-generated keypairs on the Ansible controller
+wireguard_secrets_dir: "{{ playbook_dir }}/.generated_secrets/wireguard"
+
+# PersistentKeepalive interval (seconds) — keeps NAT mappings alive
+wireguard_keepalive: 25

@@ -44,16 +44,10 @@ services:
       - postgresql_default
     environment:
 {% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
-{% set peer_ip = hostvars[peer]['netbird_ip'] | default('') %}
-{% if peer_ip %}
-      # Multi-host DSN: local PostgreSQL via Docker DNS first, peer via NetBird IP as fallback.
+{% set peer_ip = hostvars[peer]['wireguard_ip'] %}
+      # Multi-host DSN: local PostgreSQL via Docker DNS first, peer via WireGuard IP as fallback.
       # Local-first ordering avoids 30s timeout when the peer is unreachable (gotcha 38).
       NB_STORE_ENGINE_POSTGRES_DSN: "host=postgresql,{{ peer_ip }} port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
-{% else %}
-      # Bootstrap mode: NetBird IPs not yet assigned. Local PostgreSQL only via Docker DNS.
-      # After NetBird enrollment + redeploy (Step 8), the multi-host DSN is used.
-      NB_STORE_ENGINE_POSTGRES_DSN: "host=postgresql port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
-{% endif %}
     ports:
       - '0.0.0.0:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
       - '[::]:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
@@ -69,8 +63,8 @@ services:
       - traefik.http.routers.netbird-grpc.tls=true
       - traefik.http.routers.netbird-grpc.service=netbird-server-h2c
       - traefik.http.routers.netbird-grpc.priority=100
-      # Backend router: relay, API, OAuth2
-      - traefik.http.routers.netbird-backend.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`) || PathPrefix(`/api`) || PathPrefix(`/oauth2`))
+      # Backend router: relay, API
+      - traefik.http.routers.netbird-backend.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`) || PathPrefix(`/api`))
       - traefik.http.routers.netbird-backend.entrypoints=websecure
       - traefik.http.routers.netbird-backend.tls=true
       - traefik.http.routers.netbird-backend.service=netbird-server

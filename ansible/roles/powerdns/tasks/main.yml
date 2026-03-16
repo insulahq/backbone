@@ -4,13 +4,13 @@
 # Both nodes run as Native (read-write) — zone data replicates via
 # PostgreSQL streaming replication, NOT AXFR.
 
-- name: Check if NetBird IP is available
+- name: Check if WireGuard IP is available
   set_fact:
-    has_netbird_ip: "{{ netbird_ip is defined and netbird_ip | length > 0 }}"
+    has_wireguard_ip: "{{ wireguard_ip is defined and wireguard_ip | length > 0 }}"
 
 - name: Display binding interface
   debug:
-    msg: "PowerDNS on {{ inventory_hostname }} will bind API to: {{ powerdns_bind_interface }} ({{ 'NetBird mesh' if has_netbird_ip else 'localhost - will reconfigure after NetBird deployment' }})"
+    msg: "PowerDNS on {{ inventory_hostname }} will bind API to: {{ powerdns_bind_interface }} ({{ 'WireGuard tunnel' if has_wireguard_ip else 'localhost - will reconfigure after WireGuard deployment' }})"
 
 - name: Create PowerDNS installation directory
   file:
@@ -211,7 +211,7 @@
       redirectUris: >-
         {{
           groups['dns_servers']
-          | map('extract', hostvars, 'netbird_ip')
+          | map('extract', hostvars, 'wireguard_ip')
           | select('defined')
           | map('regex_replace', '(.*)', 'http://\1:' + (powerdns_nginx_admin_port | string) + '/oidc/authorized')
           | list
@@ -219,7 +219,7 @@
       postLogoutRedirectUris: >-
         {{
           groups['dns_servers']
-          | map('extract', hostvars, 'netbird_ip')
+          | map('extract', hostvars, 'wireguard_ip')
           | select('defined')
           | map('regex_replace', '(.*)', 'http://\1:' + (powerdns_nginx_admin_port | string))
           | list

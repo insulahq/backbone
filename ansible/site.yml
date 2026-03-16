@@ -2,40 +2,43 @@
 # Hosting Platform -- Infrastructure Playbook
 # Deploys fully redundant DNS + VPN mesh infrastructure on ns1 + ns2
 #
-# Bootstrap order matters:
+# Linear deployment order (no circular dependencies):
 #   0. ssh-keys    -- Generate per-server SSH keypairs (local only, always runs)
 #   1. common      -- OS hardening, Docker, nftables, fail2ban, deploy SSH public keys
-#   2. traefik     -- Reverse proxy (needs to start before NetBird for certs)
-#   3. postgresql  -- HA database (needed by PowerDNS, NetBird, and Zitadel)
-#   4. powerdns    -- DNS servers (both nodes, shared PostgreSQL HA backend)
-#   5. netbird     -- VPN mesh management (needs Traefik + PostgreSQL)
-#   6. peers       -- Enroll all servers in the VPN mesh
-#   7. zitadel     -- Central IAM (needs Traefik + PostgreSQL + PowerDNS for DNS records)
-#   8. gatus       -- Monitoring dashboard + alert receiver (needs Traefik + PostgreSQL + PowerDNS)
-#   9. portainer   -- Docker management UI (needs NetBird IPs, internal only)
-#  10. backup      -- Restic backup to Hetzner Storagebox
-#
-# IMPORTANT: Fresh deployment requires multiple runs. See docs/BOOTSTRAP.md
+#   2. wireguard   -- Point-to-point WireGuard tunnel (infrastructure backbone)
+#   3. postgresql  -- HA database bound to WireGuard IPs (replication works immediately)
+#   4. powerdns    -- Authoritative DNS (both nodes, shared PostgreSQL HA backend)
+#   5. traefik     -- Reverse proxy + ACME wildcard cert (uses PowerDNS API via WireGuard IP)
+#   6. zitadel     -- Central IAM / OIDC provider (needs Traefik + PostgreSQL + PowerDNS)
+#   7. netbird     -- VPN mesh management (uses Zitadel for auth, PostgreSQL for state)
+#   8. peers       -- Enroll servers in the VPN mesh (manual: user provides setup key)
+#   9. portainer   -- Docker management UI (Zitadel OIDC, WireGuard-only access)
+#  10. gatus       -- Monitoring dashboard + alerting (Zitadel OIDC)
+#  11. backup      -- Restic incremental backup to Hetzner Storagebox
 #
 # SSH keys: Per-server ED25519 keypairs are auto-generated in .generated_secrets/ssh/.
-# First run (bootstrapping SSH key): ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+# First run (bootstrapping SSH key):
+#   ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 # Subsequent runs use the per-server keys automatically (configured in group_vars/all.yml).
 
 # Pre-play: Generate per-server SSH keypairs (shared across all playbooks)
 - import_playbook: _ssh-keys.yml
 
+# Step 1: OS hardening, Docker, nftables, fail2ban, SSH keys
 - name: Apply common configuration to all servers
   hosts: all
   tags: [common]
   roles:
     - common
 
-- name: Deploy Traefik reverse proxy
+# Step 2: WireGuard infrastructure tunnel (zero external dependencies)
+- name: Deploy WireGuard tunnel between servers
   hosts: dns_servers
-  tags: [traefik]
+  tags: [wireguard]
   roles:
-    - traefik
+    - wireguard
 
+# Step 3: PostgreSQL HA — primary first, then standby
 - name: Deploy PostgreSQL primary node first
   hosts: dns_servers
   serial: 1
@@ -52,24 +55,21 @@
     - role: postgresql_repmgr
       when: inventory_hostname != postgresql_primary_node
 
+# Step 4: PowerDNS authoritative DNS (both nodes, shared PG backend)
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers
   tags: [powerdns, dns]
   roles:
     - powerdns
 
-- name: Deploy NetBird management server
+# Step 5: Traefik reverse proxy + ACME wildcard TLS cert
+- name: Deploy Traefik reverse proxy
   hosts: dns_servers
-  tags: [netbird, netbird_management]
+  tags: [traefik]
   roles:
-    - netbird_management
+    - traefik
 
-- name: Deploy NetBird peers
-  hosts: netbird_peers
-  tags: [netbird, netbird_peer]
-  roles:
-    - netbird_peer
-
+# Step 6: Zitadel IAM (OIDC provider for all services)
 - name: Deploy Zitadel IAM
   hosts: dns_servers
   serial: 1
@@ -77,6 +77,28 @@
   roles:
     - zitadel
 
+# Step 7: NetBird VPN mesh management (Zitadel auth, PG backend)
+- name: Deploy NetBird management server
+  hosts: dns_servers
+  tags: [netbird, netbird_management]
+  roles:
+    - netbird_management
+
+# Step 8: NetBird peer enrollment (requires setup key from user)
+- name: Deploy NetBird peers
+  hosts: netbird_peers
+  tags: [netbird, netbird_peer]
+  roles:
+    - netbird_peer
+
+# Step 9: Portainer Docker management (Zitadel OIDC, WireGuard-only)
+- name: Deploy Portainer Docker management
+  hosts: dns_servers
+  tags: [portainer]
+  roles:
+    - portainer
+
+# Step 10: Gatus monitoring dashboard (Zitadel OIDC)
 - name: Deploy Gatus monitoring
   hosts: dns_servers
   serial: 1
@@ -84,12 +106,7 @@
   roles:
     - gatus
 
-- name: Deploy Portainer Docker management
-  hosts: dns_servers
-  tags: [portainer]
-  roles:
-    - portainer
-
+# Step 11: Backup to Hetzner Storagebox
 - name: Deploy backup configuration
   hosts: backup_targets
   tags: [backup]

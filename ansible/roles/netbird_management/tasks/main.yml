@@ -84,40 +84,6 @@
     pull: missing
     state: present
 
-# Sync idp.db (Dex SQLite credential store) from NS1 → NS2 on every deploy.
-# idp.db holds admin user bcrypt password hashes for dashboard login. It lives in
-# the Docker volume (NOT in PostgreSQL), so it is NOT replicated automatically.
-# Without this sync, NS2 has an empty Dex DB and dashboard login fails when NS1
-# is down. We copy NS1's file every time so NS2 always has the latest credentials.
-# Sync idp.db (Dex SQLite credential store) from NS1 → NS2.
-# ignore_errors on the block because on first deploy, idp.db may not exist yet
-# (created only after the setup wizard is completed manually).
-- name: Sync idp.db from NS1 to NS2
-  when: inventory_hostname == 'ns2'
-  ignore_errors: true
-  block:
-    - name: Extract idp.db from NS1 netbird container to NS1 host
-      delegate_to: ns1
-      shell: docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp-netbird.db
-      changed_when: false
-
-    - name: Fetch idp.db from NS1 to Ansible controller
-      delegate_to: ns1
-      fetch:
-        src: /tmp/idp-netbird.db
-        dest: /tmp/idp-netbird-ns1.db
-        flat: yes
-
-    - name: Copy idp.db from controller to NS2 host
-      copy:
-        src: /tmp/idp-netbird-ns1.db
-        dest: /tmp/idp-netbird.db
-        mode: '0600'
-
-    - name: Inject idp.db into NS2 netbird container
-      shell: docker cp /tmp/idp-netbird.db netbird-server:/var/lib/netbird/idp.db
-      notify: restart netbird
-
 - name: Wait for NetBird API to be ready
   uri:
     url: "https://{{ netbird_dashboard_domain }}/api/instance"
@@ -178,12 +144,21 @@
       debug:
         msg: "NetBird peer DNS domain set to: {{ nb_account_update.json.settings.dns_domain }}"
 
-# --- External OIDC provider (Zitadel) via NetBird identity-providers API ---
-# Adds Zitadel as an external IdP alongside local auth. Requires both:
-#   - zitadel_service_pat (to create the OIDC app in Zitadel)
-#   - netbird_admin_pat (to add the IdP in NetBird)
-# The embedded local auth remains as fallback. Login page shows a
-# "Platform OIDC" button (configurable via netbird_oidc_provider_name).
+# --- Zitadel OIDC provider (primary auth) ---
+# Zitadel is the sole authentication provider. The OIDC app is created
+# automatically via the Zitadel Management API. zitadel_service_pat is required.
+
+- name: Assert zitadel_service_pat is defined (required for OIDC auth)
+  assert:
+    that:
+      - zitadel_service_pat is defined
+      - zitadel_service_pat | length > 0
+    fail_msg: >-
+      zitadel_service_pat must be defined. NetBird requires Zitadel as its
+      authentication provider. Set zitadel_service_pat in group_vars/all.yml
+      or pass it as an extra variable.
+  run_once: true
+  tags: [netbird, netbird_management]
 
 - name: Load persisted NetBird OIDC client_id if available
   set_fact:
@@ -198,176 +173,108 @@
   no_log: true
   tags: [netbird, netbird_management]
 
-- name: Search for Hosting Platform project in Zitadel (for NetBird)
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      queries:
-        - nameQuery:
-            name: "Hosting Platform"
-            method: TEXT_QUERY_METHOD_EQUALS
-    status_code: 200
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
-  register: nb_oidc_project_search
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - netbird_admin_pat is defined
-    - netbird_admin_pat != 'REPLACE_WITH_YOUR_PAT'
-    - netbird_oidc_client_id | default('') | length == 0
-    - not (result.json.setup_required | default(false))
+- name: Create Zitadel OIDC app for NetBird (if credentials not yet persisted)
+  when: netbird_oidc_client_id | default('') | length == 0
   tags: [netbird, netbird_management]
+  block:
+    - name: Search for Hosting Platform project in Zitadel (for NetBird)
+      uri:
+        url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          queries:
+            - nameQuery:
+                name: "Hosting Platform"
+                method: TEXT_QUERY_METHOD_EQUALS
+        status_code: 200
+        validate_certs: "{{ netbird_validate_certs | default(false) }}"
+      register: nb_oidc_project_search
+      run_once: true
 
-- name: Create Hosting Platform project if not exists (for NetBird)
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "Hosting Platform"
-    status_code: [200]
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
-  register: nb_oidc_project_created
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - netbird_admin_pat is defined
-    - netbird_oidc_client_id | default('') | length == 0
-    - nb_oidc_project_search.json.result | default([]) | length == 0
-  tags: [netbird, netbird_management]
+    - name: Create Hosting Platform project if not exists (for NetBird)
+      uri:
+        url: "https://{{ zitadel_domain }}/management/v1/projects"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          name: "Hosting Platform"
+        status_code: [200]
+        validate_certs: "{{ netbird_validate_certs | default(false) }}"
+      register: nb_oidc_project_created
+      run_once: true
+      when: nb_oidc_project_search.json.result | default([]) | length == 0
 
-- name: Set Zitadel project ID for NetBird
-  set_fact:
-    nb_oidc_zitadel_project_id: >-
-      {{ (nb_oidc_project_search.json.result[0].id)
-         if (nb_oidc_project_search.json.result | default([]) | length > 0)
-         else (nb_oidc_project_created.json.id | default('')) }}
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - netbird_admin_pat is defined
-    - netbird_oidc_client_id | default('') | length == 0
-  tags: [netbird, netbird_management]
+    - name: Set Zitadel project ID for NetBird
+      set_fact:
+        nb_oidc_zitadel_project_id: >-
+          {{ (nb_oidc_project_search.json.result[0].id)
+             if (nb_oidc_project_search.json.result | default([]) | length > 0)
+             else (nb_oidc_project_created.json.id | default('')) }}
+      run_once: true
 
-- name: Create NetBird OIDC application in Zitadel
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ nb_oidc_zitadel_project_id }}/apps/oidc"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "NetBird"
-      redirectUris:
-        - "https://{{ netbird_dashboard_domain }}/oauth2/callback"
-      postLogoutRedirectUris:
-        - "https://{{ netbird_dashboard_domain }}"
-      responseTypes:
-        - "OIDC_RESPONSE_TYPE_CODE"
-      grantTypes:
-        - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
-      appType: "OIDC_APP_TYPE_WEB"
-      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
-    status_code: [200]
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
-  register: nb_oidc_app
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - netbird_admin_pat is defined
-    - netbird_oidc_client_id | default('') | length == 0
-    - nb_oidc_zitadel_project_id | default('') | length > 0
-  tags: [netbird, netbird_management]
+    - name: Create NetBird OIDC application in Zitadel
+      uri:
+        url: "https://{{ zitadel_domain }}/management/v1/projects/{{ nb_oidc_zitadel_project_id }}/apps/oidc"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ zitadel_service_pat }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          name: "NetBird"
+          redirectUris:
+            - "https://{{ netbird_dashboard_domain }}/nb-auth"
+            - "https://{{ netbird_dashboard_domain }}/nb-silent-auth"
+          postLogoutRedirectUris:
+            - "https://{{ netbird_dashboard_domain }}"
+          responseTypes:
+            - "OIDC_RESPONSE_TYPE_CODE"
+          grantTypes:
+            - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
+            - "OIDC_GRANT_TYPE_DEVICE_CODE"
+          appType: "OIDC_APP_TYPE_WEB"
+          authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
+        status_code: [200]
+        validate_certs: "{{ netbird_validate_certs | default(false) }}"
+      register: nb_oidc_app
+      run_once: true
+      when: nb_oidc_zitadel_project_id | default('') | length > 0
 
-- name: Persist NetBird OIDC client_id
-  copy:
-    content: "{{ nb_oidc_app.json.clientId }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/netbird_oidc_client_id"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  when: nb_oidc_app is changed
-  tags: [netbird, netbird_management]
+    - name: Persist NetBird OIDC client_id
+      copy:
+        content: "{{ nb_oidc_app.json.clientId }}"
+        dest: "{{ playbook_dir }}/.generated_secrets/netbird_oidc_client_id"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: nb_oidc_app is changed
 
-- name: Persist NetBird OIDC client_secret
-  copy:
-    content: "{{ nb_oidc_app.json.clientSecret }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/netbird_oidc_client_secret"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  no_log: true
-  when: nb_oidc_app is changed
-  tags: [netbird, netbird_management]
+    - name: Persist NetBird OIDC client_secret
+      copy:
+        content: "{{ nb_oidc_app.json.clientSecret }}"
+        dest: "{{ playbook_dir }}/.generated_secrets/netbird_oidc_client_secret"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      no_log: true
+      when: nb_oidc_app is changed
 
-- name: Set NetBird OIDC client credentials from Zitadel API response
-  set_fact:
-    netbird_oidc_client_id: "{{ nb_oidc_app.json.clientId }}"
-    netbird_oidc_client_secret: "{{ nb_oidc_app.json.clientSecret }}"
-  run_once: true
-  no_log: true
-  when: nb_oidc_app is changed
-  tags: [netbird, netbird_management]
-
-# Now add Zitadel as an external IdP in NetBird via the identity-providers API
-
-- name: List existing identity providers in NetBird
-  uri:
-    url: "https://{{ netbird_dashboard_domain }}/api/identity-providers"
-    method: GET
-    headers:
-      Authorization: "Token {{ netbird_admin_pat }}"
-    status_code: 200
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
-  register: nb_idp_list
-  run_once: true
-  when:
-    - netbird_oidc_client_id | default('') | length > 0
-    - netbird_admin_pat is defined
-    - netbird_admin_pat != 'REPLACE_WITH_YOUR_PAT'
-    - not (result.json.setup_required | default(false))
-  tags: [netbird, netbird_management]
-
-- name: Check if Zitadel IdP already exists in NetBird
-  set_fact:
-    nb_zitadel_idp_exists: "{{ nb_idp_list.json | default([]) | selectattr('issuer', 'equalto', netbird_oidc_issuer_url) | list | length > 0 }}"
-  run_once: true
-  when: nb_idp_list is not skipped
-  tags: [netbird, netbird_management]
-
-- name: Add Zitadel as external identity provider in NetBird
-  uri:
-    url: "https://{{ netbird_dashboard_domain }}/api/identity-providers"
-    method: POST
-    headers:
-      Authorization: "Token {{ netbird_admin_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      type: "zitadel"
-      name: "{{ netbird_oidc_provider_name }}"
-      issuer: "{{ netbird_oidc_issuer_url }}"
-      client_id: "{{ netbird_oidc_client_id }}"
-      client_secret: "{{ netbird_oidc_client_secret }}"
-    status_code: [200, 201]
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
-  run_once: true
-  when:
-    - netbird_oidc_client_id | default('') | length > 0
-    - nb_idp_list is not skipped
-    - not (nb_zitadel_idp_exists | default(false) | bool)
-  tags: [netbird, netbird_management]
+    - name: Set NetBird OIDC client credentials from Zitadel API response
+      set_fact:
+        netbird_oidc_client_id: "{{ nb_oidc_app.json.clientId }}"
+        netbird_oidc_client_secret: "{{ nb_oidc_app.json.clientSecret }}"
+      run_once: true
+      no_log: true
+      when: nb_oidc_app is changed
 
 # --- DNS record creation (via PowerDNS API) ---
 
@@ -496,5 +403,5 @@
     msg:
       - "NetBird deployed on {{ inventory_hostname }}"
       - "Dashboard: https://{{ netbird_dashboard_domain }}"
-      - "Setup required: {{ (result.json.setup_required | default(false)) }}"
-      - "{{ 'External OIDC: enabled (' + netbird_oidc_provider_name + ' via Zitadel)' if netbird_oidc_client_id else 'External OIDC: disabled — set zitadel_service_pat + netbird_admin_pat to enable' }}"
+      - "Auth: Zitadel OIDC ({{ netbird_oidc_issuer_url }})"
+      - "OIDC client_id: {{ netbird_oidc_client_id | default('not yet created') }}"

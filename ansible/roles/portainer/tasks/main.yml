@@ -112,7 +112,7 @@
       redirectUris: >-
         {{
           groups['dns_servers']
-          | map('extract', hostvars, 'netbird_ip')
+          | map('extract', hostvars, 'wireguard_ip')
           | select('defined')
           | map('regex_replace', '(.*)', 'http://\1:' + (portainer_port | string) + '/oauth2/callback')
           | list
@@ -120,7 +120,7 @@
       postLogoutRedirectUris: >-
         {{
           groups['dns_servers']
-          | map('extract', hostvars, 'netbird_ip')
+          | map('extract', hostvars, 'wireguard_ip')
           | select('defined')
           | map('regex_replace', '(.*)', 'http://\1:' + (portainer_port | string))
           | list

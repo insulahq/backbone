@@ -27,14 +27,25 @@ table inet filter {
 {% endif %}
     
 {% if 'dns_servers' in group_names %}
-    # NetBird management server — allow HTTPS (management UI + signal server)
+    # HTTPS — Traefik reverse proxy (all services: Zitadel, NetBird, Gatus, etc.)
     tcp dport 443 accept
+    # HTTP — redirect to HTTPS via Traefik
+    tcp dport 80 accept
     
     # NetBird relay TURN server
     udp dport 10000 accept
+    
+    # NetBird STUN
+    udp dport {{ netbird_stun_port | default(3478) }} accept
 {% endif %}
     
-    # WireGuard (NetBird mesh)
+    # WireGuard infrastructure tunnel (wg0)
+    udp dport {{ wireguard_port | default(51820) }} accept
+    
+    # Allow all traffic on WireGuard interface (trusted backbone)
+    iifname "{{ wireguard_interface | default('wg0') }}" accept
+    
+    # NetBird mesh (wt0) — WireGuard-based overlay for Phase 2 peers
     udp dport 51820 accept
     
 {% if ssh_break_glass_enabled %}

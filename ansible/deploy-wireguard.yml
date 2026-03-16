@@ -1,0 +1,15 @@
+---
+# Hosting Platform — Deploy WireGuard Infrastructure Tunnel
+# Establishes a point-to-point WireGuard tunnel between all dns_servers nodes.
+# This is the infrastructure backbone — all internal services bind to WireGuard IPs.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml deploy-wireguard.yml
+
+- import_playbook: _ssh-keys.yml
+
+- name: Deploy WireGuard infrastructure tunnel
+  hosts: dns_servers
+  tags: [wireguard]
+  roles:
+    - wireguard

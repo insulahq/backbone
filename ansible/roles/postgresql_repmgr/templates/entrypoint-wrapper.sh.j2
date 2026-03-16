@@ -268,7 +268,7 @@ determine_role() {
   local peer_is_primary=false
 
   for attempt in 1 2 3; do
-    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; then
+    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 >/dev/null 2>&1; then
       peer_reachable=true
       break
     fi
@@ -334,7 +334,7 @@ determine_role() {
   # win. We wait to give the peer time to start and identify itself.
   echo "==> Timeline=1, initial primary, peer unreachable — waiting for peer before deciding..." >&2
   for i in $(seq 1 18); do  # 18 × 5s = 90s
-    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; then
+    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 >/dev/null 2>&1; then
       local pr
       pr=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
         -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")

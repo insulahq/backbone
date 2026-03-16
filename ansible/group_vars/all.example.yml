@@ -40,21 +40,19 @@ netbird_redundancy: dns_round_robin
 netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
 netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
-# NetBird external OIDC — add Zitadel as identity provider alongside local auth.
-# Requires zitadel_service_pat (below) + netbird_admin_pat (above).
-# After bootstrap, re-deploy NetBird to enable: deploy-netbird.yml
-# netbird_oidc_provider_name: "Platform OIDC"  # Login button text
+# NetBird OIDC — Zitadel is the sole auth provider (no embedded IdP).
+# Requires zitadel_service_pat (below). Credentials are auto-created via Zitadel API.
 # netbird_oidc_client_id: "<CLIENT_ID>"         # Auto-created if zitadel_service_pat is set
 # netbird_oidc_client_secret: "<CLIENT_SECRET>"
 
 # DNS records for NetBird (round-robin on both servers)
 netbird_dns_records:
-  - name: netbird.example.com
+  - name: vpn.example.com
     type: A
     ips:
       - <NS1_PUBLIC_IP>
       - <NS2_PUBLIC_IP>
-  - name: netbird.example.com
+  - name: vpn.example.com
     type: AAAA
     ips:
       - <NS1_PUBLIC_IPV6>
@@ -119,7 +117,7 @@ postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 
 # NetBird DSN is built dynamically by the template from the variables above.
 # No need to set it manually. Multi-host failover uses Docker DNS (local)
-# + the peer's netbird_ip (when available).
+# + the peer's wireguard_ip.
 
 # ============================================================================
 # Backup (Restic to Hetzner Storagebox)

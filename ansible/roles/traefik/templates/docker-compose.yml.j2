@@ -9,9 +9,8 @@ services:
 {% if traefik_public_ipv6_enabled | default(true) %}
         ipv6_address: {{ traefik_container_ipv6 }}
 {% endif %}
-{% if traefik_pdns_network | default(false) %}
-      powerdns_powerdns_internal: {}  # Access PowerDNS API for DNS-01 ACME challenges
-{% endif %}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - "--log.level={{ traefik_log_level }}"
       - "--accesslog=true"
@@ -73,7 +72,4 @@ networks:
   traefik_public:
     external: true
     name: {{ traefik_public_network }}
-{% if traefik_pdns_network | default(false) %}
-  powerdns_powerdns_internal:
-    external: true
-{% endif %}
+

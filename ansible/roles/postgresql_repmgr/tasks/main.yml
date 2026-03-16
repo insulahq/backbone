@@ -149,5 +149,5 @@
     msg:
       - "PostgreSQL deployed on {{ inventory_hostname }}"
       - "Role: {{ 'PRIMARY (node ' + postgresql_node_id | string + ')' if postgresql_is_primary else 'STANDBY (node ' + postgresql_node_id | string + ')' }}"
-      - "Listening: {{ netbird_ip | default('127.0.0.1', true) }}:{{ postgresql_port }} (NetBird mesh only)"
+      - "Listening: {{ wireguard_ip | default('127.0.0.1', true) }}:{{ postgresql_port }} (WireGuard tunnel only)"
       - "Application DBs: {{ postgresql_databases | map(attribute='name') | list | join(', ') }}"

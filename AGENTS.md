@@ -8,16 +8,18 @@
 
 Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Hosting Platform). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
 
-**Scope:** Two Debian 13 servers running PowerDNS, Traefik, PostgreSQL HA, NetBird VPN mesh, and Restic backups.
+**Scope:** Two Debian 13 servers running WireGuard, PowerDNS, Traefik, PostgreSQL HA, NetBird VPN mesh, Zitadel IAM, and Restic backups.
 
 **Servers:**
 
-| Server | Location | Role |
-|--------|----------|------|
-| ns1 | Hetzner Falkenstein | PowerDNS (read-write), NetBird management, PostgreSQL standby |
-| ns2 | Hetzner Helsinki | PowerDNS (read-write), NetBird management, PostgreSQL primary |
+| Server | Location | WireGuard IP | Role |
+|--------|----------|-------------|------|
+| ns1 | Hetzner Falkenstein | 10.100.0.1 | PowerDNS (read-write), NetBird management, PostgreSQL standby |
+| ns2 | Hetzner Helsinki | 10.100.0.2 | PowerDNS (read-write), NetBird management, PostgreSQL primary |
 
-PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd promoted NS2).
+**Network Architecture:**
+- **WireGuard (`wg0`)** — Infrastructure backbone. All internal services (PostgreSQL, PowerDNS API, Portainer) bind to WireGuard IPs. Zero external dependencies, established in Step 2.
+- **NetBird (`wt0`)** — Overlay VPN mesh for Phase 2 servers, client access, and remote administration. Uses Zitadel for authentication. Deployed in Step 7 after all dependencies are ready.
 
 ---
 
@@ -26,13 +28,14 @@ PostgreSQL primary/standby swapped after NS1 failure on 2026-03-13 (repmgrd prom
 | Component | Version | Description |
 |-----------|---------|-------------|
 | OS | Debian 13 | Hardened with nftables + fail2ban |
+| WireGuard | kernel | Infrastructure backbone tunnel, zero-dependency private network |
 | PowerDNS | 4.9 | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
 | Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
-| Portainer | 2.24.1 | Docker management UI, NetBird-only access |
+| Portainer | 2.24.1 | Docker management UI, WireGuard-only access |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ### Maintenance Automation
@@ -278,14 +281,15 @@ hosting-platform/
 │   │   └── ns2.yml
 │   └── roles/
 │       ├── common/            # OS hardening, nftables, Docker, fail2ban
+│       ├── wireguard/         # WireGuard infrastructure tunnel (zero-dep backbone)
 │       ├── powerdns/          # PowerDNS (both nodes, shared PostgreSQL HA)
 │       ├── traefik/           # Traefik v3.6 reverse proxy
 │       ├── postgresql_repmgr/ # PostgreSQL 18 + repmgr HA
-│       ├── netbird_management/# NetBird combined server
+│       ├── netbird_management/# NetBird combined server (Zitadel auth)
 │       ├── netbird_peer/      # NetBird peer enrollment
 │       ├── zitadel/           # Zitadel IAM (OIDC/OAuth2, multi-tenant)
 │       ├── gatus/             # Gatus monitoring (HA dashboard + alert receiver)
-│       ├── portainer/         # Portainer CE Docker management (NetBird-only)
+│       ├── portainer/         # Portainer CE Docker management (WireGuard-only)
 │       └── backup/            # Restic backup (with logrotate + notifications)
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure

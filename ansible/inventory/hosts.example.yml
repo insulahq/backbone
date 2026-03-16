@@ -1,6 +1,10 @@
 ---
 # Hosting Platform -- Server Inventory
 # Copy to hosts.yml and fill in your values.
+#
+# IMPORTANT: Before deploying, you must configure glue records at your domain
+# registrar pointing ns1.<domain> and ns2.<domain> to the public IPs below.
+# These servers will be authoritative DNS servers for your domain.
 
 all:
   vars:
@@ -13,17 +17,17 @@ all:
     dns_servers:
       hosts:
         ns1:
-          ansible_host: <NS1_PUBLIC_IP>
+          ansible_host: <NS1_PUBLIC_IPV4>
+          public_ipv6: <NS1_PUBLIC_IPV6>
           hostname: ns1.example.com
           location: hetzner_falkenstein
-          netbird_ip: <NS1_NETBIRD_IP>   # Assigned after NetBird enrollment
-          public_ipv6: <NS1_PUBLIC_IPV6> # Hetzner IPv6 address (for AAAA glue records)
+          wireguard_ip: 10.100.0.1        # WireGuard tunnel IP (static, pre-assigned)
         ns2:
-          ansible_host: <NS2_PUBLIC_IP>
+          ansible_host: <NS2_PUBLIC_IPV4>
+          public_ipv6: <NS2_PUBLIC_IPV6>
           hostname: ns2.example.com
           location: hetzner_helsinki
-          netbird_ip: <NS2_NETBIRD_IP>   # Assigned after NetBird enrollment
-          public_ipv6: <NS2_PUBLIC_IPV6> # Hetzner IPv6 address (for AAAA glue records)
+          wireguard_ip: 10.100.0.2        # WireGuard tunnel IP (static, pre-assigned)
 
     netbird_peers:
       hosts:

@@ -36,7 +36,7 @@
     _test_results: []
     _peer: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
     _peer_ip: "{{ hostvars[_peer]['ansible_host'] }}"
-    _peer_netbird_ip: "{{ hostvars[_peer]['netbird_ip'] | default('') }}"
+    _peer_wireguard_ip: "{{ hostvars[_peer]['wireguard_ip'] | default('') }}"
   tasks:
 
     # ------------------------------------------------------------------
@@ -87,7 +87,7 @@
 
     - name: "DNS | PowerDNS API health (via nginx)"
       uri:
-        url: "http://{{ netbird_ip | default('127.0.0.1', true) }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost"
+        url: "http://{{ wireguard_ip | default('127.0.0.1', true) }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost"
         headers:
           X-API-Key: "{{ powerdns_api_key }}"
         status_code: 200
@@ -285,17 +285,17 @@
       tags: [netbird]
 
     - name: "NetBird | Cross-node mesh connectivity (ping peer)"
-      command: "ping -c 2 -W 3 {{ _peer_netbird_ip }}"
+      command: "ping -c 2 -W 3 {{ _peer_wireguard_ip }}"
       register: _t_nb_ping
       changed_when: false
       ignore_errors: true
-      when: _peer_netbird_ip | length > 0
+      when: _peer_wireguard_ip | length > 0
       tags: [netbird, cross_node]
 
     - name: "NetBird | Record result — mesh ping"
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'NetBird mesh ping to ' + _peer, 'host': inventory_hostname, 'passed': _t_nb_ping.rc | default(1) == 0}] }}"
-      when: _peer_netbird_ip | length > 0
+      when: _peer_wireguard_ip | length > 0
       tags: [netbird, cross_node]
 
     # ------------------------------------------------------------------
@@ -590,7 +590,7 @@
     # --- Portainer OAuth2 Proxy redirect chain ---
     - name: "OIDC | Portainer OAuth2 Proxy redirects to Zitadel"
       uri:
-        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1', true) }}:{{ portainer_port | default('9000') }}/"
+        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1', true) }}:{{ portainer_port | default('9000') }}/"
         follow_redirects: none
         status_code: [200, 302, 303, 307, 401, 403]
         timeout: 10
@@ -610,7 +610,7 @@
     # --- PowerDNS Admin OIDC ---
     - name: "OIDC | PowerDNS Admin login page has OIDC button"
       uri:
-        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1', true) }}:{{ powerdns_nginx_admin_port | default('8080') }}/login"
+        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1', true) }}:{{ powerdns_nginx_admin_port | default('8080') }}/login"
         status_code: [200]
         return_content: true
         timeout: 10
@@ -629,27 +629,22 @@
       when: powerdns_admin_oidc_client_id | default('') | length > 0
       tags: [oidc, powerdns_admin]
 
-    # --- NetBird external IdP ---
-    - name: "OIDC | NetBird identity providers include Zitadel"
+    # --- NetBird Zitadel OIDC (primary auth) ---
+    - name: "OIDC | NetBird Zitadel issuer reachable"
       uri:
-        url: "{{ _netbird_url }}/api/identity-providers"
-        headers:
-          Authorization: "Token {{ netbird_admin_pat }}"
+        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/.well-known/openid-configuration"
         status_code: 200
         validate_certs: "{{ netbird_validate_certs | default(false) }}"
         timeout: 10
       register: _t_oidc_netbird
       ignore_errors: true
       run_once: true
-      when:
-        - netbird_admin_pat is defined
-        - netbird_admin_pat != 'REPLACE_WITH_YOUR_PAT'
-        - netbird_oidc_client_id | default('') | length > 0
+      when: netbird_oidc_client_id | default('') | length > 0
       tags: [oidc, netbird]
 
-    - name: "OIDC | Record result — NetBird external IdP"
+    - name: "OIDC | Record result — NetBird Zitadel OIDC"
       set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'NetBird Zitadel IdP configured', 'host': 'cluster', 'passed': _t_oidc_netbird is success and (_t_oidc_netbird.json | default([]) | selectattr('issuer', 'defined') | list | length > 0)}] }}"
+        _cluster_results: "{{ _cluster_results + [{'name': 'NetBird Zitadel OIDC issuer reachable', 'host': 'cluster', 'passed': _t_oidc_netbird is success and (_t_oidc_netbird.json.issuer | default('')) is search('auth\\.' + platform_domain)}] }}"
       run_once: true
       when: netbird_oidc_client_id | default('') | length > 0
       tags: [oidc, netbird]
@@ -699,7 +694,7 @@
     # ------------------------------------------------------------------
     - name: "Portainer | API accessible via NetBird"
       uri:
-        url: "http://{{ hostvars[inventory_hostname]['netbird_ip'] | default('127.0.0.1', true) }}:{{ portainer_port | default('9000') }}/api/system/status"
+        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1', true) }}:{{ portainer_port | default('9000') }}/api/system/status"
         status_code: [200, 302, 401]
         timeout: 10
       register: _t_portainer_api

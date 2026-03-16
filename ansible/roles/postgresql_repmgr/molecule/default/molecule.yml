@@ -31,7 +31,7 @@ provisioner:
     host_vars:
       test-postgresql:
         postgresql_primary_node: test-postgresql
-        netbird_ip: "127.0.0.1"
+        wireguard_ip: "127.0.0.1"
         postgresql_superuser_password: "test_superuser_pass"
         postgresql_repmgr_password: "test_repmgr_pass"
         postgresql_netbird_password: "test_netbird_pass"

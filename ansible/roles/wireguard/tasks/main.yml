@@ -1,0 +1,112 @@
+---
+# WireGuard Role — Main Tasks
+# Deploys a point-to-point WireGuard tunnel between all dns_servers nodes.
+# Keys are auto-generated on the Ansible controller and persisted in .generated_secrets/wireguard/.
+
+- name: Install WireGuard
+  ansible.builtin.apt:
+    name: wireguard
+    state: present
+    update_cache: true
+  tags: [wireguard]
+
+- name: Create WireGuard secrets directory on controller
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ wireguard_secrets_dir }}"
+    state: directory
+    mode: '0700'
+  tags: [wireguard]
+
+- name: Generate WireGuard private key for {{ inventory_hostname }}
+  delegate_to: localhost
+  become: false
+  ansible.builtin.command: wg genkey
+  args:
+    creates: "{{ wireguard_secrets_dir }}/{{ inventory_hostname }}.key"
+  register: _wg_genkey
+  changed_when: _wg_genkey.rc == 0
+  no_log: true
+  tags: [wireguard]
+
+- name: Save private key to file
+  delegate_to: localhost
+  become: false
+  ansible.builtin.copy:
+    content: "{{ _wg_genkey.stdout }}"
+    dest: "{{ wireguard_secrets_dir }}/{{ inventory_hostname }}.key"
+    mode: '0600'
+  when: _wg_genkey is changed
+  no_log: true
+  tags: [wireguard]
+
+- name: Read private key from file
+  delegate_to: localhost
+  become: false
+  ansible.builtin.slurp:
+    src: "{{ wireguard_secrets_dir }}/{{ inventory_hostname }}.key"
+  register: _wg_privkey
+  no_log: true
+  tags: [wireguard]
+
+- name: Derive public key for {{ inventory_hostname }}
+  delegate_to: localhost
+  become: false
+  ansible.builtin.shell: echo '{{ (_wg_privkey.content | b64decode).strip() }}' | wg pubkey
+  register: _wg_pubkey
+  changed_when: false
+  no_log: true
+  tags: [wireguard]
+
+- name: Store public key as fact
+  ansible.builtin.set_fact:
+    wireguard_public_key: "{{ _wg_pubkey.stdout.strip() }}"
+    wireguard_private_key: "{{ (_wg_privkey.content | b64decode).strip() }}"
+  no_log: true
+  tags: [wireguard]
+
+- name: Deploy WireGuard configuration
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ wireguard_install_dir }}/{{ wireguard_interface }}.conf"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: restart wireguard
+  tags: [wireguard]
+
+- name: Enable and start WireGuard tunnel
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wireguard_interface }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [wireguard]
+
+- name: Wait for WireGuard interface to be up
+  ansible.builtin.command: "wg show {{ wireguard_interface }}"
+  register: _wg_status
+  retries: 5
+  delay: 2
+  until: _wg_status.rc == 0
+  changed_when: false
+  tags: [wireguard]
+
+- name: Verify WireGuard IP is assigned
+  ansible.builtin.command: "ip addr show {{ wireguard_interface }}"
+  register: _wg_ip
+  changed_when: false
+  failed_when: wireguard_ip not in _wg_ip.stdout
+  tags: [wireguard]
+
+- name: Display WireGuard status
+  ansible.builtin.debug:
+    msg:
+      - "WireGuard tunnel active on {{ inventory_hostname }}"
+      - "Interface: {{ wireguard_interface }}"
+      - "IP: {{ wireguard_ip }}"
+      - "Port: {{ wireguard_port }}/udp"
+      - "Peers: {{ groups['dns_servers'] | difference([inventory_hostname]) | join(', ') }}"
+  tags: [wireguard]
