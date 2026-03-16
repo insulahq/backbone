@@ -12,7 +12,7 @@ ns1                              ns2
 │ (primary or    │              │ (standby or    │
 │  standby)      │              │  primary)      │
 └────────┬────────┘              └────────┬────────┘
-         │         NetBird mesh           │
+         │       WireGuard tunnel         │
          └────────────────────────────────┘
 ```
 
@@ -53,7 +53,7 @@ If both nodes restart at the same time after a failover (e.g., datacenter-wide p
 ## What It Does
 
 1. **Deploys custom entrypoint wrapper** -- Handles role detection, pg_rewind failback, split-brain watchdog, clean signal handling
-2. **Starts PostgreSQL container** -- Bound to NetBird IP only (not `0.0.0.0`, gotcha 43)
+2. **Starts PostgreSQL container** -- Bound to WireGuard IP only (not `0.0.0.0`, gotcha 43)
 3. **Configures repmgr** -- Auto-generates `repmgr.conf` with hostname-based resolution via `extra_hosts`, `failover_validation_command` for promotion safety
 4. **Creates application databases** -- On primary only (replicated to standby automatically)
 5. **Configures pg_hba.conf** -- Fixes subnet ranges, enforces `scram-sha-256` authentication
@@ -62,7 +62,7 @@ If both nodes restart at the same time after a failover (e.g., datacenter-wide p
 
 Must be deployed after:
 1. `common` -- Docker CE
-2. `netbird_peer` -- NetBird IP for binding (PostgreSQL binds to NetBird IP only)
+2. `wireguard` -- WireGuard tunnel IP for binding (PostgreSQL binds to WireGuard IP only)
 
 ## Key Variables
 
@@ -96,13 +96,13 @@ The PostgreSQL HA cluster is shared by:
 
 - Do NOT use `bitnami/postgresql-repmgr` -- removed from registries (gotcha 11)
 - Entrypoint wrapper uses `--force` flag to handle "already registered" errors (gotcha 12)
-- Docker hairpin NAT: `extra_hosts` maps own hostname to 127.0.0.1, peer to NetBird IP (gotcha 13)
-- pg_hba.conf: Docker bridge `172.16.0.0/12`, NetBird CGNAT `100.64.0.0/10` (gotcha 14)
+- Docker hairpin NAT: `extra_hosts` maps own hostname to 127.0.0.1, peer to WireGuard IP (gotcha 13)
+- pg_hba.conf: Docker bridge `172.16.0.0/12`, WireGuard `10.0.0.0/8` (gotcha 14)
 - Stale `postmaster.pid` cleaned on startup (gotcha 20)
-- repmgrd `conninfo` uses real NetBird IPs via `extra_hosts`, not `127.0.0.1` (gotcha 37)
+- repmgrd `conninfo` uses real WireGuard IPs via `extra_hosts`, not `127.0.0.1` (gotcha 37)
 - Each node lists itself first in multi-host DSN to avoid 30s timeout (gotcha 38)
 - `repmgr` binary is at `/usr/lib/postgresql/18/bin/repmgr`, use `$(which repmgr)` (gotcha 41)
-- PostgreSQL bound to NetBird IP only, `scram-sha-256` for all auth (gotcha 43)
+- PostgreSQL bound to WireGuard IP only, `scram-sha-256` for all auth (gotcha 43)
 - Old wrapper had no failback logic -- old primary restarted as primary creating split-brain (gotcha 49, fixed)
 
 ## Known Limitation

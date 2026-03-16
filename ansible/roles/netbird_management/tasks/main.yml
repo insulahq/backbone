@@ -86,9 +86,13 @@
 
 - name: Wait for NetBird API to be ready
   uri:
-    url: "https://{{ netbird_dashboard_domain }}/api/instance"
+    # Use the server's public IP with Host header to bypass DNS dependency —
+    # the vpn.domain DNS record is created AFTER this check (gotcha 82).
+    url: "https://{{ ansible_host }}/api/instance"
+    headers:
+      Host: "{{ netbird_dashboard_domain }}"
     status_code: 200
-    validate_certs: "{{ netbird_validate_certs | default(false) }}"
+    validate_certs: false
   retries: 30
   delay: 3
   register: result
@@ -98,7 +102,9 @@
 # for all subsequent API calls in this run. Avoids forgetting to flip the variable.
 - name: Check if NetBird TLS certificate is valid (auto-detect)
   uri:
-    url: "https://{{ netbird_dashboard_domain }}/api/instance"
+    url: "https://{{ ansible_host }}/api/instance"
+    headers:
+      Host: "{{ netbird_dashboard_domain }}"
     status_code: 200
     validate_certs: true
   register: netbird_cert_check
@@ -275,6 +281,18 @@
       run_once: true
       no_log: true
       when: nb_oidc_app is changed
+
+# Re-template config.yaml now that OIDC client_id is available.
+# On first deploy, config.yaml was templated before OIDC creation, so the
+# 'audience' field was missing. This re-deploy picks it up (gotcha 84).
+- name: Re-deploy config.yaml with OIDC audience (after first-time creation)
+  template:
+    src: config.yaml.j2
+    dest: "{{ netbird_install_dir }}/config.yaml"
+    mode: '0600'
+  notify: restart netbird
+  when: netbird_oidc_client_id | default('') | length > 0
+  tags: [netbird, netbird_management]
 
 # --- DNS record creation (via PowerDNS API) ---
 

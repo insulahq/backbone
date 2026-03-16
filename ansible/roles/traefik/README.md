@@ -33,7 +33,7 @@ Should be deployed before:
 | `traefik_public_network` | `traefik_public` | Shared Docker network name |
 | `traefik_public_subnet` | `172.31.0.0/24` | Docker network subnet |
 | `traefik_container_ip` | `172.31.0.254` | Fixed IP for Traefik (used as trustedHTTPProxy) |
-| `traefik_pdns_api_url` | `http://{{ netbird_ip }}:8081` | Local PowerDNS API endpoint |
+| `traefik_pdns_api_url` | `http://{{ wireguard_ip }}:8081` | Local PowerDNS API endpoint |
 | `traefik_acme_email` | `admin@{{ platform_domain }}` | Let's Encrypt registration email |
 | `powerdns_api_key` | (external) | PowerDNS API key (passed as env var) |
 

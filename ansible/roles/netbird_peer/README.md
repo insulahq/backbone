@@ -40,7 +40,7 @@ Check the assigned NetBird IP after enrollment:
 netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["localPeerState"]["ip"])'
 ```
 
-Update `inventory/hosts.yml` with the `netbird_ip` value for each server.
+The NetBird IP is separate from the WireGuard infrastructure IP (`wireguard_ip` in inventory).
 
 ## Gotchas
 

@@ -245,6 +245,32 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 78 | ACME TXT records created on ns2's PowerDNS not visible on ns1's independent PG — propagation check fails on ns1 | During bootstrap (before PG replication), manually sync `_acme-challenge` TXT records between nodes |
 | 79 | NetBird peer on ns2 can't connect to management when DNS round-robin resolves to self — circular dependency | During bootstrap, temporarily add `/etc/hosts` entry pointing `netbird.phoenix-host.net` to ns1's IP for ns2 enrollment |
 
+### PostgreSQL Entrypoint (continued)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 80 | `listen_addresses` missing from `postgresql.conf` — `init_primary()` only set it as a CLI override during temporary startup; permanent startup read from `postgresql.conf` where default is `localhost`; all network connections (replication, app DBs) failed | Added `listen_addresses = '*'` to the `cat >> postgresql.conf` block in `init_primary()` |
+| 81 | PostgreSQL superuser password never set — `init_primary()` created repmgr user with password but never ran `ALTER USER postgres WITH PASSWORD`; pg_hba.conf requires scram-sha-256 for Docker bridge networks, so any network connection as `postgres` failed | Added `ALTER USER postgres WITH PASSWORD` after temporary startup in `init_primary()` |
+
+### NetBird Deployment (continued)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 82 | NetBird health check used `https://{{ netbird_dashboard_domain }}/api/instance` — DNS record for `vpn.<domain>` doesn't exist yet at health check time (created later in the same role); health check fails with DNS resolution error | Changed to `https://{{ ansible_host }}/api/instance` with `Host` header (same pattern as Zitadel) |
+| 84 | NetBird `config.yaml` templated before OIDC client_id created — `audience` field missing on first deploy; NetBird not restarted after OIDC creation | Added re-template task after OIDC app creation; triggers handler to restart NetBird with correct `audience` |
+
+### fail2ban on Debian 13
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 83 | fail2ban sshd jail used `logpath = /var/log/auth.log` — Debian 13 (trixie) uses systemd journal by default, file doesn't exist; jail was silently non-functional | Changed to `backend = systemd` with `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd` |
+
+### Docker Networking
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 85 | PostgreSQL Docker network name `postgresql_default` was derived from install directory (`/opt/postgresql`) via Docker Compose default naming — changing `postgresql_install_dir` would silently break all downstream services (PowerDNS, Zitadel, NetBird, Gatus) | Explicitly named the network `postgresql_default` in docker-compose.yml so it's stable regardless of directory |
+
 ---
 
 ## 6. Repository Structure
@@ -294,9 +320,7 @@ hosting-platform/
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
     ├── RECOVERY.md                # Disaster recovery runbook
-    ├── DISPERSED_DNS_ARCHITECTURE.md
-    ├── NETBIRD_CERTIFICATE_BOOTSTRAP.md  # (partially outdated, see header)
-    └── NETBIRD_SIGNAL_CORRECTION.md      # (historical, see header)
+    └── DISPERSED_DNS_ARCHITECTURE.md
 ```
 
 ---

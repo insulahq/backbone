@@ -69,7 +69,7 @@
     - name: "DNS | Resolution of all service domains"
       command: "dig @127.0.0.1 {{ item }} A +short +time=5"
       loop:
-        - "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+        - "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
         - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
         - "{{ gatus_domain | default('status.' + platform_domain) }}"
       register: _t_dns_services
@@ -125,7 +125,7 @@
         validate_certs: true
         timeout: 10
       loop:
-        - "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+        - "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
         - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
         - "{{ gatus_domain | default('status.' + platform_domain) }}"
       register: _t_tls_certs
@@ -271,7 +271,7 @@
 
     - name: "NetBird | Management API health"
       uri:
-        url: "https://{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}/api/instance"
+        url: "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/instance"
         status_code: 200
         validate_certs: "{{ netbird_validate_certs | default(false) }}"
         timeout: 10
@@ -404,7 +404,7 @@
   vars:
     _cluster_results: []
     _zitadel_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
-    _netbird_url: "https://{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+    _netbird_url: "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
     _gatus_url: "https://{{ gatus_domain | default('status.' + platform_domain) }}"
   tasks:
 
@@ -764,7 +764,7 @@
       tags: [failover, never]
 
     - name: "Failover | Verify DNS excludes stopped node"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
       register: _t_fo_dns
       changed_when: false
       ignore_errors: true
@@ -793,7 +793,7 @@
       tags: [failover, never]
 
     - name: "Failover | Verify DNS includes both nodes again"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
       register: _t_fo_dns_recovery
       changed_when: false
       ignore_errors: true
@@ -903,12 +903,12 @@
 
     - name: "Failover | Verify NetBird management API on surviving node"
       uri:
-        url: "https://{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}/api/instance"
+        url: "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/instance"
         validate_certs: true
         status_code: [200, 401, 403]
         timeout: 15
         headers:
-          Host: "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+          Host: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       register: _t_fo_netbird
       ignore_errors: true
       delegate_to: "{{ _surviving_node }}"
@@ -922,7 +922,7 @@
       tags: [failover, never]
 
     - name: "Failover | Verify DNS excludes stopped NetBird node"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
       register: _t_fo_netbird_dns
       changed_when: false
       ignore_errors: true
@@ -951,7 +951,7 @@
       tags: [failover, never]
 
     - name: "Failover | Verify NetBird DNS includes both nodes again"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
       register: _t_fo_netbird_dns_recovery
       changed_when: false
       ignore_errors: true
@@ -1175,7 +1175,7 @@
       tags: [failover, never]
 
     - name: "Failover | Verify DNS includes both nodes after full recovery"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('netbird.' + platform_domain) }} A +short +time=5"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
       register: _t_fo_full_recovery_dns
       changed_when: false
       ignore_errors: true
@@ -1204,7 +1204,7 @@
         - domain: "{{ gatus_domain | default('status.' + platform_domain) }}"
           path: "api/v1/endpoints/statuses"
           codes: [200, 401, 403]
-        - domain: "{{ netbird_dashboard_domain | default('netbird.' + platform_domain) }}"
+        - domain: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
           path: "api/instance"
           codes: [200, 401, 403]
       register: _t_fo_full_recovery_health

@@ -22,46 +22,33 @@ ssh_break_glass_enabled: true
 ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
 
 # ============================================================================
-# NetBird VPN Mesh
+# Domain
 # ============================================================================
-netbird_management_url: "https://netbird.example.com"
+platform_domain: example.com
 
-# Personal Access Token -- create via dashboard after initial setup
-netbird_admin_pat: "<YOUR_NETBIRD_PAT>"
+# ============================================================================
+# WireGuard Infrastructure Tunnel
+# ============================================================================
+# WireGuard provides the zero-dependency private backbone for PostgreSQL
+# replication, PowerDNS API, and all internal service communication.
+# IPs are assigned per-host in inventory/hosts.yml (wireguard_ip).
+# wireguard_port: 51810           # UDP port (default in role)
+# wireguard_interface: wg0        # Interface name (default in role)
 
-# Reusable setup key -- create via dashboard (type: reusable, usage_limit: 0)
-netbird_setup_key: "<YOUR_SETUP_KEY>"
+# ============================================================================
+# PostgreSQL HA (shared by PowerDNS + NetBird + Zitadel + Gatus)
+# ============================================================================
+# Which node is the initial primary (ns1 or ns2)
+# postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
+# Override here if your primary differs from the role default (ns2).
+# postgresql_primary_node: ns2
 
-# Internal peer DNS domain — peers resolve as <hostname>.<domain>
-# e.g., with "netbird": ns1.netbird, ns2.netbird
-# Default: "netbird" (override in group_vars/all.yml if needed)
-# netbird_peer_dns_domain: "netbird"
-
-netbird_deployment: fresh
-netbird_redundancy: dns_round_robin
-
-# Secrets -- generate once, must match on both nodes.
-# If left undefined, Ansible auto-generates and persists in .generated_secrets/
-netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
-netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
-
-# NetBird OIDC — Zitadel is the sole auth provider (no embedded IdP).
-# Requires zitadel_service_pat (below). Credentials are auto-created via Zitadel API.
-# netbird_oidc_client_id: "<CLIENT_ID>"         # Auto-created if zitadel_service_pat is set
-# netbird_oidc_client_secret: "<CLIENT_SECRET>"
-
-# DNS records for NetBird (round-robin on both servers)
-netbird_dns_records:
-  - name: vpn.example.com
-    type: A
-    ips:
-      - <NS1_PUBLIC_IP>
-      - <NS2_PUBLIC_IP>
-  - name: vpn.example.com
-    type: AAAA
-    ips:
-      - <NS1_PUBLIC_IPV6>
-      - <NS2_PUBLIC_IPV6>
+# REQUIRED: These must be set before first deploy.
+# Generate once with: openssl rand -base64 22
+# Must match on both nodes — shared PostgreSQL HA cluster.
+postgresql_superuser_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 
 # ============================================================================
 # PowerDNS (both nodes, shared PostgreSQL HA backend)
@@ -74,7 +61,7 @@ powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 
 # PowerDNS-Admin OIDC — protect the web UI via Zitadel login.
 # Uses PDA's native OIDC support (env vars always override DB settings).
-# Same automated/manual options as Gatus — requires zitadel_service_pat (above).
+# Same automated/manual options as Gatus — requires zitadel_service_pat (below).
 # powerdns_admin_oidc_client_id: "<CLIENT_ID>"
 # powerdns_admin_oidc_client_secret: "<CLIENT_SECRET>"
 
@@ -97,6 +84,12 @@ zitadel_admin_email: "admin@example.com"
 # CRITICAL: masterkey CANNOT be changed after initialization — back it up!
 # zitadel_masterkey: "<GENERATE: 32 chars>"
 
+# Service account PAT — enables automated OIDC app creation for Gatus,
+# Portainer, PowerDNS-Admin, and NetBird.
+# Create in Zitadel Console after Step 6: Users → Service Users → New →
+# Personal Access Tokens → Generate → paste value below.
+# zitadel_service_pat: "<PASTE_PAT_HERE>"
+
 # SMTP for user invitations and password resets (optional, can be configured later in console)
 # zitadel_smtp_host: "smtp.example.com:587"
 # zitadel_smtp_user: "noreply@example.com"
@@ -106,53 +99,28 @@ zitadel_admin_email: "admin@example.com"
 # zitadel_smtp_from_name: "Hosting Platform"
 
 # ============================================================================
-# PostgreSQL HA (shared by PowerDNS + NetBird + Zitadel)
+# NetBird VPN Mesh
 # ============================================================================
-# Which node is the initial primary (ns1 or ns2)
-# postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
-# Override here if your primary differs from the role default (ns2).
-# postgresql_primary_node: ns2
+# Management URL (vpn.<domain>, served via Traefik)
+netbird_management_url: "https://vpn.example.com"
 
-# REQUIRED: These must be set before first deploy.
-# Generate once with: openssl rand -base64 22
-# Must match on both nodes — shared PostgreSQL HA cluster.
-postgresql_superuser_password: "<GENERATE: openssl rand -base64 22>"
-postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
-postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
+# Reusable setup key for peer enrollment — created in Step 8 via the dashboard.
+# Create via dashboard (Settings > Setup Keys) after Zitadel + NetBird are deployed.
+netbird_setup_key: ""
 
-# NetBird DSN is built dynamically by the template from the variables above.
-# No need to set it manually. Multi-host failover uses Docker DNS (local)
-# + the peer's wireguard_ip.
+# Internal peer DNS domain — peers resolve as <hostname>.<domain>
+# e.g., with "netbird": ns1.netbird, ns2.netbird
+# Default: "netbird" (override in group_vars/all.yml if needed)
+# netbird_peer_dns_domain: "netbird"
 
-# ============================================================================
-# Backup (Restic to Hetzner Storagebox)
-# ============================================================================
-# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
-backup_enabled: true
-backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
-backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
-backup_storagebox_path: /backups
-# SSH key for Storagebox SFTP access (separate from per-server Ansible keys).
-# Default: ~/hosting-platform.key — override if your Storagebox uses a different key.
-# restic_ssh_key_src: "~/hosting-platform.key"
-# If left undefined, auto-generated and persisted in .generated_secrets/
-# WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
-restic_password: "<GENERATE: openssl rand -base64 22>"
+# Secrets -- auto-generated and persisted in .generated_secrets/ if left undefined.
+# netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
+# netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
-# Backup paths per server
-ns1_backup_paths:
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /etc/restic
-  - /root/.ssh
-
-ns2_backup_paths:
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /etc/restic
-  - /root/.ssh
+# NetBird OIDC — Zitadel is the sole auth provider (no embedded IdP).
+# Credentials are auto-created via Zitadel API when zitadel_service_pat is set.
+# netbird_oidc_client_id: "<CLIENT_ID>"         # Auto-created if zitadel_service_pat is set
+# netbird_oidc_client_secret: "<CLIENT_SECRET>"
 
 # ============================================================================
 # Gatus Monitoring (HA status dashboard + alert receiver)
@@ -176,24 +144,58 @@ gatus_domain: "status.example.com"
 # gatus_alerting_email_to: "admin@example.com"
 
 # OIDC authentication — protect Gatus dashboard via Zitadel login
-# Option A (automated): provide a Zitadel service account PAT.
-#   Create in Zitadel Console: Users → Service Users → New →
-#   Personal Access Tokens → Generate → paste value below.
-#   The Gatus role auto-creates the OIDC app and stores client credentials.
-# zitadel_service_pat: "<PASTE_PAT_HERE>"
-#
+# Option A (automated): provide zitadel_service_pat (above) — OIDC app auto-created.
 # Option B (manual): create the OIDC app in Zitadel Console yourself,
 #   then paste the client_id and client_secret here.
 # gatus_oidc_client_id: "<CLIENT_ID>"
 # gatus_oidc_client_secret: "<CLIENT_SECRET>"
 
 # ============================================================================
+# Portainer Docker Management (WireGuard-only access)
+# ============================================================================
+# OIDC authentication — OAuth2 Proxy sidecar handles Zitadel login.
+# Auto-created via zitadel_service_pat, or set manually:
+# portainer_oidc_client_id: "<CLIENT_ID>"
+# portainer_oidc_client_secret: "<CLIENT_SECRET>"
+
+# ============================================================================
+# Backup (Restic to Hetzner Storagebox)
+# ============================================================================
+# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
+backup_enabled: true
+backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
+backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
+backup_storagebox_path: /backups
+# SSH key for Storagebox SFTP access (separate from per-server Ansible keys).
+# Default: ~/hosting-platform.key — override if your Storagebox uses a different key.
+# restic_ssh_key_src: "~/hosting-platform.key"
+# If left undefined, auto-generated and persisted in .generated_secrets/
+# WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
+restic_password: "<GENERATE: openssl rand -base64 22>"
+
+# Backup paths per server
+ns1_backup_paths:
+  - /opt/powerdns
+  - /opt/netbird
+  - /opt/zitadel
+  - /opt/gatus
+  - /opt/portainer
+  - /etc/restic
+  - /root/.ssh
+  - /etc/wireguard
+
+ns2_backup_paths:
+  - /opt/powerdns
+  - /opt/netbird
+  - /opt/zitadel
+  - /opt/gatus
+  - /opt/portainer
+  - /etc/restic
+  - /root/.ssh
+  - /etc/wireguard
+
+# ============================================================================
 # Alerting (fallback raw webhook — used when Gatus is not deployed)
 # ============================================================================
 # Leave empty if using Gatus (recommended).
 alert_webhook_url: ""
-
-# ============================================================================
-# Domain
-# ============================================================================
-platform_domain: example.com

@@ -21,7 +21,7 @@ The firewall is deliberately simple (gotcha 7: complex NAT rules broke server ac
 | DNS (53/tcp+udp) | Host in `dns_servers` group |
 | HTTPS (443/tcp) | Host in `dns_servers` group |
 | TURN relay (10000/udp) | Host in `dns_servers` group |
-| WireGuard (51820/udp) | Always |
+| WireGuard (51810/udp) | Always |
 | SSH | When `ssh_break_glass_enabled: true` |
 
 **Critical:** After nftables reload, Docker is also restarted because `flush ruleset` wipes Docker's iptables chains (gotcha 2).

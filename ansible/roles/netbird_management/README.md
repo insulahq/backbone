@@ -23,7 +23,7 @@ Set in `group_vars/all.yml`:
 
 | Variable | Description |
 |----------|-------------|
-| `netbird_management_url` | Dashboard URL (e.g., `https://netbird.example.com`) |
+| `netbird_management_url` | Dashboard URL (e.g., `https://vpn.example.com`) |
 | `netbird_postgres_dsn` | Multi-host PostgreSQL DSN |
 | `netbird_relay_auth_secret` | Relay authentication secret |
 | `netbird_datastore_encryption_key` | Datastore encryption key |

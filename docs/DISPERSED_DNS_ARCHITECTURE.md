@@ -35,24 +35,24 @@ Both nodes can read and write zones — there is no primary/secondary DNS distin
 ```
 ns1 (Hetzner Falkenstein)
 ├── Docker Compose at /opt/powerdns/
-│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → NetBird IP only)
+│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
 │   ├── nginx (reverse proxy for API)
 │   └── powerdns-admin (Web UI, ns1 only)
 │
 ├── PowerDNS NATIVE (read-write)
 │   ├── Backend: PostgreSQL HA cluster (via Docker network)
-│   └── API writes via NetBird mesh
+│   └── API writes via WireGuard tunnel
 │
 └── PostgreSQL HA standby (repmgr)
 
 ns2 (Hetzner Helsinki)
 ├── Docker Compose at /opt/powerdns/
-│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → NetBird IP only)
+│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
 │   └── nginx (reverse proxy for API)
 │
 ├── PowerDNS NATIVE (read-write)
 │   ├── Backend: PostgreSQL HA cluster (via Docker network)
-│   └── API writes via NetBird mesh
+│   └── API writes via WireGuard tunnel
 │
 └── PostgreSQL HA primary (repmgr)
 
@@ -77,7 +77,7 @@ Zone Replication:
 
 **API Writes:**
 - DNS changes via PowerDNS API on the PostgreSQL primary node
-- PowerDNS-Admin UI available on ns1 (via NetBird mesh)
+- PowerDNS-Admin UI available on ns1 (via WireGuard tunnel)
 - Both nodes serve DNS queries (reads from either primary or standby PG)
 
 **Nameservers given to customers:**
@@ -126,10 +126,10 @@ docker exec powerdns-auth pdnsutil show-zone example.com
 
 ## Security
 
-- PowerDNS API is only accessible via NetBird mesh (nginx binds to NetBird IP)
+- PowerDNS API is only accessible via WireGuard tunnel (nginx binds to WireGuard IP)
 - Public internet can only reach port 53 (DNS queries)
 - `webserver-allow-from` restricted to RFC 1918 + loopback
-- pdns.conf file mode 0600 (contains API key)
+- pdns.conf file mode 0640, group pdns (UID 953) — protects API key
 - API key never displayed in Ansible debug output
 
 ---

@@ -8,11 +8,11 @@
 # and a runtime watchdog that detects and resolves dual-primary states.
 #
 # Architecture:
-#   2-node PostgreSQL cluster (ns1 + ns2) connected via WireGuard (NetBird).
-#   Docker extra_hosts maps each hostname: self → 127.0.0.1, peer → NetBird IP.
+#   2-node PostgreSQL cluster (ns1 + ns2) connected via WireGuard tunnel.
+#   Docker extra_hosts maps each hostname: self → 127.0.0.1, peer → WireGuard IP.
 #   repmgr conninfo uses the hostname, so:
 #     - Self-registration connects locally (127.0.0.1)
-#     - Peer monitoring resolves to the real NetBird IP
+#     - Peer monitoring resolves to the real WireGuard IP
 #
 # Failover flow:
 #   1. Primary goes down
@@ -188,7 +188,7 @@ node_name=${NODE_NAME}
 
 # conninfo uses NODE_NAME (hostname). Docker extra_hosts maps:
 #   self → 127.0.0.1 (local connect for self-registration)
-#   peer → NetBird IP (cross-wire failover detection)
+#   peer → WireGuard IP (cross-node failover detection)
 conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} password=${REPMGR_PASSWORD} connect_timeout=5'
 data_directory='${PGDATA}'
 
@@ -364,8 +364,13 @@ init_primary() {
   echo "==> Initializing new primary node..."
   initdb -U "$POSTGRES_USER" -D "$PGDATA"
 
-  # WAL, replication, and performance settings
+  # Network, WAL, replication, and performance settings
   cat >> "$PGDATA/postgresql.conf" <<CONF
+# Listen on all interfaces inside the container — required for Docker port
+# forwarding and cross-node replication. Without this, PG defaults to
+# 'localhost' and rejects all network connections (gotcha 80).
+listen_addresses = '*'
+
 shared_preload_libraries = 'repmgr'
 
 # WAL and replication
@@ -406,7 +411,11 @@ host all all 100.64.0.0/10 scram-sha-256
 host all all fd00::/8 scram-sha-256
 HBA
 
-  pg_ctl -D "$PGDATA" -o "-c listen_addresses='*'" -w start
+  pg_ctl -D "$PGDATA" -w start
+  # Set superuser password — required for scram-sha-256 auth from Docker
+  # bridge networks. Without this, any network connection as 'postgres' fails
+  # because pg_hba.conf requires scram-sha-256 but no password hash exists (gotcha 81).
+  psql -U postgres -c "ALTER USER postgres WITH PASSWORD '${POSTGRES_PASSWORD}'"
   createuser --superuser --login "$REPMGR_USER"
   psql -U postgres -c "ALTER USER ${REPMGR_USER} WITH PASSWORD '${REPMGR_PASSWORD}'"
   createdb --owner="$REPMGR_USER" "$REPMGR_DB"

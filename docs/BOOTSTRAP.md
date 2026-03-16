@@ -7,11 +7,20 @@ The deployment follows a **strictly linear** order with **no circular dependenci
 WireGuard provides the private backbone from Step 2, so all subsequent services
 can bind to stable internal IPs from the start.
 
+> **WARNING:** Do NOT run `site.yml` without `--tags` during initial bootstrap.
+> Steps 7-8 require manual input (`zitadel_service_pat`, `netbird_setup_key`)
+> that is only available after Step 6. Run each step individually as documented below.
+
 ## Prerequisites
 
 1. Two Hetzner VPS with Debian 13 (Trixie) installed
 2. Root SSH access to both servers (via a bootstrapping SSH key, e.g., `~/hosting-platform.key`)
-3. Ansible 2.15+ on your control machine
+3. **Ansible control machine** with:
+   - Ansible 2.15+
+   - `wireguard-tools` — needed to generate WireGuard keys on the controller
+   - `openssl` — needed to generate the NetBird datastore encryption key
+   - Python 3
+
 4. Ansible Galaxy collections installed:
 
 ```bash
@@ -22,6 +31,19 @@ ansible-galaxy install -r ansible/requirements.yml
 
 ```bash
 chmod 755 /path/to/hosting-platform/ansible
+```
+
+### Installing controller prerequisites
+
+```bash
+# Debian/Ubuntu
+sudo apt install wireguard-tools openssl python3
+
+# macOS
+brew install wireguard-tools openssl python3
+
+# Arch Linux
+sudo pacman -S wireguard-tools openssl python
 ```
 
 ## Required Information
@@ -44,13 +66,16 @@ Before starting, gather the following:
 > at your domain registrar. These servers will host the authoritative DNS for your domain.
 > Set the following at your registrar:
 >
-> - `ns1.example.com` → `<NS1_PUBLIC_IPV4>` (A record)
-> - `ns2.example.com` → `<NS2_PUBLIC_IPV4>` (A record)
-> - `ns1.example.com` → `<NS1_PUBLIC_IPV6>` (AAAA record, if available)
-> - `ns2.example.com` → `<NS2_PUBLIC_IPV6>` (AAAA record, if available)
+> - `ns1.example.com` -> `<NS1_PUBLIC_IPV4>` (A record)
+> - `ns2.example.com` -> `<NS2_PUBLIC_IPV4>` (A record)
+> - `ns1.example.com` -> `<NS1_PUBLIC_IPV6>` (AAAA record, if available)
+> - `ns2.example.com` -> `<NS2_PUBLIC_IPV6>` (AAAA record, if available)
 > - Set `example.com` NS records to `ns1.example.com` and `ns2.example.com`
 >
 > DNS propagation takes 24-48 hours. Configure this BEFORE starting deployment.
+> Note: ACME certificate issuance (Step 5) queries the authoritative nameservers
+> directly, so it works as soon as the glue records are resolvable — you don't need
+> to wait for full global propagation.
 
 ## Step 1: Configure Inventory and Variables
 
@@ -74,6 +99,8 @@ cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard \
   -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 ```
+
+> All subsequent commands assume you are in the `ansible/` directory.
 
 After this step:
 - Per-server SSH keys are deployed (no more `-e` override needed)
@@ -126,6 +153,15 @@ ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 > echo | openssl s_client -connect <NS1_IP>:443 -servername auth.<domain> 2>/dev/null | openssl x509 -noout -subject -issuer
 > ```
 > Expected: `issuer=... Let's Encrypt ...`
+>
+> **If the certificate doesn't appear after 2 minutes**, check Traefik logs:
+> ```bash
+> ansible -i inventory/hosts.yml ns1 -m command -a "docker logs traefik --tail 50"
+> ```
+> Common issues:
+> - `context deadline exceeded` — Traefik can't reach the PowerDNS API
+> - `NXDOMAIN` — DNS zone not created (re-run Step 4)
+> - `rate limited` — too many failed attempts, wait 1 hour
 
 ## Step 6: Deploy Zitadel IAM
 
@@ -135,13 +171,50 @@ Zitadel provides OIDC/OAuth2 for all services (NetBird, PowerDNS Admin, Portaine
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml
 ```
 
-### Manual Step: Zitadel Admin Setup
+### Manual Step: Create Zitadel Service Account
 
-After deployment, Zitadel creates its admin user automatically. You need to:
+After deployment, you need to create a service account with a Personal Access Token (PAT)
+that enables automated OIDC app creation for downstream services.
 
-1. Log in to `https://auth.<domain>` with the admin credentials (printed by the playbook)
-2. Create a **Service User** with a **Personal Access Token (PAT)** for automation
-3. Set `zitadel_service_pat` in `group_vars/all.yml`
+1. Find the admin credentials:
+   ```bash
+   cat .generated_secrets/zitadel_admin_password
+   ```
+
+2. Open `https://auth.<domain>` in your browser
+
+3. Log in with username `admin` and the password from step 1.
+   You may be prompted to change the password on first login.
+
+4. Navigate to: **Users** (left sidebar) -> **Service Users** -> **New**
+
+5. Create a service user:
+   - **Username:** `platform-automation`
+   - **Name:** `Platform Automation`
+   - Click **Create**
+
+6. Assign the **IAM_OWNER** role:
+   - On the service user page, go to the **Authorizations** tab
+   - Click **New**
+   - Select **ZITADEL** as the project
+   - Select **IAM_OWNER** as the role
+   - Click **Save**
+
+7. Generate a Personal Access Token:
+   - Go to the **Personal Access Tokens** section (same service user page)
+   - Click **New**
+   - Set an expiry (or leave unlimited)
+   - Click **Add** -> copy the token value
+
+8. Set the token in your config:
+   ```bash
+   # Add to group_vars/all.yml:
+   zitadel_service_pat: "<PASTE_TOKEN_HERE>"
+   ```
+
+> **Important:** The `IAM_OWNER` role is required so the service account can create
+> OIDC applications and projects via the Management API. Without it, Steps 7-10
+> will fail with `403 Forbidden` errors.
 
 ## Step 7: Deploy NetBird VPN Mesh
 
@@ -173,7 +246,8 @@ Peers resolve as `ns1.netbird`, `ns2.netbird` within the mesh.
 
 ## Step 9: Deploy Portainer
 
-Docker management UI, accessible only via WireGuard IP. Uses Zitadel OIDC.
+Docker management UI, accessible only via WireGuard IP (`http://10.100.0.x:9000`).
+Uses Zitadel OIDC via OAuth2 Proxy sidecar.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
@@ -211,3 +285,30 @@ Destructive failover tests (opt-in):
 ```bash
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 ```
+
+## Subsequent Runs
+
+After all manual steps are complete and `group_vars/all.yml` has `zitadel_service_pat`
+and `netbird_setup_key` set, you can run `site.yml` without `--tags` to deploy
+or update everything at once:
+
+```bash
+ansible-playbook -i inventory/hosts.yml site.yml
+```
+
+## Troubleshooting
+
+### Recovery from failed bootstrap
+
+If a step fails partway through, it is safe to re-run the same command. All roles
+are idempotent — they detect existing state and skip or update as needed.
+
+If PostgreSQL fails on the standby node after the primary is running:
+```bash
+# Re-run just the standby
+ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <STANDBY_NODE>
+```
+
+If OIDC app creation fails (e.g., wrong PAT permissions):
+1. Fix the service user permissions in Zitadel Console (see Step 6)
+2. Re-run the affected deploy playbook — it will retry OIDC creation

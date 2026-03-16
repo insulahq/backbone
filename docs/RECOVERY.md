@@ -1,6 +1,6 @@
 # Disaster Recovery Runbook
 
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-03-16
 **Audience:** Operators responding to infrastructure failures
 
 ---
@@ -83,7 +83,7 @@ The entrypoint wrapper (`entrypoint-wrapper.sh`) automatically detects the role 
 
 ```bash
 # If automatic rejoin doesn't work, force a rejoin:
-ssh root@<OLD_PRIMARY_IP> "docker exec postgresql repmgr standby clone --force -h <NEW_PRIMARY_NETBIRD_IP> -U repmgr -d repmgr"
+ssh root@<OLD_PRIMARY_IP> "docker exec postgresql repmgr standby clone --force -h <NEW_PRIMARY_WIREGUARD_IP> -U repmgr -d repmgr"
 ssh root@<OLD_PRIMARY_IP> "docker restart postgresql"
 ```
 
@@ -114,8 +114,8 @@ restic ls latest --host <DEAD_NODE>
 ```bash
 cd ansible
 
-# 1. Deploy base OS hardening + Docker
-ansible-playbook -i inventory/hosts.yml site.yml --tags common --limit <DEAD_NODE> \
+# 1. Deploy base OS hardening + Docker + WireGuard tunnel
+ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard --limit <DEAD_NODE> \
   -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 # The `-e` override is needed because the re-provisioned server does not
 # have the per-server SSH public key in its `authorized_keys` yet.
@@ -129,28 +129,25 @@ ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <DEAD_NODE
 # 4. Deploy PowerDNS
 ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit <DEAD_NODE>
 
-# 5. Deploy NetBird management
-ansible-playbook -i inventory/hosts.yml deploy-netbird.yml --limit <DEAD_NODE>
-
-# 6. Re-enroll as NetBird peer
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <DEAD_NODE>
-
-# 7. Check NetBird IP (may have changed — gotcha 17)
-ssh root@<NEW_IP> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"ip\"])'"
-
-# 8. Update inventory/hosts.yml if NetBird IP changed, then redeploy services that bind to it
-ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml --limit <DEAD_NODE>
-
-# 9. Deploy Zitadel (stateless — just starts and connects to existing PG data)
+# 5. Deploy Zitadel (stateless — just starts and connects to existing PG data)
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml --limit <DEAD_NODE>
 
-# 10. Deploy Gatus monitoring
+# 6. Deploy NetBird management
+ansible-playbook -i inventory/hosts.yml deploy-netbird.yml --limit <DEAD_NODE>
+
+# 7. Re-enroll as NetBird peer
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <DEAD_NODE>
+
+# 8. Check NetBird IP (may have changed — gotcha 17)
+ssh root@<NEW_IP> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"ip\"])'"
+
+# 9. Deploy Gatus monitoring
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml --limit <DEAD_NODE>
 
-# 11. Deploy Portainer
+# 10. Deploy Portainer
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml --limit <DEAD_NODE>
 
-# 12. Deploy backups
+# 11. Deploy backups
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml --limit <DEAD_NODE>
 ```
 
@@ -162,11 +159,11 @@ ssh root@<REBUILT_NODE>
 export RESTIC_REPOSITORY="sftp:<USER>@<HOST>:/backups/<NODE>"
 export RESTIC_PASSWORD_FILE="/etc/restic/password"
 
-# Restore specific paths
-restic restore latest --target /tmp/restore --include "/opt/netbird/idp.db"
+# Restore specific paths (example: NetBird config)
+restic restore latest --target /tmp/restore --include "/opt/netbird/config.yaml"
 
 # Copy restored files to correct locations
-cp /tmp/restore/opt/netbird/idp.db /opt/netbird/
+cp /tmp/restore/opt/netbird/config.yaml /opt/netbird/
 docker restart netbird-server
 ```
 
@@ -245,6 +242,10 @@ ssh root@<NODE> "restic -r <REPO> check"
 
 **Symptoms:** Servers can't reach each other via NetBird IPs. Public IPs still work.
 
+> **Note:** The WireGuard infrastructure tunnel (`wg0`) is independent of NetBird.
+> If WireGuard is up, PostgreSQL replication and PowerDNS API still function.
+> NetBird (`wt0`) is used for Phase 2 peer connectivity and remote admin access.
+
 ```bash
 # 1. Check NetBird status on both nodes
 ssh root@<NS1_PUBLIC_IP> "netbird status"
@@ -259,9 +260,6 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NODE>
 
 # 4. Check if NetBird IP changed (gotcha 17)
 ssh root@<NODE> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"ip\"])'"
-
-# 5. If IP changed, update inventory and redeploy bound services
-ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml
 ```
 
 ---
@@ -285,7 +283,7 @@ ssh root@<NODE> "docker logs postgresql 2>&1 | tail -50"
 
 # 4. If not auto-resolved, manually demote one node:
 # Pick the node with FEWER recent writes (or lower timeline)
-ssh root@<DEMOTE_NODE> "docker exec postgresql repmgr standby clone --force -h <PRIMARY_NETBIRD_IP> -U repmgr -d repmgr"
+ssh root@<DEMOTE_NODE> "docker exec postgresql repmgr standby clone --force -h <PRIMARY_WIREGUARD_IP> -U repmgr -d repmgr"
 ssh root@<DEMOTE_NODE> "docker restart postgresql"
 
 # 5. Verify resolution
@@ -303,22 +301,22 @@ After any recovery, verify all components:
 dig @<NS1_PUBLIC_IP> <PLATFORM_DOMAIN> SOA +short
 dig @<NS2_PUBLIC_IP> <PLATFORM_DOMAIN> SOA +short
 
+# WireGuard tunnel connectivity
+ssh root@<NS1> "ping -c 3 10.100.0.2"
+ssh root@<NS2> "ping -c 3 10.100.0.1"
+
 # PostgreSQL replication
 ssh root@<PRIMARY> "docker exec postgresql repmgr cluster show"
 
-# NetBird mesh connectivity
-ssh root@<NS1> "ping -c 3 <NS2_NETBIRD_IP>"
-ssh root@<NS2> "ping -c 3 <NS1_NETBIRD_IP>"
-
 # Traefik TLS
-curl -I https://netbird.<PLATFORM_DOMAIN>
+curl -I https://vpn.<PLATFORM_DOMAIN>
 
 # Backup timer
 ssh root@<NS1> "systemctl status restic-backup.timer"
 ssh root@<NS2> "systemctl status restic-backup.timer"
 
-# PowerDNS API
-curl -s -H "X-API-Key: <KEY>" http://<NETBIRD_IP>:8081/api/v1/servers/localhost/zones | python3 -m json.tool
+# PowerDNS API (via WireGuard IP)
+curl -s -H "X-API-Key: <KEY>" http://<WIREGUARD_IP>:8081/api/v1/servers/localhost/zones | python3 -m json.tool
 ```
 
 ---

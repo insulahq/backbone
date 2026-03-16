@@ -28,15 +28,15 @@ ns1                                ns2
 | Container | Image | Purpose |
 |-----------|-------|---------|
 | `powerdns-auth` | `powerdns/pdns-auth-49` | Authoritative DNS server |
-| `powerdns-nginx` | `nginx:alpine` | API proxy, binds to NetBird IP only |
+| `powerdns-nginx` | `nginx:alpine` | API proxy, binds to WireGuard IP only |
 | `powerdns-admin` | `powerdnsadmin/pda-legacy:v0.4.1` | Web UI (ns1 only) |
 
 ## Dependencies
 
 Must be deployed after:
 1. `common` -- Docker CE, OS hardening
-2. `postgresql_repmgr` -- PostgreSQL HA cluster (provides the `postgresql_default` Docker network)
-3. `netbird_peer` -- NetBird IP for API binding (optional; falls back to `127.0.0.1`)
+2. `wireguard` -- WireGuard tunnel (provides `wireguard_ip` for API binding)
+3. `postgresql_repmgr` -- PostgreSQL HA cluster (provides the `postgresql_default` Docker network)
 
 ## Key Variables
 
@@ -48,7 +48,7 @@ Set in `group_vars/all.yml` or vault:
 | `powerdns_db_password` | PostgreSQL password for `pdns` user | Auto-generated |
 | `powerdns_db_name` | PowerDNS database name | `powerdns` |
 | `powerdns_db_user` | PowerDNS database user | `pdns` |
-| `powerdns_bind_interface` | Interface for API binding | `{{ netbird_ip }}` or `127.0.0.1` |
+| `powerdns_bind_interface` | Interface for API binding | `{{ wireguard_ip }}` or `127.0.0.1` |
 | `powerdns_admin_node` | Node that runs PowerDNS-Admin UI | `ns1` |
 | `platform_domain` | Platform domain for zone creation | (required) |
 | `postgresql_primary_node` | Node running PG primary (for DB init) | (required) |
@@ -65,8 +65,8 @@ Set in `group_vars/all.yml` or vault:
 ## Network Topology
 
 - **DNS (port 53):** Bound to `0.0.0.0` -- serves public DNS queries
-- **API (port 8081):** Bound to NetBird IP -- accessible only via VPN mesh
-- **Admin UI (port 8080):** Bound to NetBird IP, ns1 only -- accessible only via VPN mesh
+- **API (port 8081):** Bound to WireGuard IP -- accessible only via WireGuard tunnel
+- **Admin UI (port 8080):** Bound to WireGuard IP, ns1 only -- accessible only via VPN
 - **PostgreSQL:** Connected via `postgresql_default` Docker network (internal)
 
 ## Gotchas
@@ -75,4 +75,4 @@ Set in `group_vars/all.yml` or vault:
 - `pdnsutil add-record` does NOT auto-increment SOA serial; always run `pdnsutil increase-serial` after (gotcha 30)
 - `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0; manually increment after zone creation (gotcha 33)
 - PowerDNS webserver restricted to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` (gotcha 46)
-- `pdns.conf` deployed with mode `0600` to protect API key (gotcha 45)
+- `pdns.conf` deployed with mode `0640, group: 953` to protect API key (gotcha 45, 71)

@@ -40,7 +40,7 @@ table inet filter {
 {% endif %}
     
     # WireGuard infrastructure tunnel (wg0)
-    udp dport {{ wireguard_port | default(51820) }} accept
+    udp dport {{ wireguard_port | default(51810) }} accept
     
     # Allow all traffic on WireGuard interface (trusted backbone)
     iifname "{{ wireguard_interface | default('wg0') }}" accept

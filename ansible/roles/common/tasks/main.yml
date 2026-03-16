@@ -40,11 +40,14 @@
       bantime = 3600
       findtime = 600
       maxretry = 5
+      # Debian 13 (trixie) uses systemd journal by default — /var/log/auth.log
+      # does not exist unless rsyslog is installed (gotcha 83).
+      backend = systemd
 
       [sshd]
       enabled = true
       port = {{ ssh_port }}
-      logpath = /var/log/auth.log
+      journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd
     mode: '0644'
   notify: restart fail2ban
   tags: [common, security, fail2ban]

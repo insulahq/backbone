@@ -59,5 +59,9 @@ services:
         max-size: "200m"
         max-file: "2"
 
+networks:
+  default:
+    name: postgresql_default
+
 volumes:
   postgresql_data:
