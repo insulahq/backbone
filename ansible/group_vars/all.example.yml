@@ -32,6 +32,11 @@ netbird_admin_pat: "<YOUR_NETBIRD_PAT>"
 # Reusable setup key -- create via dashboard (type: reusable, usage_limit: 0)
 netbird_setup_key: "<YOUR_SETUP_KEY>"
 
+# Internal peer DNS domain — peers resolve as <hostname>.<domain>
+# e.g., with "netbird": ns1.netbird, ns2.netbird
+# Default: "netbird" (override in group_vars/all.yml if needed)
+# netbird_peer_dns_domain: "netbird"
+
 netbird_deployment: fresh
 netbird_redundancy: dns_round_robin
 

@@ -37,6 +37,7 @@ Before starting, gather the following:
 | **Primary domain** | `example.com` | The domain this platform will serve |
 | **Bootstrapping SSH key** | `~/hosting-platform.key` | Key provisioned by Hetzner or uploaded during server creation |
 | **Server timezone** | `Europe/Berlin` | Applied to both servers |
+| **NetBird peer DNS domain** | `netbird` | Internal mesh domain — peers resolve as `<host>.<domain>` (e.g., `ns1.netbird`). Default: `netbird` |
 | **Backup SFTP credentials** | (optional) | Hetzner Storagebox user/host; set `backup_enabled: false` to skip |
 
 > **CRITICAL — DNS Glue Records:** Before deploying, you MUST configure **glue records**
