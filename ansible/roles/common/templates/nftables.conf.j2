@@ -45,9 +45,6 @@ table inet filter {
     # Allow all traffic on WireGuard interface (trusted backbone)
     iifname "{{ wireguard_interface | default('wg0') }}" accept
     
-    # NetBird mesh (wt0) — WireGuard-based overlay for Phase 2 peers
-    udp dport 51820 accept
-    
 {% if ssh_break_glass_enabled %}
     # SSH break-glass access (kept open per user requirement)
     tcp dport {{ ssh_port }} accept
