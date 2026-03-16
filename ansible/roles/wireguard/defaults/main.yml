@@ -8,7 +8,7 @@
 wireguard_interface: wg0
 
 # WireGuard listen port (UDP)
-wireguard_port: 51820
+wireguard_port: 51810
 
 # Subnet for WireGuard tunnel (all nodes share this subnet)
 wireguard_subnet: "10.100.0.0/24"
