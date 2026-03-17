@@ -54,12 +54,15 @@ gatus_log_level: "info"
 #   Auth Method: BASIC → Redirect: https://status.example.com/authorization-code/callback
 #   Post-Logout: https://status.example.com → Save → copy client_id/secret below.
 #
-gatus_oidc_issuer_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+gatus_oidc_issuer_url: "https://{{ zitadel_domain }}"
 gatus_oidc_redirect_url: "https://{{ gatus_domain }}/authorization-code/callback"
 gatus_oidc_scopes: "openid profile email"
 # Set manually or auto-generated via Zitadel API (Option A)
 gatus_oidc_client_id: ""
 gatus_oidc_client_secret: ""
+
+# Zitadel domain (used for OIDC discovery and API calls)
+zitadel_domain: "auth.{{ platform_domain }}"
 
 # Zitadel service account PAT — enables automated OIDC app creation
 # Create in Zitadel Console: Users → Service Users → New →

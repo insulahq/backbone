@@ -46,3 +46,16 @@ Machine:
 # Telemetry — disabled for self-hosted
 Telemetry:
   Enabled: false
+
+# Disable Login V2 — the v2 login UI requires a separate Login Client
+# service user + PAT (ZITADEL_SERVICE_USER_TOKEN) which adds complexity.
+# The v1 login UI at /ui/login/ works out of the box.
+DefaultInstance:
+  Features:
+    LoginV2:
+      Required: false
+
+# Force OIDC to use v1 login URLs
+OIDC:
+  DefaultLoginURLV2: ""
+  DefaultLogoutURLV2: ""

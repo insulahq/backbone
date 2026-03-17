@@ -4,6 +4,10 @@
 # Uses PostgreSQL HA backend (deployed by postgresql_repmgr role).
 # Zitadel OIDC as the sole authentication provider (no embedded IdP).
 
+# Zitadel domain — needed for OIDC app creation via Management API.
+# Falls back to auth.<platform_domain> if the Zitadel role defaults aren't loaded.
+zitadel_domain: "auth.{{ platform_domain }}"
+
 # NetBird versions -- combined server architecture (0.66+)
 # Pin to specific versions to prevent breakage on deploy
 netbird_server_version: "0.66.4"

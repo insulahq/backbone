@@ -40,7 +40,7 @@
 
 - name: Generate Zitadel admin password if not set
   set_fact:
-    zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=24 chars=ascii_letters,digits') + '!#' }}"
+    zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=24 chars=ascii_letters,digits,punctuation') }}"
   when: zitadel_admin_password is not defined or zitadel_admin_password | length == 0
   no_log: true
   tags: [zitadel]

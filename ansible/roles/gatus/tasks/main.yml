@@ -90,7 +90,7 @@
   no_log: true
   tags: [gatus]
 
-- name: Search for Hosting Platform project in Zitadel
+- name: Search for Zitadel project (for Gatus OIDC app)
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
     method: POST
@@ -98,46 +98,24 @@
       Authorization: "Bearer {{ zitadel_service_pat }}"
       Content-Type: application/json
     body_format: json
-    body:
-      queries:
-        - nameQuery:
-            name: "Hosting Platform"
-            method: TEXT_QUERY_METHOD_EQUALS
+    body: {}
     status_code: 200
     validate_certs: "{{ gatus_validate_certs | default(false) }}"
-  register: gatus_project_search
+  register: gatus_oidc_project_search
   run_once: true
   when:
     - zitadel_service_pat | default('') | length > 0
     - gatus_oidc_client_id | default('') | length == 0
-  tags: [gatus]
-
-- name: Create Hosting Platform project if not exists
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "Hosting Platform"
-    status_code: [200]
-    validate_certs: "{{ gatus_validate_certs | default(false) }}"
-  register: gatus_project_created
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - gatus_oidc_client_id | default('') | length == 0
-    - gatus_project_search.json.result | default([]) | length == 0
+    - zitadel_project_id is not defined or zitadel_project_id | length == 0
   tags: [gatus]
 
 - name: Set Zitadel project ID for Gatus
   set_fact:
-    zitadel_project_id: >-
-      {{ (gatus_project_search.json.result[0].id)
-         if (gatus_project_search.json.result | default([]) | length > 0)
-         else (gatus_project_created.json.id | default('')) }}
+    gatus_oidc_zitadel_project_id: >-
+      {{ zitadel_project_id | default(
+         gatus_oidc_project_search.json.result[0].id
+         if (gatus_oidc_project_search.json.result | default([]) | length > 0)
+         else '') }}
   run_once: true
   when:
     - zitadel_service_pat | default('') | length > 0
@@ -146,7 +124,7 @@
 
 - name: Create Gatus OIDC application in Zitadel
   uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ zitadel_project_id }}/apps/oidc"
+    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ gatus_oidc_zitadel_project_id }}/apps/oidc"
     method: POST
     headers:
       Authorization: "Bearer {{ zitadel_service_pat }}"
@@ -164,14 +142,14 @@
         - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
       appType: "OIDC_APP_TYPE_WEB"
       authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
-    status_code: [200]
+    status_code: [200, 409]
     validate_certs: "{{ gatus_validate_certs | default(false) }}"
   register: zitadel_oidc_app
   run_once: true
   when:
     - zitadel_service_pat | default('') | length > 0
     - gatus_oidc_client_id | default('') | length == 0
-    - zitadel_project_id is defined
+    - gatus_oidc_zitadel_project_id | default('') | length > 0
   tags: [gatus]
 
 - name: Persist Gatus OIDC client_id
@@ -373,7 +351,7 @@
 
 - name: Update shared alert helper with Gatus endpoint info
   template:
-    src: ../../../common/templates/platform-alert.sh.j2
+    src: "{{ playbook_dir }}/roles/common/templates/platform-alert.sh.j2"
     dest: /usr/local/lib/platform-alert.sh
     mode: '0644'
   tags: [gatus]

@@ -22,9 +22,12 @@ portainer_bind_interface: "{{ wireguard_ip | default('127.0.0.1', true) }}"
 # Port exposed on the NetBird interface (oauth2-proxy listens here)
 portainer_port: 9000
 
+# Zitadel domain (used for OIDC discovery and API calls)
+zitadel_domain: "auth.{{ platform_domain }}"
+
 # OIDC configuration (Zitadel)
 # Set via zitadel_service_pat (automated) or manually (see all.example.yml)
-portainer_oidc_issuer_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+portainer_oidc_issuer_url: "https://{{ zitadel_domain }}"
 portainer_oidc_client_id: ""
 portainer_oidc_client_secret: ""
 # portainer_oidc_cookie_secret: auto-generated and persisted in .generated_secrets/

@@ -183,7 +183,7 @@
   when: netbird_oidc_client_id | default('') | length == 0
   tags: [netbird, netbird_management]
   block:
-    - name: Search for Hosting Platform project in Zitadel (for NetBird)
+    - name: Search for Zitadel project (for NetBird OIDC app)
       uri:
         url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
         method: POST
@@ -191,38 +191,20 @@
           Authorization: "Bearer {{ zitadel_service_pat }}"
           Content-Type: application/json
         body_format: json
-        body:
-          queries:
-            - nameQuery:
-                name: "Hosting Platform"
-                method: TEXT_QUERY_METHOD_EQUALS
+        body: {}
         status_code: 200
         validate_certs: "{{ netbird_validate_certs | default(false) }}"
       register: nb_oidc_project_search
       run_once: true
-
-    - name: Create Hosting Platform project if not exists (for NetBird)
-      uri:
-        url: "https://{{ zitadel_domain }}/management/v1/projects"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ zitadel_service_pat }}"
-          Content-Type: application/json
-        body_format: json
-        body:
-          name: "Hosting Platform"
-        status_code: [200]
-        validate_certs: "{{ netbird_validate_certs | default(false) }}"
-      register: nb_oidc_project_created
-      run_once: true
-      when: nb_oidc_project_search.json.result | default([]) | length == 0
+      when: zitadel_project_id is not defined or zitadel_project_id | length == 0
 
     - name: Set Zitadel project ID for NetBird
       set_fact:
         nb_oidc_zitadel_project_id: >-
-          {{ (nb_oidc_project_search.json.result[0].id)
+          {{ zitadel_project_id | default(
+             nb_oidc_project_search.json.result[0].id
              if (nb_oidc_project_search.json.result | default([]) | length > 0)
-             else (nb_oidc_project_created.json.id | default('')) }}
+             else '') }}
       run_once: true
 
     - name: Create NetBird OIDC application in Zitadel

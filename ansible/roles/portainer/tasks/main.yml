@@ -44,8 +44,7 @@
   no_log: true
   tags: [portainer]
 
-# Search for existing "Hosting Platform" project in Zitadel (may already exist from Gatus role)
-- name: Search for Hosting Platform project in Zitadel
+- name: Search for Zitadel project (for Portainer OIDC app)
   uri:
     url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
     method: POST
@@ -53,46 +52,24 @@
       Authorization: "Bearer {{ zitadel_service_pat }}"
       Content-Type: application/json
     body_format: json
-    body:
-      queries:
-        - nameQuery:
-            name: "Hosting Platform"
-            method: TEXT_QUERY_METHOD_EQUALS
+    body: {}
     status_code: 200
     validate_certs: "{{ portainer_validate_certs | default(false) }}"
-  register: portainer_project_search
+  register: portainer_oidc_project_search
   run_once: true
   when:
     - zitadel_service_pat | default('') | length > 0
     - portainer_oidc_client_id | default('') | length == 0
+    - zitadel_project_id is not defined or zitadel_project_id | length == 0
   tags: [portainer]
 
-- name: Create Hosting Platform project if not exists
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "Hosting Platform"
-    status_code: [200]
-    validate_certs: "{{ portainer_validate_certs | default(false) }}"
-  register: portainer_project_created
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - portainer_oidc_client_id | default('') | length == 0
-    - portainer_project_search.json.result | default([]) | length == 0
-  tags: [portainer]
-
-- name: Set Zitadel project ID
+- name: Set Zitadel project ID for Portainer
   set_fact:
-    portainer_zitadel_project_id: >-
-      {{ (portainer_project_search.json.result[0].id)
-         if (portainer_project_search.json.result | default([]) | length > 0)
-         else (portainer_project_created.json.id | default('')) }}
+    portainer_oidc_zitadel_project_id: >-
+      {{ zitadel_project_id | default(
+         portainer_oidc_project_search.json.result[0].id
+         if (portainer_oidc_project_search.json.result | default([]) | length > 0)
+         else '') }}
   run_once: true
   when:
     - zitadel_service_pat | default('') | length > 0
@@ -101,7 +78,7 @@
 
 - name: Create Portainer OIDC application in Zitadel
   uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ portainer_zitadel_project_id }}/apps/oidc"
+    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ portainer_oidc_zitadel_project_id }}/apps/oidc"
     method: POST
     headers:
       Authorization: "Bearer {{ zitadel_service_pat }}"
@@ -139,7 +116,7 @@
   when:
     - zitadel_service_pat | default('') | length > 0
     - portainer_oidc_client_id | default('') | length == 0
-    - portainer_zitadel_project_id | default('') | length > 0
+    - portainer_oidc_zitadel_project_id | default('') | length > 0
   tags: [portainer]
 
 - name: Persist Portainer OIDC client_id
