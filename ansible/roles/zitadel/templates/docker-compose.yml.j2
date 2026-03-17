@@ -9,7 +9,7 @@ services:
     image: {{ zitadel_image }}
     container_name: zitadel
     restart: unless-stopped
-    command: 'start-from-init --config /etc/zitadel/config.yaml --steps /etc/zitadel/steps.yaml --masterkeyFromEnv'
+    command: 'start-from-init --config /etc/zitadel/config.yaml --steps /etc/zitadel/steps.yaml --masterkeyFromEnv --tlsMode external'
     environment:
       ZITADEL_MASTERKEY: "{{ zitadel_masterkey }}"
     networks:
@@ -27,15 +27,11 @@ services:
       - traefik.http.routers.zitadel.entrypoints=websecure
       - traefik.http.routers.zitadel.tls=true
       - traefik.http.routers.zitadel.service=zitadel
-      # Backend service — h2c for gRPC support
+      # Backend service — HTTP for web, gRPC uses content-type detection
       - traefik.http.services.zitadel.loadbalancer.server.port={{ zitadel_port }}
-      - traefik.http.services.zitadel.loadbalancer.server.scheme=h2c
-    healthcheck:
-      test: ["CMD", "/app/zitadel", "ready", "--config", "/etc/zitadel/config.yaml"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # No Docker healthcheck — Traefik v3.6 filters unhealthy/starting containers
+    # from routing (gotcha 74). Zitadel's 'ready' command may report not-ready
+    # during initial setup or migration, causing Traefik to permanently exclude it.
     logging:
       driver: "json-file"
       options:
