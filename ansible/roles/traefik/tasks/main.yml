@@ -3,6 +3,13 @@
 # Deploys a shared Traefik reverse proxy.
 # Creates the traefik_public Docker network that other stacks attach to.
 
+- name: Load PowerDNS API key from generated secrets (for ACME DNS-01)
+  set_fact:
+    powerdns_api_key: "{{ lookup('file', playbook_dir + '/.generated_secrets/powerdns_api_key', errors='ignore') | default('') }}"
+  when: powerdns_api_key is not defined or powerdns_api_key == ''
+  no_log: true
+  tags: [traefik]
+
 - name: Create Traefik installation directory
   file:
     path: "{{ traefik_install_dir }}"

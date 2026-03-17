@@ -123,8 +123,7 @@ services:
 
 networks:
   powerdns_internal:
-    name: powerdns_internal
-    driver: bridge
+    external: true
   postgresql_default:
     external: true
 

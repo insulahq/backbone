@@ -32,11 +32,14 @@ traefik_acme_dns_provider: pdns
 traefik_wildcard_cert: true
 
 # PowerDNS API URL for DNS-01 challenge.
-# Traefik joins the powerdns_internal Docker network and reaches the API
-# via container DNS — no host-level port binding or DNAT involved (gotcha 75).
-# Both nodes run PowerDNS with shared PostgreSQL HA backend (Native mode),
-# so each node uses its OWN local PowerDNS API for ACME challenges.
-traefik_pdns_api_url: "http://powerdns-nginx:8081"
+# ACME needs to write TXT records, which requires the PG primary's PowerDNS.
+# On the PG primary: use local PowerDNS via Docker network (gotcha 75/89).
+# On the PG standby: use the primary's PowerDNS via WireGuard IP (writes
+# go through DNAT to the primary's powerdns-nginx container).
+traefik_pdns_api_url: >-
+  {{ 'http://powerdns-nginx:8081'
+     if (inventory_hostname == (postgresql_primary_node | default('ns2')))
+     else 'http://' + hostvars[postgresql_primary_node | default('ns2')]['wireguard_ip'] + ':8081' }}
 
 # Logging
 traefik_log_level: INFO

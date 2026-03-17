@@ -78,9 +78,7 @@
     - name: Check if PowerDNS schema exists
       community.docker.docker_container_exec:
         container: postgresql
-        command: >
-          psql -U postgres -d {{ powerdns_db_name }} -tc
-          "SELECT 1 FROM information_schema.tables WHERE table_name='domains'"
+        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} -tAc \"SELECT 1 FROM information_schema.tables WHERE table_name='domains' LIMIT 1\""
       register: schema_check
       changed_when: false
 
@@ -89,17 +87,17 @@
         src: init-schema.sql.j2
         dest: "{{ powerdns_install_dir }}/init-schema.sql"
         mode: '0600'
-      when: schema_check.stdout | trim == ""
+      when: (schema_check.stdout | default('') | trim) != "1"
 
     - name: Copy schema init script into PostgreSQL container
       shell: docker cp {{ powerdns_install_dir }}/init-schema.sql postgresql:/tmp/init-schema.sql
-      when: schema_check.stdout | trim == ""
+      when: (schema_check.stdout | default('') | trim) != "1"
 
     - name: Initialize PowerDNS schema
       community.docker.docker_container_exec:
         container: postgresql
-        command: psql -U postgres -d {{ powerdns_db_name }} -f /tmp/init-schema.sql
-      when: schema_check.stdout | trim == ""
+        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} -f /tmp/init-schema.sql"
+      when: (schema_check.stdout | default('') | trim) != "1"
 
 - name: Create PowerDNS-Admin database and user
   when: inventory_hostname == postgresql_primary_node
@@ -316,7 +314,7 @@
   register: pdns_ready
   until: pdns_ready.status == 200
 
-# --- Platform zone creation (run once on any node) ---
+# --- Platform zone creation (on PG primary only — writes need read-write DB) ---
 
 - name: Create platform zone ({{ platform_domain }})
   uri:
@@ -335,15 +333,16 @@
       soa_edit_api: "INCEPTION-INCREMENT"
     status_code: [201, 409]  # 409 = already exists
   register: zone_create_result
-  run_once: true
+  when: inventory_hostname == postgresql_primary_node
   ignore_errors: yes
 
 - name: Increment SOA serial after zone creation (gotcha 33)
   community.docker.docker_container_exec:
     container: powerdns-auth
     command: pdnsutil increase-serial {{ platform_domain }}
-  when: zone_create_result.status == 201
-  run_once: true
+  when:
+    - inventory_hostname == postgresql_primary_node
+    - zone_create_result.status | default(0) == 201
   changed_when: true
 
 # --- Platform base domain DNS records ---
@@ -354,8 +353,8 @@
 
 - name: Create base domain A records (static round-robin)
   when:
+    - inventory_hostname == postgresql_primary_node
     - powerdns_api_key is defined
-  run_once: true
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -383,9 +382,9 @@
 
 - name: Create base domain AAAA records (static round-robin)
   when:
+    - inventory_hostname == postgresql_primary_node
     - powerdns_api_key is defined
     - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
-  run_once: true
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -437,8 +436,9 @@
             - content: "{{ hostvars['ns2']['ansible_host'] }}"
               disabled: false
     status_code: [200, 204]
-  run_once: true
-  when: powerdns_api_key is defined
+  when:
+    - inventory_hostname == postgresql_primary_node
+    - powerdns_api_key is defined
   ignore_errors: true
   tags: [powerdns, dns]
 
@@ -446,9 +446,10 @@
   community.docker.docker_container_exec:
     container: powerdns-auth
     command: pdnsutil increase-serial {{ platform_domain }}
-  run_once: true
   changed_when: true
-  when: powerdns_api_key is defined
+  when:
+    - inventory_hostname == postgresql_primary_node
+    - powerdns_api_key is defined
   ignore_errors: true
   tags: [powerdns, dns]
 
