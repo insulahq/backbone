@@ -3,6 +3,26 @@
 # Deploys a point-to-point WireGuard tunnel between all dns_servers nodes.
 # Keys are auto-generated on the Ansible controller and persisted in .generated_secrets/wireguard/.
 
+- name: Verify wireguard-tools available on controller (required for key generation)
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.command: wg --version
+  register: _wg_version
+  changed_when: false
+  failed_when: false
+  tags: [wireguard]
+
+- name: Fail with clear message if wireguard-tools missing on controller
+  ansible.builtin.fail:
+    msg: >-
+      wireguard-tools is not installed on the Ansible controller.
+      Install it first: apt install wireguard-tools (Debian/Ubuntu),
+      brew install wireguard-tools (macOS), or pacman -S wireguard-tools (Arch).
+  when: _wg_version.rc | default(1) != 0
+  run_once: true
+  tags: [wireguard]
+
 - name: Install WireGuard
   ansible.builtin.apt:
     name: wireguard

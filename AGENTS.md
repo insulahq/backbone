@@ -83,7 +83,7 @@ ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer Doc
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
-**Fresh deployment requires multiple runs** due to circular dependencies (NetBird needs Traefik certs, Traefik needs PowerDNS API, PowerDNS nginx binds to NetBird IP). See `docs/BOOTSTRAP.md`.
+**Fresh deployment** follows a strictly linear order (no circular dependencies). See `docs/BOOTSTRAP.md`.
 
 **SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform.key`) is only needed for the first run:
 ```bash
@@ -116,9 +116,9 @@ Rules:
 
 ---
 
-## 5. Critical Gotchas
+## 5. Gotchas
 
-Hard-won lessons from deployment. These **will** bite you if ignored.
+Lessons from deployment. These explain **why** the code is written a specific way.
 
 ### Docker & Networking
 
@@ -128,6 +128,7 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 2 | `flush ruleset` in nftables wipes Docker's iptables chains | Always restart Docker after nftables changes |
 | 7 | Complex DNAT/SNAT/NAT rules broke server access | Keep firewall simple. Let Docker and NetBird manage their own NAT |
 | 22 | Container restart in partial network state loses port forwarding | `docker compose up -d --force-recreate` to reconnect all networks |
+| 85 | Docker network name derived from install directory — changing dir breaks downstream | Explicitly name networks (`postgresql_default`, `powerdns_internal`) in docker-compose.yml |
 
 ### PowerDNS
 
@@ -136,6 +137,9 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 29 | `pdns_control ping` is invalid in PowerDNS 4.9 | Use `pdns_control uptime > /dev/null 2>&1` for health checks |
 | 30 | `pdnsutil add-record` does NOT auto-increment SOA serial | Always run `pdnsutil increase-serial` after |
 | 33 | `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0 | Manually increment serial after zone creation |
+| 45 | PowerDNS `.secrets` file and API key in debug output | pdns.conf mode 0640 (group: pdns UID 953); no API key in debug msgs |
+| 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
+| 71 | `pdns.conf` mode `0600` unreadable by pdns user (UID 953) | `mode: 0640, group: 953` |
 
 ### PostgreSQL & repmgr
 
@@ -143,22 +147,39 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 |---|-------|-----|
 | 11 | `bitnami/postgresql-repmgr` removed from registries | Use `sourcemation/postgres-repmgr:5.5.0` (PG18 + repmgr 5.5) |
 | 12 | Entrypoint crashes on restart ("already registered") | Custom `entrypoint-wrapper.sh` with `--force` flag |
-| 13 | Docker hairpin NAT: container can't reach its own forwarded port | Use `extra_hosts`: own hostname -> 127.0.0.1, peer -> NetBird IP |
-| 14 | pg_hba.conf blocks Docker bridge networks | Add `host all all 172.16.0.0/12 scram-sha-256` (Docker RFC 1918) |
+| 13 | Docker hairpin NAT: container can't reach its own forwarded port | `extra_hosts`: own hostname → 127.0.0.1, peer → WireGuard IP |
+| 14 | pg_hba.conf blocks Docker bridge networks | Add `host all all 172.16.0.0/12 scram-sha-256` |
 | 20 | Stale `postmaster.pid` after unclean stop | Entrypoint wrapper cleans PID + socket files on startup |
-| 37 | repmgrd `conninfo` with `host=127.0.0.1` masked failures | Cross-wire via extra_hosts: peer sees real NetBird IP |
-| 41 | `promote_command` used `/usr/bin/repmgr` (doesn't exist) | Use `$(which repmgr)` -- actual path is `/usr/lib/postgresql/18/bin/repmgr` |
-| 49 | Old entrypoint wrapper blindly trusted `REPMGR_ROLE` env var — after failover, old primary restarted as primary creating split-brain | Rewritten wrapper: `determine_role()` queries peer + compares timelines on every boot; `promote-check.sh` validates connectivity before promotion; runtime watchdog detects dual-primary and self-demotes lower timeline; `.demoted` marker survives restarts |
+| 37 | repmgrd `conninfo` with `host=127.0.0.1` masked failures | Cross-wire via extra_hosts: peer sees real WireGuard IP |
+| 41 | `promote_command` used `/usr/bin/repmgr` (doesn't exist) | Use `$(which repmgr)` — actual path is `/usr/lib/postgresql/18/bin/repmgr` |
+| 43 | PostgreSQL on `0.0.0.0` with `trust` auth | Bind to WireGuard IP only, `scram-sha-256` for all pg_hba entries |
+| 49 | Entrypoint blindly trusted `REPMGR_ROLE` env var — split-brain after failover | `determine_role()` queries peer + compares timelines; `promote-check.sh` validates connectivity; runtime watchdog self-demotes lower timeline; `.demoted` marker survives restarts |
+| 57 | Replication slots hold WAL indefinitely when standby offline | `max_slot_wal_keep_size = 10GB`; standby re-clones if behind |
+| 67 | `set -e` + `[ -e "$f" ] && { cmd }` returns exit 1 when test is false | Use `if [ -e "$f" ]; then cmd; fi` instead of `&&` short-circuit |
+| 68 | `determine_role()` debug on stdout polluted `$(determine_role)` capture | Redirect debug to stderr (`>&2`); only final role goes to stdout |
+| 69 | `promote-check.sh` in `/usr/local/bin/` not writable by postgres user | Write to `/tmp/promote-check.sh` |
+| 70 | `docker_container_exec` returns dict without `.rc` during startup | Use `pg_ready.rc \| default(1) == 0` |
+| 80 | `listen_addresses` missing from `postgresql.conf` — default `localhost` | Added `listen_addresses = '*'` to `init_primary()` postgresql.conf block |
+| 81 | Superuser password never set — scram-sha-256 auth fails for `postgres` | Added `ALTER USER postgres WITH PASSWORD` in `init_primary()` |
+| 86 | Zitadel/Gatus `start-from-init` on PG standby — migrations need write access | Two-play pattern: PG primary node runs first, then remaining nodes |
+
+### Traefik & ACME
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 74 | Traefik v3.6 filters unhealthy/starting containers from routing | Removed Docker healthcheck from netbird-server |
+| 75 | Traefik can't reach PowerDNS API from inside container via host IP | Traefik joins `powerdns_internal` network; uses `http://powerdns-nginx:8081` |
+| 76 | `defaultCertificate` (empty) + `defaultGeneratedCert` conflict | Removed empty `defaultCertificate` block |
+| 89 | PDNS API URL via WireGuard IP relied on fragile Docker DNAT hairpin | Same as #75 — direct Docker network, no DNAT |
 
 ### NetBird
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 17 | NetBird IPs change on re-enrollment (fresh PG DB) | Check IPs via `netbird status --json`, update all configs |
-| 24 | Circular boot dependency: NetBird needs PG via WireGuard, WireGuard needs NetBird | Connect netbird-server to `postgresql_default` Docker network, use `host=postgresql` in DSN |
-| 36 | Dashboard auth breaks after netbird-server restart | Clear cookies, run `netbird login` on clients |
-| 38 | NS2 DSN was NS1-first, causing 30s timeout when NS1 down | Each node lists itself first in multi-host DSN |
-| 39 | `idp.db` (Dex credentials) not replicated via PostgreSQL | Ansible syncs idp.db NS1->NS2 on every deploy |
+| 17 | NetBird IPs change on re-enrollment (fresh PG DB) | Check IPs via `netbird status --json`, update configs |
+| 72 | Encryption key: 32 alphanumeric chars base64-decode to only 24 bytes | `openssl rand -base64 32` (44 chars → 32 bytes) |
+| 82 | Health check uses DNS domain before record exists | Use `ansible_host` with `Host` header (same as Zitadel) |
+| 84 | `config.yaml` templated before OIDC client_id created | Re-template task after OIDC app creation triggers restart handler |
 
 ### Backup
 
@@ -167,109 +188,49 @@ Hard-won lessons from deployment. These **will** bite you if ignored.
 | 5 | Restic `--group-by "host"` causes snapshot conflicts | Use `--group-by "host,paths"` |
 | 9 | NetBird SSH config intercepts all SSH connections | Backup script uses `-F /dev/null` in SFTP args |
 | 10 | Wrong restic password corrupts repo permanently | Wipe ALL files before re-init |
-| 42 | `ProtectSystem=strict` in systemd blocks restic reading `/opt/*` | Use `ProtectSystem=full` (protects `/usr`,`/boot` but allows `/opt` reads) |
+| 42 | `ProtectSystem=strict` blocks restic reading `/opt/*` | Use `ProtectSystem=full` |
 
-### Security
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 43 | PostgreSQL 5432 on `0.0.0.0` with `trust` auth for repmgr | Bind to NetBird IP only, use `scram-sha-256` for all pg_hba entries |
-| 44 | `lookup('password', '/dev/null')` regenerates secrets each run | Use `lookup('password', 'path/to/file')` to persist generated secrets |
-| 45 | PowerDNS `.secrets` file and API key in debug output | Removed .secrets file; removed API key from debug msg; pdns.conf mode 0640 (group: pdns UID 953) |
-| 46 | PowerDNS `webserver-allow-from=0.0.0.0/0` | Restrict to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` |
-| 47 | Docker images unpinned (`latest` tags) | Pin: `sourcemation/postgres-repmgr:5.5.0`, `netbird-server:0.66.4`, `dashboard:v2.34.2`, `pdns-auth-49:4.9.13`, `nginx:1.27-alpine` |
-| 48 | nftables `netbird_management` group check never matched (ports 443/10000 never opened) | Changed to check `dns_servers` group (both ns1 and ns2 run NetBird management) |
-| 65 | Single shared SSH key for all servers — compromise of one key exposes all | Per-server ED25519 keypairs auto-generated in `.generated_secrets/ssh/`; bootstrapping SSH key (`hosting-platform.key`) used only for initial deploy |
-
-### Disk & Data Growth
+### Security & Secrets
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 57 | Replication slots hold WAL indefinitely when standby offline | `max_slot_wal_keep_size = 10GB` caps WAL per slot; standby re-clones if behind |
-| 58 | PowerDNS containers (pdns, nginx, pdns-admin) had no log limits | Added `json-file` driver with `max-size: 100m, max-file: 2` to all containers |
-| 59 | No Docker daemon.json — new containers get unlimited logs | Deploy `daemon.json` with default `max-size: 100m, max-file: 3` |
-| 60 | No Docker image/container cleanup — old images accumulate | Weekly `docker-cleanup.timer` prunes images >7d, stopped containers, build cache |
-| 61 | systemd journal grows unbounded (Debian default ~10% of disk) | `journald.conf.d/size-limit.conf`: `SystemMaxUse=500M`, `MaxRetentionSec=4week` |
-| 62 | No disk space alerting — discover full disk when services crash | `disk-monitor.timer` (hourly): warns at 80%, critical at 90%, webhook alerts |
-| 63 | Zitadel event store (append-only) + all DB tables lack scheduled maintenance | Weekly `pg-maintenance.timer`: VACUUM ANALYZE + REINDEX SYSTEM on all databases |
-| 64 | Restic cache (`/var/cache/restic`) grows indefinitely | Weekly `restic cache --cleanup` runs after integrity check in backup script |
+| 44 | `lookup('password', '/dev/null')` regenerates secrets each run | Use `lookup('password', 'path/to/file')` to persist |
+| 47 | Docker images unpinned (`latest` tags) | Pin all images to specific versions |
+| 65 | Single shared SSH key for all servers | Per-server ED25519 keypairs in `.generated_secrets/ssh/` |
 
 ### IPv6
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 50 | PowerDNS `local-address=0.0.0.0` served DNS on IPv4 only | Changed to `0.0.0.0, ::` and added `[::]:53` port bindings |
-| 51 | Traefik ports bound to IPv4 only, Docker network IPv4-only | Added `[::]:80/443` bindings, dual-stack IPAM with ULA subnet |
-| 52 | No AAAA DNS records in default config | Added AAAA record template in `all.example.yml`, `public_ipv6` in inventory |
-| 53 | `pg_hba.conf` only allowed IPv4 Docker CIDRs | Added `fd00::/8` (Docker ULA) to pg_hba rules |
-| 54 | PostgreSQL promote-check only tested IPv4 DNS resolvers | Added `2001:4860:4860::8888` and `2606:4700:4700::1111` |
-| 55 | NetBird STUN port bound to IPv4 only | Added explicit `[::]:3478` binding |
-| 56 | NetBird trusted proxy list was IPv4 only | Added Traefik IPv6 container address to `trustedHTTPProxies` |
-| 66 | Docker IPv6 ULA subnets used non-hex labels (`fd00:traefik::`, `fd00:netbird::`) — invalid IPv6 | Use proper ULA: `fd00:dead:beef:1::/112` (Traefik), `fd00:dead:beef:2::/112` (NetBird) |
+| 50 | PowerDNS `local-address=0.0.0.0` — IPv4 only | Changed to `0.0.0.0, ::` with `[::]:53` port bindings |
+| 51 | Traefik ports IPv4 only, Docker network IPv4-only | `[::]:80/443` bindings, dual-stack IPAM with ULA subnet |
+| 52 | No AAAA DNS records in default config | AAAA template in `all.example.yml`, `public_ipv6` in inventory |
+| 53 | `pg_hba.conf` only allowed IPv4 Docker CIDRs | Added `fd00::/8` (Docker ULA) |
+| 54 | Promote-check only tested IPv4 DNS resolvers | Added `2001:4860:4860::8888` and `2606:4700:4700::1111` |
+| 55 | NetBird STUN port bound to IPv4 only | Added `[::]:3478` binding |
+| 56 | NetBird trusted proxy list IPv4 only | Added Traefik IPv6 container address |
+| 66 | Docker ULA subnets used non-hex labels (`fd00:traefik::`) | Proper ULA: `fd00:dead:beef:1::/112`, `fd00:dead:beef:2::/112` |
 
-### PostgreSQL Entrypoint
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 67 | `set -e` + `[ -e "$f" ] && { cmd }` — returns exit 1 when test is false, crashing the script | Use `if [ -e "$f" ]; then cmd; fi` instead of `&&` short-circuit |
-| 68 | `determine_role()` debug messages (`echo "==> ..."`) on stdout polluted `$(determine_role)` capture — role resolved as multi-line string, fell through to FATAL | Redirect all debug messages to stderr (`>&2`); only the final `echo "primary"` / `echo "standby"` goes to stdout |
-| 69 | `promote-check.sh` written to `/usr/local/bin/` which is not writable by the postgres user in the container | Changed to `/tmp/promote-check.sh` |
-| 70 | `docker_container_exec` returns a dict without `.rc` when container is still starting — `until: pg_ready.rc == 0` fails with "object has no attribute 'rc'" | Use `pg_ready.rc \| default(1) == 0` |
-
-### PowerDNS Deployment
+### Disk & Data Growth
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 71 | `pdns.conf` deployed with mode `0600` (root-only) — PowerDNS container runs as `pdns` user (UID 953) and cannot read it | Changed to `mode: 0640, group: 953` |
+| 58 | PowerDNS containers had no log limits | `json-file` driver with `max-size: 100m, max-file: 2` |
+| 59 | No Docker daemon.json — unlimited logs | `daemon.json` with default `max-size: 100m, max-file: 3` |
+| 60 | No Docker image cleanup — old images accumulate | Weekly `docker-cleanup.timer` |
+| 61 | systemd journal grows unbounded | `SystemMaxUse=500M`, `MaxRetentionSec=4week` |
+| 62 | No disk space alerting | `disk-monitor.timer` (hourly): warns 80%, critical 90% |
+| 63 | All DB tables lack scheduled maintenance | Weekly `pg-maintenance.timer`: VACUUM ANALYZE + REINDEX |
+| 64 | Restic cache grows indefinitely | Weekly `restic cache --cleanup` in backup script |
 
-### NetBird Deployment
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 72 | `netbird_datastore_encryption_key` generated as 32 alphanumeric chars — NetBird base64-decodes it, producing only 24 bytes instead of required 32 | Generate with `openssl rand -base64 32` (44 chars that decode to 32 bytes); custom task block replaces `lookup('password')` |
-
-### Ansible Control Machine
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 73 | `ansible.cfg` silently ignored when working directory is world-writable (Ansible security policy) — SSH multiplexing, callbacks, and all custom config disabled | Ensure `chmod 755` on the project directory; or set `ANSIBLE_CONFIG` env var explicitly |
-
-### Traefik & Docker Health Checks
+### Ansible & Control Machine
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 74 | Traefik v3.6 filters unhealthy/starting containers from routing — NetBird server had no working healthcheck (no wget/curl in image, `/dev/tcp` is bash-only), so Traefik permanently excluded it, making management/gRPC/OAuth2 routes invisible | Removed Docker healthcheck from netbird-server; Traefik routes to all containers with `traefik.enable=true` regardless of health |
-| 75 | Traefik PDNS API URL `http://127.0.0.1:8081` unreachable from inside container — localhost in container != host localhost | Traefik joins `powerdns_powerdns_internal` Docker network (conditional); uses `http://powerdns-nginx:8081` via container DNS |
-| 76 | Traefik `dynamic.yml` had both `defaultCertificate` (empty) and `defaultGeneratedCert` — conflict blocked ACME wildcard cert generation | Removed empty `defaultCertificate` block; only `defaultGeneratedCert` remains |
-| 77 | ACME DNS-01 propagation check queries ALL authoritative nameservers — ns1 had no PowerDNS during early bootstrap, causing cert issuance to fail | Deploy PowerDNS on BOTH nodes before Traefik ACME (BOOTSTRAP.md updated) |
-| 78 | ACME TXT records created on ns2's PowerDNS not visible on ns1's independent PG — propagation check fails on ns1 | During bootstrap (before PG replication), manually sync `_acme-challenge` TXT records between nodes |
-| 79 | NetBird peer on ns2 can't connect to management when DNS round-robin resolves to self — circular dependency | During bootstrap, temporarily add `/etc/hosts` entry pointing `netbird.phoenix-host.net` to ns1's IP for ns2 enrollment |
-
-### PostgreSQL Entrypoint (continued)
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 80 | `listen_addresses` missing from `postgresql.conf` — `init_primary()` only set it as a CLI override during temporary startup; permanent startup read from `postgresql.conf` where default is `localhost`; all network connections (replication, app DBs) failed | Added `listen_addresses = '*'` to the `cat >> postgresql.conf` block in `init_primary()` |
-| 81 | PostgreSQL superuser password never set — `init_primary()` created repmgr user with password but never ran `ALTER USER postgres WITH PASSWORD`; pg_hba.conf requires scram-sha-256 for Docker bridge networks, so any network connection as `postgres` failed | Added `ALTER USER postgres WITH PASSWORD` after temporary startup in `init_primary()` |
-
-### NetBird Deployment (continued)
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 82 | NetBird health check used `https://{{ netbird_dashboard_domain }}/api/instance` — DNS record for `vpn.<domain>` doesn't exist yet at health check time (created later in the same role); health check fails with DNS resolution error | Changed to `https://{{ ansible_host }}/api/instance` with `Host` header (same pattern as Zitadel) |
-| 84 | NetBird `config.yaml` templated before OIDC client_id created — `audience` field missing on first deploy; NetBird not restarted after OIDC creation | Added re-template task after OIDC app creation; triggers handler to restart NetBird with correct `audience` |
-
-### fail2ban on Debian 13
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 83 | fail2ban sshd jail used `logpath = /var/log/auth.log` — Debian 13 (trixie) uses systemd journal by default, file doesn't exist; jail was silently non-functional | Changed to `backend = systemd` with `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd` |
-
-### Docker Networking
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 85 | PostgreSQL Docker network name `postgresql_default` was derived from install directory (`/opt/postgresql`) via Docker Compose default naming — changing `postgresql_install_dir` would silently break all downstream services (PowerDNS, Zitadel, NetBird, Gatus) | Explicitly named the network `postgresql_default` in docker-compose.yml so it's stable regardless of directory |
+| 73 | `ansible.cfg` ignored in world-writable directories | `chmod 755` on project directory |
+| 83 | fail2ban `logpath = /var/log/auth.log` — doesn't exist on Debian 13 | `backend = systemd` with `journalmatch` |
+| 87 | `community.docker.docker_network` needs `python3-docker` | Added to common role base packages |
+| 88 | `wg genkey` on controller — missing `wireguard-tools` | Pre-check task with clear error message and install instructions |
 
 ---
 
@@ -406,7 +367,7 @@ pre-commit run --all-files
 - Do not hardcode `/usr/bin/repmgr` (wrong path, gotcha 41)
 - Do not use `lookup('password', '/dev/null')` — secrets regenerate each run (gotcha 44)
 - Do not use `latest` tags for Docker images (gotcha 47)
-- Do not expose PostgreSQL on `0.0.0.0` — bind to NetBird IP only (gotcha 43)
+- Do not expose PostgreSQL on `0.0.0.0` — bind to WireGuard IP only (gotcha 43)
 - Do not force-push to `main` without explicit user approval
 - Do not use `pull: always` in docker_compose_v2 tasks — use `pull: missing` (wasteful re-downloads)
 - Do not change the Zitadel masterkey after initialization — it cannot be rotated (encrypted data becomes inaccessible)

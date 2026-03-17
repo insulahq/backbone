@@ -32,11 +32,11 @@ traefik_acme_dns_provider: pdns
 traefik_wildcard_cert: true
 
 # PowerDNS API URL for DNS-01 challenge.
-# PowerDNS API accessible via WireGuard IP (host-level port binding).
+# Traefik joins the powerdns_internal Docker network and reaches the API
+# via container DNS — no host-level port binding or DNAT involved (gotcha 75).
 # Both nodes run PowerDNS with shared PostgreSQL HA backend (Native mode),
 # so each node uses its OWN local PowerDNS API for ACME challenges.
-# No single point of failure: if one node is down, the other renews certs independently.
-traefik_pdns_api_url: "http://{{ wireguard_ip | default('127.0.0.1', true) }}:8081"
+traefik_pdns_api_url: "http://powerdns-nginx:8081"
 
 # Logging
 traefik_log_level: INFO

@@ -9,6 +9,10 @@ services:
 {% if traefik_public_ipv6_enabled | default(true) %}
         ipv6_address: {{ traefik_container_ipv6 }}
 {% endif %}
+      # Join PowerDNS internal network for DNS-01 ACME — Traefik reaches the
+      # PowerDNS API via container DNS (http://powerdns-nginx:8081) instead of
+      # relying on Docker DNAT through the host's WireGuard IP (gotcha 75).
+      powerdns_internal: {}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
@@ -72,4 +76,6 @@ networks:
   traefik_public:
     external: true
     name: {{ traefik_public_network }}
+  powerdns_internal:
+    external: true
 

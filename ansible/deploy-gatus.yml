@@ -1,16 +1,22 @@
 ---
 # Deploy Gatus monitoring dashboard
-# Deployed with serial: 1 — first node creates DB before second starts.
-# IMPORTANT: Do not remove serial: 1. DB creation uses
-# "when: inventory_hostname == postgresql_primary_node" (not run_once).
-# Without serial:1, both hosts run in parallel and the non-primary would
-# start Gatus before the DB exists, causing connection failures.
+# PG primary node runs first — DB creation and schema migration need write
+# access. The standby node's local PG is read-only (gotcha 86).
 
 - import_playbook: _ssh-keys.yml
 
-- name: Deploy Gatus monitoring
+- name: Deploy Gatus on PostgreSQL primary node first
   hosts: dns_servers
   serial: 1
   tags: [gatus]
   roles:
-    - gatus
+    - role: gatus
+      when: inventory_hostname == postgresql_primary_node
+
+- name: Deploy Gatus on remaining nodes
+  hosts: dns_servers
+  serial: 1
+  tags: [gatus]
+  roles:
+    - role: gatus
+      when: inventory_hostname != postgresql_primary_node

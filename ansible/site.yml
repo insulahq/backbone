@@ -70,12 +70,24 @@
     - traefik
 
 # Step 6: Zitadel IAM (OIDC provider for all services)
-- name: Deploy Zitadel IAM
+# PG primary first — start-from-init runs DB migrations that need write access.
+# The standby node's local PG is read-only; Zitadel connects to local 'postgresql'
+# container via Docker DNS, so it MUST run on the PG primary first (gotcha 86).
+- name: Deploy Zitadel on PostgreSQL primary node first
   hosts: dns_servers
   serial: 1
   tags: [zitadel]
   roles:
-    - zitadel
+    - role: zitadel
+      when: inventory_hostname == postgresql_primary_node
+
+- name: Deploy Zitadel on remaining nodes
+  hosts: dns_servers
+  serial: 1
+  tags: [zitadel]
+  roles:
+    - role: zitadel
+      when: inventory_hostname != postgresql_primary_node
 
 # Step 7: NetBird VPN mesh management (Zitadel auth, PG backend)
 - name: Deploy NetBird management server
@@ -99,12 +111,22 @@
     - portainer
 
 # Step 10: Gatus monitoring dashboard (Zitadel OIDC)
-- name: Deploy Gatus monitoring
+# PG primary first — DB/schema creation needs write access (gotcha 86).
+- name: Deploy Gatus on PostgreSQL primary node first
   hosts: dns_servers
   serial: 1
   tags: [gatus]
   roles:
-    - gatus
+    - role: gatus
+      when: inventory_hostname == postgresql_primary_node
+
+- name: Deploy Gatus on remaining nodes
+  hosts: dns_servers
+  serial: 1
+  tags: [gatus]
+  roles:
+    - role: gatus
+      when: inventory_hostname != postgresql_primary_node
 
 # Step 11: Backup to Hetzner Storagebox
 - name: Deploy backup configuration
