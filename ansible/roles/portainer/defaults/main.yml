@@ -4,13 +4,10 @@
 # Bound to 0.0.0.0 but blocked on public interfaces via nftables FORWARD chain.
 # Accessible via WireGuard (wg0) and NetBird (wt0) only.
 
-# Portainer CE — management UI
+# Portainer CE + Agent — same version for compatibility
 portainer_version: "2.39.0"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
-
-# Portainer Agent — remote Docker management
-portainer_agent_version: "2.27.6"
-portainer_agent_image: "portainer/agent:{{ portainer_agent_version }}"
+portainer_agent_image: "portainer/agent:{{ portainer_version }}"
 
 # Installation directory
 portainer_install_dir: /opt/portainer

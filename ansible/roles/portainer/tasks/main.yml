@@ -31,7 +31,7 @@
 - name: Display Portainer deployment status
   debug:
     msg:
-      - "Portainer {{ portainer_version }} + Agent {{ portainer_agent_version }} deployed on {{ inventory_hostname }}"
+      - "Portainer CE + Agent {{ portainer_version }} deployed on {{ inventory_hostname }}"
       - "Dashboard: http://<wireguard-or-netbird-ip>:{{ portainer_port }}"
       - "Agent: http://<wireguard-or-netbird-ip>:{{ portainer_agent_port }}"
       - "Accessible via WireGuard and NetBird only (public access blocked by nftables)."
