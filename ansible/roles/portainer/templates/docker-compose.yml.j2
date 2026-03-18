@@ -1,11 +1,11 @@
 ---
-# Portainer CE + Agent — Docker Management ({{ inventory_hostname }})
-# Portainer server uses host networking — can reach WireGuard and NetBird IPs
-# for connecting to remote agents. nftables blocks public access (gotcha 114).
-# Agent on 0.0.0.0:9001 — same nftables protection.
+# Portainer — Docker Management ({{ inventory_hostname }})
+# nftables blocks public access on ports 9000/9001 (gotcha 114).
+# Accessible via WireGuard (wg0) and NetBird (wt0) only.
 
 services:
-  # Portainer CE — Docker management UI
+{% if inventory_hostname == portainer_server_node %}
+  # Portainer CE — Docker management UI (single instance, manages all nodes via agents)
   portainer:
     image: {{ portainer_image }}
     container_name: portainer
@@ -20,8 +20,9 @@ services:
       options:
         max-size: "100m"
         max-file: "2"
+{% endif %}
 
-  # Portainer Agent — allows remote management from the other node's Portainer
+  # Portainer Agent — managed by the CE instance on {{ portainer_server_node }}
   portainer-agent:
     image: {{ portainer_agent_image }}
     container_name: portainer-agent
@@ -40,5 +41,7 @@ services:
         max-size: "100m"
         max-file: "2"
 
+{% if inventory_hostname == portainer_server_node %}
 volumes:
   portainer_data:
+{% endif %}

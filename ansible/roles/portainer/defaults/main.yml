@@ -12,6 +12,9 @@ portainer_agent_image: "portainer/agent:{{ portainer_version }}"
 # Installation directory
 portainer_install_dir: /opt/portainer
 
+# Which node runs the Portainer CE server (single instance manages all nodes)
+portainer_server_node: "ns2"
+
 # Ports — blocked on public interfaces by nftables (gotcha 114)
 portainer_port: 9000
 portainer_agent_port: 9001
