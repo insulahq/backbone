@@ -33,9 +33,9 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.66.4 | Combined management+signal+relay, PostgreSQL backend, round-robin DNS |
-| Zitadel | 2.71.0 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
+| Zitadel | 4.12.3 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
-| Portainer | 2.24.1 | Docker management UI, WireGuard-only access |
+| Portainer | 2.39.0 | Docker management UI, WireGuard + NetBird access |
 | Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
 
 ### Maintenance Automation
@@ -231,6 +231,56 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 83 | fail2ban `logpath = /var/log/auth.log` — doesn't exist on Debian 13 | `backend = systemd` with `journalmatch` |
 | 87 | `community.docker.docker_network` needs `python3-docker` | Added to common role base packages |
 | 88 | `wg genkey` on controller — missing `wireguard-tools` | Pre-check task with clear error message and install instructions |
+| 90 | `apt update` with `cache_valid_time: 3600` trusts stale Hetzner image cache — packages not found | Removed `cache_valid_time`; always refresh on first run |
+
+### PowerDNS Deployment
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 91 | Schema init task silently skipped — `docker_container_exec` with YAML `>` folding + psql had parsing issues; condition evaluated wrong | Rewrote to use `bash -c` wrapper; inverted condition to check for `"1"` (schema exists) instead of empty string |
+| 92 | `run_once: true` on zone/record creation tasks ran on first inventory host (ns1 = PG standby); all writes failed on read-only DB | Changed to `when: inventory_hostname == postgresql_primary_node` for all write operations |
+| 93 | `powerdns_internal` network declared as compose-managed but pre-created by Traefik role; Docker Compose rejected mismatched labels | Changed to `external: true` in PowerDNS compose; Traefik role creates the network |
+
+### Traefik & ACME (continued)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 94 | `PDNS_API_KEY` empty in Traefik compose — PowerDNS role sets the key via `set_fact` at runtime, but Traefik role doesn't load it | Added task to load API key from `.generated_secrets/powerdns_api_key` in Traefik role |
+| 95 | ACME on PG standby node — local PowerDNS can't write TXT challenge records (read-only PG) | Standby node's Traefik uses primary node's PowerDNS API via WireGuard IP |
+| 96 | ACME `could not determine authoritative nameservers` — Traefik's propagation check failed to resolve NS chain | Added `dnschallenge.resolvers=8.8.8.8:53,1.1.1.1:53` to use public DNS for propagation checks |
+
+### Zitadel
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 97 | Zitadel v2.65–v2.71 migration 34 creates `UNLOGGED` partitioned table — PostgreSQL 18 doesn't support this | Upgraded to Zitadel v4.12.3 which handles PG 18 correctly |
+| 98 | `config.yaml` and `steps.yaml` deployed with mode `0600` — Zitadel container runs as non-root and can't read them | Changed to mode `0644` (same pattern as PowerDNS gotcha 71) |
+| 99 | Admin password generated with `chars=ascii_letters,digits` — Zitadel requires at least one symbol | Changed to `chars=ascii_letters,digits,punctuation` |
+| 100 | Docker healthcheck (`/app/zitadel ready`) fails during init/migration — Traefik permanently excludes container from routing | Removed Docker healthcheck (same pattern as gotcha 74) |
+| 101 | Zitadel v4 listens on plain HTTP behind Traefik but defaults to expecting TLS; `h2c` backend scheme caused routing failures | Added `--tlsMode external` flag; removed `h2c` scheme from Traefik service label |
+| 102 | Login V2 UI requires a Login Client service user + `ZITADEL_SERVICE_USER_TOKEN` env var — without it, `/ui/v2/login/` returns 404; catch-22: can't create the user without a working login | Disabled Login V2 (`DefaultInstance.Features.LoginV2.Required: false`); v1 login works out of the box |
+| 103 | OIDC project search in all roles hardcoded project name `"Hosting Platform"` — user created `"Hosting Apps"` | Changed to use `zitadel_project_id` variable directly when set; skips search/create entirely |
+| 104 | OIDC app creation returned `409 Conflict` (already exists) on re-run — task failed instead of succeeding idempotently | Added `status_code: [200, 409]` to all OIDC app creation tasks |
+
+### NetBird
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 105 | NetBird v0.66+ uses embedded Dex IdP for local auth — config pointed `auth.issuer` to Zitadel, causing JWKS mismatch (tokens signed by Zitadel, validated against embedded Dex keys) | Changed `issuer` to `https://vpn.<domain>/oauth2` (embedded IdP endpoint); Zitadel added as external IdP via dashboard UI |
+| 106 | `/oauth2` path missing from Traefik backend router — embedded Dex endpoint caught by dashboard nginx (priority 1) which returned HTML instead of OIDC JSON | Added `PathPrefix(\`/oauth2\`)` to the `netbird-backend` Traefik router rule |
+| 107 | Dashboard `OidcTrustedDomains.js` template only includes management endpoint — OIDC service worker blocks callbacks from untrusted auth domain | Template needs auth authority domain added (ephemeral fix; permanent fix requires custom template in role) |
+| 108 | Dashboard nginx `try_files $uri $uri.html $uri/ =404` — SPA callback routes `/nb-auth` and `/nb-silent-auth` have no static files; returns 404 on OIDC redirect back | Needs nginx config override to `try_files $uri $uri.html $uri/ /index.html` (ephemeral fix on container restart) |
+| 109 | `dnsDomain` missing from `config.yaml` — defaults to `netbird.selfhosted` instead of configured value | Added `dnsDomain: "{{ netbird_peer_dns_domain }}"` to config template; existing accounts need DB update (`settings_dns_domain`) |
+| 110 | Zitadel access tokens are opaque by default — NetBird management server can't validate non-JWT tokens (`token is malformed: invalid number of segments`) | Set `accessTokenType: OIDC_TOKEN_TYPE_JWT` on the OIDC app via Zitadel API (only relevant if Zitadel is used as external IdP) |
+| 111 | `idp.db` (embedded Dex user credentials) stored as SQLite in Docker volume — not replicated via PostgreSQL; logins fail on the node missing it | Manual sync: `docker cp` from source node to target; documented in BOOTSTRAP.md Step 7 |
+
+### Portainer
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 112 | Docker healthcheck uses `wget` which doesn't exist in Portainer CE image — container permanently shows `unhealthy` | Removed Docker healthcheck (same pattern as gotcha 74) |
+| 113 | Portainer admin creation times out after 5 minutes — instance locks and requires restart | Document in BOOTSTRAP.md; restart container to reset the window |
+| 114 | Portainer bound to WireGuard IP only — not reachable via NetBird mesh | Changed to `0.0.0.0` binding; nftables FORWARD chain drops port 9000 from public interfaces (allows `wg0`, `wt0`, `lo` only) |
 
 ---
 
