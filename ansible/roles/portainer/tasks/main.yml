@@ -109,7 +109,7 @@
       appType: "OIDC_APP_TYPE_WEB"
       authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
       devMode: true
-    status_code: [200]
+    status_code: [200, 409]
     validate_certs: "{{ portainer_validate_certs | default(false) }}"
   register: portainer_oidc_app
   run_once: true
