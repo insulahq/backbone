@@ -6,7 +6,7 @@
 # Access via http://<netbird-ip>:9000 from within the VPN mesh.
 
 # Version — pin to a tested stable release (gotcha 47)
-portainer_version: "2.24.1"
+portainer_version: "2.39.0"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
 
 # OAuth2 Proxy — OIDC sidecar in front of Portainer
