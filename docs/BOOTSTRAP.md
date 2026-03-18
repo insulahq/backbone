@@ -218,8 +218,9 @@ that enables automated OIDC app creation for downstream services.
 
 ## Step 7: Deploy NetBird VPN Mesh
 
-NetBird uses Zitadel for authentication (no embedded IdP). The OIDC app is
-auto-created in Zitadel during deployment.
+NetBird uses an embedded Dex IdP for local authentication. External identity
+providers (Zitadel, Google, etc.) can be added later through the dashboard
+Settings > Identity Providers.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
@@ -227,11 +228,36 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
 
 The NetBird dashboard is available at `https://vpn.<domain>`.
 
+### Manual Step: Create Admin Account
+
+1. Open `https://vpn.<domain>` — you'll be redirected to `/setup`
+2. Create your admin account (email + password)
+3. Log in with the new credentials
+
+### Manual Step: Sync `idp.db` to the second node
+
+The embedded Dex IdP stores user credentials in `/var/lib/netbird/idp.db`
+(a SQLite file inside the Docker volume). This file is **NOT replicated** via
+PostgreSQL — it exists only on the node where the admin account was created.
+Without syncing it, logins on the other node will fail.
+
+```bash
+# Copy idp.db from ns2 (where admin was created) to ns1:
+ssh root@<NS2_IP> "docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db"
+scp root@<NS2_IP>:/tmp/idp.db /tmp/idp.db
+scp /tmp/idp.db root@<NS1_IP>:/tmp/idp.db
+ssh root@<NS1_IP> "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
+```
+
+> **Note:** Repeat this sync whenever new local users are created. If you add
+> Zitadel as an external IdP (via Settings > Identity Providers), SSO users
+> authenticate against Zitadel directly and don't need `idp.db` sync.
+
 ## Step 8: Enroll NetBird Peers
 
 ### Manual Step: Create Setup Key
 
-1. Log in to `https://vpn.<domain>` (authenticates via Zitadel)
+1. Log in to `https://vpn.<domain>`
 2. Go to Settings > Setup Keys > Add Key
 3. Type: Reusable, no usage limit
 4. Set `netbird_setup_key` in `group_vars/all.yml`
@@ -247,7 +273,6 @@ Peers resolve as `ns1.netbird`, `ns2.netbird` within the mesh.
 ## Step 9: Deploy Portainer
 
 Docker management UI, accessible only via WireGuard IP (`http://10.100.0.x:9000`).
-Uses Zitadel OIDC via OAuth2 Proxy sidecar.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
@@ -255,7 +280,7 @@ ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
 
 ## Step 10: Deploy Gatus Monitoring
 
-HA monitoring dashboard with push alerting. Uses Zitadel OIDC.
+HA monitoring dashboard with push alerting.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
