@@ -42,12 +42,7 @@ services:
       OAUTH2_PROXY_PROXY_WEBSOCKETS: "true"
     networks:
       - portainer_internal
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4180/ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # No Docker healthcheck — image has no wget/curl (gotcha 74)
     logging:
       driver: "json-file"
       options:
@@ -80,12 +75,7 @@ services:
     networks:
       - portainer_internal
 {% endif %}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/api/system/status"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+    # No Docker healthcheck — image has no wget/curl (gotcha 74)
     logging:
       driver: "json-file"
       options:

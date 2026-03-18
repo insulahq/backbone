@@ -26,12 +26,7 @@ services:
       - traefik.http.routers.gatus.tls=true
       - traefik.http.routers.gatus.service=gatus
       - traefik.http.services.gatus.loadbalancer.server.port={{ gatus_port }}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:{{ gatus_port }}/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+    # No Docker healthcheck — image has no wget/curl (gotcha 74)
     logging:
       driver: "json-file"
       options:
