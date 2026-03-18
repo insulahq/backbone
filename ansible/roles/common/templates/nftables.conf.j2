@@ -60,10 +60,11 @@ table inet filter {
     # Allow established and related connections
     ct state established,related accept
     
-    # Block Portainer (port 9000) from public interfaces — only allow via
+    # Block Portainer (ports 9000/9001) from public interfaces — only allow via
     # WireGuard (wg0) and NetBird (wt0) tunnels. Docker port bindings on
     # 0.0.0.0 bypass the INPUT chain (gotcha 1), so we block here in FORWARD.
     iifname != "wg0" iifname != "wt0" iifname != "lo" tcp dport {{ portainer_port | default(9000) }} drop
+    iifname != "wg0" iifname != "wt0" iifname != "lo" tcp dport {{ portainer_agent_port | default(9001) }} drop
     
     # Docker will inject its own rules here
     # DO NOT add custom DNAT or SNAT rules — let Docker manage forwarding

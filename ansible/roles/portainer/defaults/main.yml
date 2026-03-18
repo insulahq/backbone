@@ -1,33 +1,20 @@
 ---
 # Portainer Role — Default Variables
-# Deploys Portainer CE for Docker management on each server.
-# Bound to NetBird IP only — NOT publicly accessible.
-# OAuth2 Proxy sidecar handles Zitadel OIDC authentication.
-# Access via http://<netbird-ip>:9000 from within the VPN mesh.
+# Deploys Portainer CE + Agent for Docker management on each server.
+# Bound to 0.0.0.0 but blocked on public interfaces via nftables FORWARD chain.
+# Accessible via WireGuard (wg0) and NetBird (wt0) only.
 
-# Version — pin to a tested stable release (gotcha 47)
+# Portainer CE — management UI
 portainer_version: "2.39.0"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
 
-# OAuth2 Proxy — OIDC sidecar in front of Portainer
-oauth2_proxy_version: "v7.7.1"
-oauth2_proxy_image: "quay.io/oauth2-proxy/oauth2-proxy:{{ oauth2_proxy_version }}"
+# Portainer Agent — remote Docker management
+portainer_agent_version: "2.27.6"
+portainer_agent_image: "portainer/agent:{{ portainer_agent_version }}"
 
 # Installation directory
 portainer_install_dir: /opt/portainer
 
-# Bind interface — WireGuard tunnel IP only (not public)
-portainer_bind_interface: "{{ wireguard_ip | default('127.0.0.1', true) }}"
-
-# Port exposed on the NetBird interface (oauth2-proxy listens here)
+# Ports — blocked on public interfaces by nftables (gotcha 114)
 portainer_port: 9000
-
-# Zitadel domain (used for OIDC discovery and API calls)
-zitadel_domain: "auth.{{ platform_domain }}"
-
-# OIDC configuration (Zitadel)
-# Set via zitadel_service_pat (automated) or manually (see all.example.yml)
-portainer_oidc_issuer_url: "https://{{ zitadel_domain }}"
-portainer_oidc_client_id: ""
-portainer_oidc_client_secret: ""
-# portainer_oidc_cookie_secret: auto-generated and persisted in .generated_secrets/
+portainer_agent_port: 9001

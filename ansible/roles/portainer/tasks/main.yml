@@ -1,154 +1,14 @@
 ---
 # Portainer Role — Main Tasks
-# Deploys Portainer CE with OAuth2 Proxy sidecar for Zitadel OIDC.
-# Bound to NetBird IP only — not publicly accessible.
+# Deploys Portainer CE + Agent for Docker management.
+# Bound to 0.0.0.0 but blocked on public interfaces via nftables FORWARD chain.
+# Accessible via WireGuard (wg0) and NetBird (wt0) only.
 
 - name: Create Portainer installation directory
   file:
     path: "{{ portainer_install_dir }}"
     state: directory
     mode: '0755'
-  tags: [portainer]
-
-# --- Secret generation (idempotent, persisted to .generated_secrets/) ---
-
-- name: Ensure secrets directory exists on controller
-  file:
-    path: "{{ playbook_dir }}/.generated_secrets"
-    state: directory
-    mode: '0700'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  tags: [portainer]
-
-- name: Generate OAuth2 Proxy cookie secret if not set
-  set_fact:
-    portainer_oidc_cookie_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/portainer_oidc_cookie_secret length=32 chars=ascii_letters,digits') }}"
-  when: portainer_oidc_cookie_secret is not defined or portainer_oidc_cookie_secret | length == 0
-  no_log: true
-  tags: [portainer]
-
-# --- OIDC application creation in Zitadel (automated, requires PAT) ---
-
-- name: Load persisted Portainer OIDC client_id if available
-  set_fact:
-    portainer_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/portainer_oidc_client_id', errors='ignore') | default('', true) }}"
-  when: portainer_oidc_client_id is not defined or portainer_oidc_client_id | length == 0
-  tags: [portainer]
-
-- name: Load persisted Portainer OIDC client_secret if available
-  set_fact:
-    portainer_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/portainer_oidc_client_secret', errors='ignore') | default('', true) }}"
-  when: portainer_oidc_client_secret is not defined or portainer_oidc_client_secret | length == 0
-  no_log: true
-  tags: [portainer]
-
-- name: Search for Zitadel project (for Portainer OIDC app)
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body: {}
-    status_code: 200
-    validate_certs: "{{ portainer_validate_certs | default(false) }}"
-  register: portainer_oidc_project_search
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - portainer_oidc_client_id | default('') | length == 0
-    - zitadel_project_id is not defined or zitadel_project_id | length == 0
-  tags: [portainer]
-
-- name: Set Zitadel project ID for Portainer
-  set_fact:
-    portainer_oidc_zitadel_project_id: >-
-      {{ zitadel_project_id | default(
-         portainer_oidc_project_search.json.result[0].id
-         if (portainer_oidc_project_search.json.result | default([]) | length > 0)
-         else '') }}
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - portainer_oidc_client_id | default('') | length == 0
-  tags: [portainer]
-
-- name: Create Portainer OIDC application in Zitadel
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ portainer_oidc_zitadel_project_id }}/apps/oidc"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "Portainer"
-      redirectUris: >-
-        {{
-          groups['dns_servers']
-          | map('extract', hostvars, 'wireguard_ip')
-          | select('defined')
-          | map('regex_replace', '(.*)', 'http://\1:' + (portainer_port | string) + '/oauth2/callback')
-          | list
-        }}
-      postLogoutRedirectUris: >-
-        {{
-          groups['dns_servers']
-          | map('extract', hostvars, 'wireguard_ip')
-          | select('defined')
-          | map('regex_replace', '(.*)', 'http://\1:' + (portainer_port | string))
-          | list
-        }}
-      responseTypes:
-        - "OIDC_RESPONSE_TYPE_CODE"
-      grantTypes:
-        - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
-      appType: "OIDC_APP_TYPE_WEB"
-      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
-      devMode: true
-    status_code: [200, 409]
-    validate_certs: "{{ portainer_validate_certs | default(false) }}"
-  register: portainer_oidc_app
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - portainer_oidc_client_id | default('') | length == 0
-    - portainer_oidc_zitadel_project_id | default('') | length > 0
-  tags: [portainer]
-
-- name: Persist Portainer OIDC client_id
-  copy:
-    content: "{{ portainer_oidc_app.json.clientId }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/portainer_oidc_client_id"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  when: portainer_oidc_app is changed
-  tags: [portainer]
-
-- name: Persist Portainer OIDC client_secret
-  copy:
-    content: "{{ portainer_oidc_app.json.clientSecret }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/portainer_oidc_client_secret"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  no_log: true
-  when: portainer_oidc_app is changed
-  tags: [portainer]
-
-- name: Set OIDC client credentials from Zitadel API response
-  set_fact:
-    portainer_oidc_client_id: "{{ portainer_oidc_app.json.clientId }}"
-    portainer_oidc_client_secret: "{{ portainer_oidc_app.json.clientSecret }}"
-  run_once: true
-  no_log: true
-  when: portainer_oidc_app is changed
   tags: [portainer]
 
 # --- Deploy and start ---
@@ -171,10 +31,9 @@
 - name: Display Portainer deployment status
   debug:
     msg:
-      - "Portainer {{ portainer_version }} deployed on {{ inventory_hostname }}"
-      - "Dashboard: http://{{ portainer_bind_interface }}:{{ portainer_port }}"
-      - "OIDC: {{ 'enabled (Zitadel)' if portainer_oidc_client_id else 'disabled — set zitadel_service_pat to enable' }}"
-      - ""
-      - "Access via NetBird mesh only (not publicly accessible)."
-      - "{{ 'Zitadel login required, then create Portainer admin on first visit.' if portainer_oidc_client_id else 'On first visit, create an admin user in the Portainer UI.' }}"
+      - "Portainer {{ portainer_version }} + Agent {{ portainer_agent_version }} deployed on {{ inventory_hostname }}"
+      - "Dashboard: http://<wireguard-or-netbird-ip>:{{ portainer_port }}"
+      - "Agent: http://<wireguard-or-netbird-ip>:{{ portainer_agent_port }}"
+      - "Accessible via WireGuard and NetBird only (public access blocked by nftables)."
+      - "On first visit, create an admin user within 5 minutes (gotcha 113)."
   tags: [portainer]
