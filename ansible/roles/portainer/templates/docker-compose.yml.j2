@@ -66,7 +66,8 @@ services:
     # No host port — only reachable via oauth2-proxy
 {% else %}
     ports:
-      - "{{ portainer_bind_interface }}:{{ portainer_port }}:9000"
+      - "0.0.0.0:{{ portainer_port }}:9000"
+      - "[::]:{{ portainer_port }}:9000"
 {% endif %}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
