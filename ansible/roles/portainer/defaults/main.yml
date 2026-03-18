@@ -1,24 +1,15 @@
 ---
 # Portainer Role — Default Variables
-# Deploys Portainer CE + Agent for Docker management on each server.
-# Bound to 0.0.0.0 but blocked on public interfaces via nftables FORWARD chain.
-# Accessible via WireGuard (wg0) and NetBird (wt0) only.
+# Deploys Portainer CE for Docker management on each server.
+# Each node runs its own instance managing local Docker via socket mount.
+# Accessible via WireGuard (wg0) and NetBird (wt0) only — not publicly exposed.
 
-# Portainer CE + Agent — same version for compatibility
+# Version — pin to a tested stable release (gotcha 47)
 portainer_version: "2.39.0"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
-portainer_agent_image: "portainer/agent:{{ portainer_version }}"
 
 # Installation directory
 portainer_install_dir: /opt/portainer
 
-# Which node runs the Portainer CE server (single instance manages all nodes)
-portainer_server_node: "ns2"
-
-# Ports — blocked on public interfaces by nftables (gotcha 114)
+# Port — blocked on public interfaces by nftables (gotcha 114)
 portainer_port: 9000
-portainer_agent_port: 9001
-
-# Shared secret between Portainer CE and Agent — used for mutual authentication.
-# When set, Portainer CE must provide this secret when connecting to the agent.
-portainer_agent_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/portainer_agent_secret length=32 chars=ascii_letters,digits') }}"

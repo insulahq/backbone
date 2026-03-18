@@ -31,9 +31,8 @@
 - name: Display Portainer deployment status
   debug:
     msg:
-      - "Portainer CE + Agent {{ portainer_version }} deployed on {{ inventory_hostname }}"
+      - "Portainer CE {{ portainer_version }} deployed on {{ inventory_hostname }}"
       - "Dashboard: http://<wireguard-or-netbird-ip>:{{ portainer_port }}"
-      - "Agent: http://<wireguard-or-netbird-ip>:{{ portainer_agent_port }}"
       - "Accessible via WireGuard and NetBird only (public access blocked by nftables)."
       - "On first visit, create an admin user within 5 minutes (gotcha 113)."
   tags: [portainer]
