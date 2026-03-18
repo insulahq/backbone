@@ -1,8 +1,8 @@
 ---
 # Portainer CE + Agent — Docker Management ({{ inventory_hostname }})
-# Portainer server on 0.0.0.0:9000 — nftables blocks public access (gotcha 114).
-# Portainer agent on 0.0.0.0:9001 — same nftables protection.
-# Reachable via WireGuard (wg0) and NetBird (wt0) only.
+# Portainer server uses host networking — can reach WireGuard and NetBird IPs
+# for connecting to remote agents. nftables blocks public access (gotcha 114).
+# Agent on 0.0.0.0:9001 — same nftables protection.
 
 services:
   # Portainer CE — Docker management UI
@@ -10,9 +10,7 @@ services:
     image: {{ portainer_image }}
     container_name: portainer
     restart: unless-stopped
-    ports:
-      - "0.0.0.0:{{ portainer_port }}:9000"
-      - "[::]:{{ portainer_port }}:9000"
+    network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
@@ -31,6 +29,8 @@ services:
     ports:
       - "0.0.0.0:{{ portainer_agent_port }}:9001"
       - "[::]:{{ portainer_agent_port }}:9001"
+    environment:
+      AGENT_SECRET: "{{ portainer_agent_secret }}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker/volumes:/var/lib/docker/volumes

@@ -15,3 +15,7 @@ portainer_install_dir: /opt/portainer
 # Ports — blocked on public interfaces by nftables (gotcha 114)
 portainer_port: 9000
 portainer_agent_port: 9001
+
+# Shared secret between Portainer CE and Agent — used for mutual authentication.
+# When set, Portainer CE must provide this secret when connecting to the agent.
+portainer_agent_secret: "{{ lookup('password', playbook_dir + '/.generated_secrets/portainer_agent_secret length=32 chars=ascii_letters,digits') }}"

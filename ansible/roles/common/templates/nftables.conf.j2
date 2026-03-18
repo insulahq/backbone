@@ -45,6 +45,10 @@ table inet filter {
     # Allow all traffic on WireGuard interface (trusted backbone)
     iifname "{{ wireguard_interface | default('wg0') }}" accept
     
+    # Allow Portainer (host networking) on NetBird interface
+    iifname "wt0" tcp dport {{ portainer_port | default(9000) }} accept
+    iifname "wt0" tcp dport {{ portainer_agent_port | default(9001) }} accept
+    
 {% if ssh_break_glass_enabled %}
     # SSH break-glass access (kept open per user requirement)
     tcp dport {{ ssh_port }} accept
