@@ -63,8 +63,8 @@ services:
       - traefik.http.routers.netbird-grpc.tls=true
       - traefik.http.routers.netbird-grpc.service=netbird-server-h2c
       - traefik.http.routers.netbird-grpc.priority=100
-      # Backend router: relay, API
-      - traefik.http.routers.netbird-backend.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`) || PathPrefix(`/api`))
+      # Backend router: relay, API, embedded IdP (oauth2)
+      - traefik.http.routers.netbird-backend.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`) || PathPrefix(`/api`) || PathPrefix(`/oauth2`))
       - traefik.http.routers.netbird-backend.entrypoints=websecure
       - traefik.http.routers.netbird-backend.tls=true
       - traefik.http.routers.netbird-backend.service=netbird-server

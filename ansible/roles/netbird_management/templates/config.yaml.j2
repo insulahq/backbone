@@ -15,18 +15,16 @@ server:
   dataDir: "/var/lib/netbird"
 
   auth:
-    issuer: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
-    userIDClaim: "sub"
-{% if netbird_oidc_client_id | default('') | length > 0 %}
-    audience: "{{ netbird_oidc_client_id }}"
-{% endif %}
+    # Embedded IdP — the management server runs its own Dex instance at /oauth2.
+    # Dashboard authenticates via this endpoint, not directly to Zitadel.
+    # External IdPs (Zitadel, Google, etc.) are added via dashboard Settings.
+    issuer: "https://{{ netbird_dashboard_domain }}/oauth2"
+    signKeyRefreshEnabled: true
     dashboardRedirectURIs:
       - "https://{{ netbird_dashboard_domain }}/nb-auth"
       - "https://{{ netbird_dashboard_domain }}/nb-silent-auth"
     cliRedirectURIs:
       - "http://localhost:53000/"
-    deviceAuthorizationFlow:
-      providerURL: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
 
   reverseProxy:
     trustedHTTPProxies:
