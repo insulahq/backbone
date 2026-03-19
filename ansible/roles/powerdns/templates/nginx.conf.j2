@@ -65,9 +65,8 @@ http {
         location / {
             proxy_pass http://pdns-admin:{{ powerdns_admin_port }};
             # Use $http_host (preserves port) instead of $host (strips port).
-            # PDA's OIDC uses Flask url_for(_external=True) which reads the Host
-            # header to construct the callback URL — without the port, the redirect
-            # URI won't match what's registered in Zitadel.
+            # PDA uses Flask url_for(_external=True) which reads the Host
+            # header — without the port, generated URLs are incorrect.
             proxy_set_header Host $http_host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

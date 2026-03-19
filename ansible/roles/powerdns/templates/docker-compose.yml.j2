@@ -56,23 +56,6 @@ services:
       PDNS_API_KEY: "{{ powerdns_api_key }}"
       PDNS_API_URL: "http://pdns:{{ powerdns_webserver_port }}"
       PDNS_VERSION: "{{ powerdns_version }}"
-{% if powerdns_admin_oidc_client_id %}
-      # OIDC via Zitadel — env vars always override DB-stored settings
-      OIDC_OAUTH_ENABLED: "True"
-      OIDC_OAUTH_KEY: "{{ powerdns_admin_oidc_client_id }}"
-      OIDC_OAUTH_SECRET: "{{ powerdns_admin_oidc_client_secret }}"
-      OIDC_OAUTH_SCOPE: "{{ powerdns_admin_oidc_scopes }}"
-      OIDC_OAUTH_AUTO_CONFIGURE: "True"
-      OIDC_OAUTH_METADATA_URL: "{{ powerdns_admin_oidc_issuer_url }}/.well-known/openid-configuration"
-      OIDC_OAUTH_API_URL: "{{ powerdns_admin_oidc_issuer_url }}/oidc/v1/userinfo"
-      OIDC_OAUTH_LOGOUT_URL: "{{ powerdns_admin_oidc_issuer_url }}/oidc/v1/end_session"
-      OIDC_OAUTH_USERNAME: "preferred_username"
-      OIDC_OAUTH_EMAIL: "email"
-      OIDC_OAUTH_FIRSTNAME: "given_name"
-      OIDC_OAUTH_LAST_NAME: "family_name"
-      SERVER_EXTERNAL_SSL: "False"
-      SIGNUP_ENABLED: "False"
-{% endif %}
     volumes:
       - pdns_admin_data:/data
     networks:

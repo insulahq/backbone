@@ -8,8 +8,8 @@ WireGuard provides the private backbone from Step 2, so all subsequent services
 can bind to stable internal IPs from the start.
 
 > **WARNING:** Do NOT run `site.yml` without `--tags` during initial bootstrap.
-> Steps 7-8 require manual input (`zitadel_service_pat`, `netbird_setup_key`)
-> that is only available after Step 6. Run each step individually as documented below.
+> Step 8 requires manual input (`netbird_setup_key`) that is only available
+> after Step 7. Run each step individually as documented below.
 
 ## Prerequisites
 
@@ -165,16 +165,15 @@ ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
 
 ## Step 6: Deploy Zitadel IAM
 
-Zitadel provides OIDC/OAuth2 for all services (NetBird, PowerDNS Admin, Portainer, Gatus).
+Zitadel provides the central OIDC/OAuth2 identity provider. OIDC integration
+with downstream services (NetBird, PowerDNS Admin, Gatus) is configured
+manually after all services are confirmed running.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml
 ```
 
-### Manual Step: Create Zitadel Service Account
-
-After deployment, you need to create a service account with a Personal Access Token (PAT)
-that enables automated OIDC app creation for downstream services.
+After deployment, verify Zitadel is running:
 
 1. Find the admin credentials:
    ```bash
@@ -185,36 +184,6 @@ that enables automated OIDC app creation for downstream services.
 
 3. Log in with username `admin` and the password from step 1.
    You may be prompted to change the password on first login.
-
-4. Navigate to: **Users** (left sidebar) -> **Service Users** -> **New**
-
-5. Create a service user:
-   - **Username:** `platform-automation`
-   - **Name:** `Platform Automation`
-   - Click **Create**
-
-6. Assign the **IAM_OWNER** role:
-   - On the service user page, go to the **Authorizations** tab
-   - Click **New**
-   - Select **ZITADEL** as the project
-   - Select **IAM_OWNER** as the role
-   - Click **Save**
-
-7. Generate a Personal Access Token:
-   - Go to the **Personal Access Tokens** section (same service user page)
-   - Click **New**
-   - Set an expiry (or leave unlimited)
-   - Click **Add** -> copy the token value
-
-8. Set the token in your config:
-   ```bash
-   # Add to group_vars/all.yml:
-   zitadel_service_pat: "<PASTE_TOKEN_HERE>"
-   ```
-
-> **Important:** The `IAM_OWNER` role is required so the service account can create
-> OIDC applications and projects via the Management API. Without it, Steps 7-10
-> will fail with `403 Forbidden` errors.
 
 ## Step 7: Deploy NetBird VPN Mesh
 
@@ -313,9 +282,8 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 
 ## Subsequent Runs
 
-After all manual steps are complete and `group_vars/all.yml` has `zitadel_service_pat`
-and `netbird_setup_key` set, you can run `site.yml` without `--tags` to deploy
-or update everything at once:
+After all manual steps are complete and `group_vars/all.yml` has `netbird_setup_key`
+set, you can run `site.yml` without `--tags` to deploy or update everything at once:
 
 ```bash
 ansible-playbook -i inventory/hosts.yml site.yml
@@ -334,6 +302,6 @@ If PostgreSQL fails on the standby node after the primary is running:
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <STANDBY_NODE>
 ```
 
-If OIDC app creation fails (e.g., wrong PAT permissions):
-1. Fix the service user permissions in Zitadel Console (see Step 6)
-2. Re-run the affected deploy playbook — it will retry OIDC creation
+OIDC integration for downstream services (Gatus, PowerDNS Admin, NetBird, Portainer)
+is configured manually after all services are confirmed running. See Zitadel Console
+documentation for creating OIDC applications.

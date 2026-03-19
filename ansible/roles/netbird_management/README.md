@@ -7,7 +7,7 @@ Deploys NetBird Management + Signal + Relay on both ns1 and ns2 with PostgreSQL 
 Both ns1 and ns2 run the full NetBird stack behind Traefik (HTTPS). DNS round-robin on `vpn.<domain>` distributes clients between both nodes.
 
 - **Database:** PostgreSQL HA (deployed by `postgresql_repmgr` role), multi-host DSN with `target_session_attrs=read-write`
-- **IdP:** Zitadel (external OIDC provider). No embedded IdP — Zitadel is the sole authentication provider
+- **IdP:** Embedded Dex IdP for local authentication. External IdPs (Zitadel, Google, etc.) can be added manually via the dashboard
 - **Failover:** DNS round-robin (TTL 60s). If one node goes down, clients reconnect to the other within ~60s
 
 ## Dependencies

@@ -2,7 +2,7 @@
 # Hosting Platform — System Test Suite
 #
 # Comprehensive tests for all infrastructure components, service integrations,
-# OIDC authentication, and failover scenarios.
+# and failover scenarios.
 #
 # Usage:
 #   # All non-destructive tests
@@ -11,14 +11,13 @@
 #   # Specific test groups
 #   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags dns
 #   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags postgresql
-#   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags oidc
 #
 #   # Include destructive failover tests (will temporarily stop services)
 #   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 #
 # Available tags:
-#   dns, tls, postgresql, netbird, zitadel, oidc, gatus, portainer,
-#   powerdns_admin, backup, maintenance, cross_node, failover, summary
+#   dns, tls, postgresql, netbird, zitadel, gatus, portainer,
+#   backup, maintenance, cross_node, failover, summary
 #
 # The playbook collects results into _test_results and prints a summary table.
 # Failed tests are reported as Ansible failures for CI integration.
@@ -421,13 +420,13 @@
       register: _t_zitadel_oidc
       ignore_errors: true
       run_once: true
-      tags: [zitadel, oidc]
+      tags: [zitadel]
 
     - name: "Zitadel | Record result — OIDC Discovery"
       set_fact:
         _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel OIDC Discovery', 'host': 'cluster', 'passed': _t_zitadel_oidc is success and 'authorization_endpoint' in (_t_zitadel_oidc.content | default(''))}] }}"
       run_once: true
-      tags: [zitadel, oidc]
+      tags: [zitadel]
 
     - name: "Zitadel | Admin console accessible"
       uri:
@@ -445,209 +444,6 @@
         _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel console accessible', 'host': 'cluster', 'passed': _t_zitadel_console is success}] }}"
       run_once: true
       tags: [zitadel]
-
-    - name: "Zitadel | Service PAT authentication"
-      uri:
-        url: "{{ _zitadel_url }}/management/v1/projects/_search"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ zitadel_service_pat }}"
-          Content-Type: application/json
-        body_format: json
-        body: { "queries": [] }
-        status_code: 200
-        validate_certs: true
-        timeout: 10
-      register: _t_zitadel_pat
-      ignore_errors: true
-      run_once: true
-      when: zitadel_service_pat | default('') | length > 0
-      tags: [zitadel, oidc]
-
-    - name: "Zitadel | Record result — PAT auth"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'Zitadel service PAT authentication', 'host': 'cluster', 'passed': _t_zitadel_pat is success}] }}"
-      run_once: true
-      when: zitadel_service_pat | default('') | length > 0
-      tags: [zitadel, oidc]
-
-    # ------------------------------------------------------------------
-    # OIDC Integration Tests
-    # ------------------------------------------------------------------
-
-    # --- Auto-create test user in Zitadel ---
-    - name: "OIDC | Check if test user already exists"
-      uri:
-        url: "{{ _zitadel_url }}/management/v1/users/_search"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ zitadel_service_pat }}"
-          Content-Type: application/json
-        body_format: json
-        body:
-          queries:
-            - userNameQuery:
-                userName: "test-runner"
-                method: TEXT_QUERY_METHOD_EQUALS
-        status_code: 200
-        validate_certs: true
-      register: _t_oidc_user_search
-      ignore_errors: true
-      run_once: true
-      when: zitadel_service_pat | default('') | length > 0
-      tags: [oidc]
-
-    - name: "OIDC | Create test-runner user in Zitadel"
-      uri:
-        url: "{{ _zitadel_url }}/management/v1/users/human/_import"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ zitadel_service_pat }}"
-          Content-Type: application/json
-        body_format: json
-        body:
-          userName: "test-runner"
-          profile:
-            firstName: "Test"
-            lastName: "Runner"
-          email:
-            email: "test-runner@{{ platform_domain }}"
-            isEmailVerified: true
-          password: "{{ lookup('password', playbook_dir + '/.generated_secrets/test_runner_password length=24 chars=ascii_letters,digits') }}"
-          passwordChangeRequired: false
-        status_code: [200, 201]
-        validate_certs: true
-      register: _t_oidc_user_create
-      ignore_errors: true
-      run_once: true
-      when:
-        - zitadel_service_pat | default('') | length > 0
-        - _t_oidc_user_search is success
-        - _t_oidc_user_search.json.result | default([]) | length == 0
-      tags: [oidc]
-
-    - name: "OIDC | Record result — test user ready"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'OIDC test user (test-runner) ready', 'host': 'cluster', 'passed': (_t_oidc_user_search.json.result | default([]) | length > 0) or (_t_oidc_user_create is success)}] }}"
-      run_once: true
-      when: zitadel_service_pat | default('') | length > 0
-      tags: [oidc]
-
-    # --- Verify Hosting Platform OIDC apps exist in Zitadel ---
-    - name: "OIDC | List apps in Hosting Platform project"
-      uri:
-        url: "{{ _zitadel_url }}/management/v1/projects/{{ (_t_zitadel_pat.json.result | default([]) | first).id | default('') }}/apps/_search"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ zitadel_service_pat }}"
-          Content-Type: application/json
-        body_format: json
-        body: {}
-        status_code: 200
-        validate_certs: true
-      register: _t_oidc_apps
-      ignore_errors: true
-      run_once: true
-      when:
-        - zitadel_service_pat | default('') | length > 0
-        - _t_zitadel_pat.json.result | default([]) | length > 0
-      tags: [oidc]
-
-    - name: "OIDC | Record result — OIDC apps registered"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'OIDC apps in Zitadel (found: ' + ((_t_oidc_apps.json.result | default([]) | map(attribute='name') | join(', ')) or 'none') + ')', 'host': 'cluster', 'passed': (_t_oidc_apps.json.result | default([]) | length) >= 1}] }}"
-      run_once: true
-      when: _t_oidc_apps is not skipped
-      tags: [oidc]
-
-    # --- Gatus OIDC redirect chain ---
-    - name: "OIDC | Gatus dashboard redirects to Zitadel"
-      uri:
-        url: "{{ _gatus_url }}"
-        follow_redirects: none
-        status_code: [200, 301, 302, 303, 307, 401]
-        validate_certs: true
-        timeout: 10
-        return_content: true
-      register: _t_oidc_gatus
-      ignore_errors: true
-      run_once: true
-      tags: [oidc, gatus]
-
-    - name: "OIDC | Record result — Gatus OIDC"
-      set_fact:
-        _cluster_results: >-
-          {{ _cluster_results + [{'name': 'Gatus OIDC protection',
-              'host': 'cluster',
-              'passed': _t_oidc_gatus is success and
-                        ((_t_oidc_gatus.status in [302, 303, 307] and zitadel_domain | default('auth.' + platform_domain) in (_t_oidc_gatus.location | default('')))
-                         or (_t_oidc_gatus.status == 200 and 'oidc' in (_t_oidc_gatus.content | default('') | lower))
-                         or (_t_oidc_gatus.status == 401))
-          }] }}
-      run_once: true
-      tags: [oidc, gatus]
-
-    # --- Portainer OAuth2 Proxy redirect chain ---
-    - name: "OIDC | Portainer OAuth2 Proxy redirects to Zitadel"
-      uri:
-        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1', true) }}:{{ portainer_port | default('9000') }}/"
-        follow_redirects: none
-        status_code: [200, 302, 303, 307, 401, 403]
-        timeout: 10
-      register: _t_oidc_portainer
-      ignore_errors: true
-      run_once: true
-      when: portainer_oidc_client_id | default('') | length > 0
-      tags: [oidc, portainer]
-
-    - name: "OIDC | Record result — Portainer OIDC"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'Portainer OAuth2 Proxy active', 'host': 'cluster', 'passed': _t_oidc_portainer is success and _t_oidc_portainer.status in [302, 303, 307]}] }}"
-      run_once: true
-      when: portainer_oidc_client_id | default('') | length > 0
-      tags: [oidc, portainer]
-
-    # --- PowerDNS Admin OIDC ---
-    - name: "OIDC | PowerDNS Admin login page has OIDC button"
-      uri:
-        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1', true) }}:{{ powerdns_nginx_admin_port | default('8080') }}/login"
-        status_code: [200]
-        return_content: true
-        timeout: 10
-      register: _t_oidc_pda
-      ignore_errors: true
-      run_once: true
-      when:
-        - powerdns_admin_enabled | default(false) | bool
-        - powerdns_admin_oidc_client_id | default('') | length > 0
-      tags: [oidc, powerdns_admin]
-
-    - name: "OIDC | Record result — PDA OIDC"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'PowerDNS Admin OIDC button present', 'host': 'cluster', 'passed': _t_oidc_pda is success and ('oidc' in (_t_oidc_pda.content | default('') | lower) or 'openid' in (_t_oidc_pda.content | default('') | lower))}] }}"
-      run_once: true
-      when: powerdns_admin_oidc_client_id | default('') | length > 0
-      tags: [oidc, powerdns_admin]
-
-    # --- NetBird Zitadel OIDC (primary auth) ---
-    - name: "OIDC | NetBird Zitadel issuer reachable"
-      uri:
-        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/.well-known/openid-configuration"
-        status_code: 200
-        validate_certs: "{{ netbird_validate_certs | default(false) }}"
-        timeout: 10
-      register: _t_oidc_netbird
-      ignore_errors: true
-      run_once: true
-      when: netbird_oidc_client_id | default('') | length > 0
-      tags: [oidc, netbird]
-
-    - name: "OIDC | Record result — NetBird Zitadel OIDC"
-      set_fact:
-        _cluster_results: "{{ _cluster_results + [{'name': 'NetBird Zitadel OIDC issuer reachable', 'host': 'cluster', 'passed': _t_oidc_netbird is success and (_t_oidc_netbird.json.issuer | default('')) is search('auth\\.' + platform_domain)}] }}"
-      run_once: true
-      when: netbird_oidc_client_id | default('') | length > 0
-      tags: [oidc, netbird]
 
     # ------------------------------------------------------------------
     # Gatus Service Tests
@@ -1092,26 +888,6 @@
     - name: "Failover | Record result — DNS during full outage"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS resolves during full node outage', 'host': 'cluster', 'passed': (_t_fo_full_dns.stdout | default('') | length > 0) and (hostvars[_test_node]['ansible_host'] not in (_t_fo_full_dns.stdout | default('')))}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify Zitadel OIDC during full node outage"
-      uri:
-        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/.well-known/openid-configuration"
-        validate_certs: true
-        status_code: [200]
-        timeout: 15
-        headers:
-          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
-      register: _t_fo_full_oidc
-      ignore_errors: true
-      delegate_to: "{{ _surviving_node }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Record result — OIDC during full outage"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'OIDC discovery works during full node outage', 'host': 'cluster', 'passed': _t_fo_full_oidc.status | default(0) == 200}] }}"
       run_once: true
       tags: [failover, never]
 

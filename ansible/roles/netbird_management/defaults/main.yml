@@ -2,11 +2,8 @@
 # NetBird Management Role -- Default Variables
 # Deploys NetBird Management + Signal + Relay on both ns1 and ns2.
 # Uses PostgreSQL HA backend (deployed by postgresql_repmgr role).
-# Zitadel OIDC as the sole authentication provider (no embedded IdP).
-
-# Zitadel domain — needed for OIDC app creation via Management API.
-# Falls back to auth.<platform_domain> if the Zitadel role defaults aren't loaded.
-zitadel_domain: "auth.{{ platform_domain }}"
+# Uses embedded Dex IdP for local authentication.
+# External IdPs (Zitadel, Google, etc.) can be added manually via the dashboard.
 
 # NetBird versions -- combined server architecture (0.66+)
 # Pin to specific versions to prevent breakage on deploy
@@ -40,9 +37,5 @@ netbird_traefik_dns_provider: pdns
 # Set to true after initial bootstrap when Let's Encrypt certs are provisioned
 netbird_validate_certs: false
 
-# OIDC via Zitadel (primary authentication provider)
-# Credentials are auto-created via Zitadel Management API using zitadel_service_pat.
-# zitadel_service_pat must be defined — deployment will fail without it.
-netbird_oidc_client_id: ""
-netbird_oidc_client_secret: ""
-netbird_oidc_issuer_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+# Health check URL for DNS failover (used by ifurlup() in LUA records)
+netbird_health_check_url: "https://{{ netbird_dashboard_domain }}/api/instance"

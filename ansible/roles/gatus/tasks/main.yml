@@ -71,119 +71,6 @@
   changed_when: false
   tags: [gatus]
 
-# --- OIDC application creation in Zitadel (automated, requires PAT) ---
-# Creates an OIDC application for Gatus in Zitadel if:
-#   1. zitadel_service_pat is set (admin created a service account PAT)
-#   2. gatus_oidc_client_id is NOT already set (app not yet created)
-# The client_id and client_secret are persisted to .generated_secrets/
-
-- name: Load persisted Gatus OIDC client_id if available
-  set_fact:
-    gatus_oidc_client_id: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_id', errors='ignore') | default('', true) }}"
-  when: gatus_oidc_client_id is not defined or gatus_oidc_client_id | length == 0
-  tags: [gatus]
-
-- name: Load persisted Gatus OIDC client_secret if available
-  set_fact:
-    gatus_oidc_client_secret: "{{ lookup('file', playbook_dir + '/.generated_secrets/gatus_oidc_client_secret', errors='ignore') | default('', true) }}"
-  when: gatus_oidc_client_secret is not defined or gatus_oidc_client_secret | length == 0
-  no_log: true
-  tags: [gatus]
-
-- name: Search for Zitadel project (for Gatus OIDC app)
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/_search"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body: {}
-    status_code: 200
-    validate_certs: "{{ gatus_validate_certs | default(false) }}"
-  register: gatus_oidc_project_search
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - gatus_oidc_client_id | default('') | length == 0
-    - zitadel_project_id is not defined or zitadel_project_id | length == 0
-  tags: [gatus]
-
-- name: Set Zitadel project ID for Gatus
-  set_fact:
-    gatus_oidc_zitadel_project_id: >-
-      {{ zitadel_project_id | default(
-         gatus_oidc_project_search.json.result[0].id
-         if (gatus_oidc_project_search.json.result | default([]) | length > 0)
-         else '') }}
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - gatus_oidc_client_id | default('') | length == 0
-  tags: [gatus]
-
-- name: Create Gatus OIDC application in Zitadel
-  uri:
-    url: "https://{{ zitadel_domain }}/management/v1/projects/{{ gatus_oidc_zitadel_project_id }}/apps/oidc"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ zitadel_service_pat }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      name: "Gatus Dashboard"
-      redirectUris:
-        - "{{ gatus_oidc_redirect_url }}"
-      postLogoutRedirectUris:
-        - "https://{{ gatus_domain }}"
-      responseTypes:
-        - "OIDC_RESPONSE_TYPE_CODE"
-      grantTypes:
-        - "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
-      appType: "OIDC_APP_TYPE_WEB"
-      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC"
-    status_code: [200, 409]
-    validate_certs: "{{ gatus_validate_certs | default(false) }}"
-  register: zitadel_oidc_app
-  run_once: true
-  when:
-    - zitadel_service_pat | default('') | length > 0
-    - gatus_oidc_client_id | default('') | length == 0
-    - gatus_oidc_zitadel_project_id | default('') | length > 0
-  tags: [gatus]
-
-- name: Persist Gatus OIDC client_id
-  copy:
-    content: "{{ zitadel_oidc_app.json.clientId }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/gatus_oidc_client_id"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  when: zitadel_oidc_app is changed
-  tags: [gatus]
-
-- name: Persist Gatus OIDC client_secret
-  copy:
-    content: "{{ zitadel_oidc_app.json.clientSecret }}"
-    dest: "{{ playbook_dir }}/.generated_secrets/gatus_oidc_client_secret"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  no_log: true
-  when: zitadel_oidc_app is changed
-  tags: [gatus]
-
-- name: Set OIDC client credentials from Zitadel API response
-  set_fact:
-    gatus_oidc_client_id: "{{ zitadel_oidc_app.json.clientId }}"
-    gatus_oidc_client_secret: "{{ zitadel_oidc_app.json.clientSecret }}"
-  run_once: true
-  no_log: true
-  when: zitadel_oidc_app is changed
-  tags: [gatus]
-
 # --- Deploy configuration files ---
 
 - name: Deploy Gatus config
@@ -223,16 +110,26 @@
 
 # --- DNS record creation (optional, via PowerDNS API) ---
 
+- name: Compute DNS failover address order
+  set_fact:
+    _dns_primary: "{{ dns_failover_primary | default('ns1') }}"
+    _dns_secondary: "{{ groups['dns_servers'] | difference([dns_failover_primary | default('ns1')]) | first }}"
+  run_once: true
+  when:
+    - gatus_create_dns_records | default(true)
+    - dns_health_check_enabled | default(false) | bool
+  tags: [gatus, dns]
+
 - name: Build LUA health-check DNS records for Gatus
   set_fact:
     _gatus_lua_records: >-
-      {{ [{'content': 'A "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
-          (groups['dns_servers'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
-          "}, {selector='all'})\"", 'disabled': false}] +
+      {{ [{'content': 'A "ifurlup(\'' + gatus_health_check_url + '\',
+      { {\'' + hostvars[_dns_primary]['ansible_host'] + '\'}, {\'' + hostvars[_dns_secondary]['ansible_host'] + '\'} },
+      {timeout=' + (dns_health_check_timeout | default(5) | string) + '})"', 'disabled': false}] +
          ([] if (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length == 0) else
-          [{'content': 'AAAA "ifportup(' + (dns_health_check_port | default(443) | string) + ', {' +
-            (groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | map('regex_replace', '(.*)', "'" + '\\1' + "'") | join(', ')) +
-            "}, {selector='all'})\"", 'disabled': false}])
+          [{'content': 'AAAA "ifurlup(\'' + gatus_health_check_url + '\',
+      { {\'' + hostvars[_dns_primary]['public_ipv6'] + '\'}, {\'' + hostvars[_dns_secondary]['public_ipv6'] + '\'} },
+      {timeout=' + (dns_health_check_timeout | default(5) | string) + '})"', 'disabled': false}])
       }}
   run_once: true
   when:

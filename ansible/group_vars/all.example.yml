@@ -27,6 +27,14 @@ ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inve
 platform_domain: example.com
 
 # ============================================================================
+# DNS Failover (active-passive with health checks)
+# ============================================================================
+# dns_failover_primary: ns1        # Preferred server (default in role)
+# dns_health_check_enabled: true   # Use LUA ifurlup() health checks (default in role)
+# dns_health_check_ttl: 30         # DNS TTL in seconds (default in role)
+# dns_health_check_timeout: 5      # HTTP check timeout in seconds (default in role)
+
+# ============================================================================
 # WireGuard Infrastructure Tunnel
 # ============================================================================
 # WireGuard provides the zero-dependency private backbone for PostgreSQL
@@ -59,12 +67,6 @@ postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 # deploys earlier (Step 3) and needs this value, so pre-generate it.
 powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 
-# PowerDNS-Admin OIDC — protect the web UI via Zitadel login.
-# Uses PDA's native OIDC support (env vars always override DB settings).
-# Same automated/manual options as Gatus — requires zitadel_service_pat (below).
-# powerdns_admin_oidc_client_id: "<CLIENT_ID>"
-# powerdns_admin_oidc_client_secret: "<CLIENT_SECRET>"
-
 # ============================================================================
 # Zitadel IAM (central identity provider)
 # ============================================================================
@@ -83,12 +85,6 @@ zitadel_admin_email: "admin@example.com"
 # zitadel_admin_password: "<GENERATE>"
 # CRITICAL: masterkey CANNOT be changed after initialization — back it up!
 # zitadel_masterkey: "<GENERATE: 32 chars>"
-
-# Service account PAT — enables automated OIDC app creation for Gatus,
-# Portainer, PowerDNS-Admin, and NetBird.
-# Create in Zitadel Console after Step 6: Users → Service Users → New →
-# Personal Access Tokens → Generate → paste value below.
-# zitadel_service_pat: "<PASTE_PAT_HERE>"
 
 # SMTP for user invitations and password resets (optional, can be configured later in console)
 # zitadel_smtp_host: "smtp.example.com:587"
@@ -117,11 +113,6 @@ netbird_setup_key: ""
 # netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
 # netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
-# NetBird OIDC — Zitadel is the sole auth provider (no embedded IdP).
-# Credentials are auto-created via Zitadel API when zitadel_service_pat is set.
-# netbird_oidc_client_id: "<CLIENT_ID>"         # Auto-created if zitadel_service_pat is set
-# netbird_oidc_client_secret: "<CLIENT_SECRET>"
-
 # ============================================================================
 # Gatus Monitoring (HA status dashboard + alert receiver)
 # ============================================================================
@@ -142,21 +133,6 @@ gatus_domain: "status.example.com"
 # gatus_alerting_email_password: "<SMTP_PASSWORD>"
 # gatus_alerting_email_from: "alerts@example.com"
 # gatus_alerting_email_to: "admin@example.com"
-
-# OIDC authentication — protect Gatus dashboard via Zitadel login
-# Option A (automated): provide zitadel_service_pat (above) — OIDC app auto-created.
-# Option B (manual): create the OIDC app in Zitadel Console yourself,
-#   then paste the client_id and client_secret here.
-# gatus_oidc_client_id: "<CLIENT_ID>"
-# gatus_oidc_client_secret: "<CLIENT_SECRET>"
-
-# ============================================================================
-# Portainer Docker Management (WireGuard-only access)
-# ============================================================================
-# OIDC authentication — OAuth2 Proxy sidecar handles Zitadel login.
-# Auto-created via zitadel_service_pat, or set manually:
-# portainer_oidc_client_id: "<CLIENT_ID>"
-# portainer_oidc_client_secret: "<CLIENT_SECRET>"
 
 # ============================================================================
 # Backup (Restic to Hetzner Storagebox)

@@ -34,40 +34,11 @@ gatus_db_user: gatus
 # DNS record management (auto-create A/AAAA records via PowerDNS API)
 gatus_create_dns_records: true
 
+# Health check URL for DNS failover (used by ifurlup() in LUA records)
+gatus_health_check_url: "https://{{ gatus_domain }}/health"
+
 # Logging
 gatus_log_level: "info"
-
-# ============================================================================
-# OIDC authentication — protect dashboard via Zitadel login
-# ============================================================================
-# When configured, the Gatus dashboard requires Zitadel authentication.
-# External endpoint push API (/api/v1/endpoints/*/external) remains
-# accessible via Bearer token without OIDC (push scripts are not browsers).
-#
-# Option A (automated): Set zitadel_service_pat in group_vars/all.yml.
-#   The Gatus role creates the OIDC application in Zitadel automatically.
-#   To create the PAT: Zitadel Console → Users → Service Users → New →
-#   Generate Personal Access Token → copy to group_vars/all.yml.
-#
-# Option B (manual): Create the OIDC app in Zitadel Console yourself:
-#   Projects → New → "Hosting Platform" → Applications → New → Web →
-#   Auth Method: BASIC → Redirect: https://status.example.com/authorization-code/callback
-#   Post-Logout: https://status.example.com → Save → copy client_id/secret below.
-#
-gatus_oidc_issuer_url: "https://{{ zitadel_domain }}"
-gatus_oidc_redirect_url: "https://{{ gatus_domain }}/authorization-code/callback"
-gatus_oidc_scopes: "openid profile email"
-# Set manually or auto-generated via Zitadel API (Option A)
-gatus_oidc_client_id: ""
-gatus_oidc_client_secret: ""
-
-# Zitadel domain (used for OIDC discovery and API calls)
-zitadel_domain: "auth.{{ platform_domain }}"
-
-# Zitadel service account PAT — enables automated OIDC app creation
-# Create in Zitadel Console: Users → Service Users → New →
-# Personal Access Tokens → Generate → copy value here
-zitadel_service_pat: ""
 
 # ============================================================================
 # Notification targets — configure these to receive alerts
