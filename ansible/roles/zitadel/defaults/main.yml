@@ -46,3 +46,6 @@ zitadel_db_max_conn_idle_time: "5m"
 
 # DNS record management (auto-create A/AAAA records via PowerDNS API)
 zitadel_create_dns_records: true
+
+# Health check URL for DNS failover (used by ifurlup() in LUA records)
+zitadel_health_check_url: "https://{{ zitadel_domain }}/debug/ready"

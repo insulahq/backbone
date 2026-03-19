@@ -19,7 +19,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 
 **Network Architecture:**
 - **WireGuard (`wg0`)** — Infrastructure backbone. All internal services (PostgreSQL, PowerDNS API, Portainer) bind to WireGuard IPs. Zero external dependencies, established in Step 2.
-- **NetBird (`wt0`)** — Overlay VPN mesh for Phase 2 servers, client access, and remote administration. Uses Zitadel for authentication. Deployed in Step 7 after all dependencies are ready.
+- **NetBird (`wt0`)** — Overlay VPN mesh for Phase 2 servers, client access, and remote administration. Uses embedded Dex IdP for local authentication. Deployed in Step 7 after all dependencies are ready.
 
 ---
 
@@ -259,8 +259,8 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 100 | Docker healthcheck (`/app/zitadel ready`) fails during init/migration — Traefik permanently excludes container from routing | Removed Docker healthcheck (same pattern as gotcha 74) |
 | 101 | Zitadel v4 listens on plain HTTP behind Traefik but defaults to expecting TLS; `h2c` backend scheme caused routing failures | Added `--tlsMode external` flag; removed `h2c` scheme from Traefik service label |
 | 102 | Login V2 UI requires a Login Client service user + `ZITADEL_SERVICE_USER_TOKEN` env var — without it, `/ui/v2/login/` returns 404; catch-22: can't create the user without a working login | Disabled Login V2 (`DefaultInstance.Features.LoginV2.Required: false`); v1 login works out of the box |
-| 103 | OIDC project search in all roles hardcoded project name `"Hosting Platform"` — user created `"Hosting Apps"` | Changed to use `zitadel_project_id` variable directly when set; skips search/create entirely |
-| 104 | OIDC app creation returned `409 Conflict` (already exists) on re-run — task failed instead of succeeding idempotently | Added `status_code: [200, 409]` to all OIDC app creation tasks |
+| 103 | OIDC project search in all roles hardcoded project name `"Hosting Platform"` — user created `"Hosting Apps"` | Removed — automated OIDC app creation removed; OIDC configured manually post-deploy |
+| 104 | OIDC app creation returned `409 Conflict` (already exists) on re-run — task failed instead of succeeding idempotently | Removed — automated OIDC app creation removed; OIDC configured manually post-deploy |
 
 ### NetBird
 
@@ -281,6 +281,14 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 112 | Docker healthcheck uses `wget` which doesn't exist in Portainer CE image — container permanently shows `unhealthy` | Removed Docker healthcheck (same pattern as gotcha 74) |
 | 113 | Portainer admin creation times out after 5 minutes — instance locks and requires restart | Document in BOOTSTRAP.md; restart container to reset the window |
 | 114 | Portainer bound to WireGuard IP only — not reachable via NetBird mesh | Changed to `0.0.0.0` binding; nftables FORWARD chain drops port 9000 from public interfaces (allows `wg0`, `wt0`, `lo` only) |
+
+### DNS Failover
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 115 | `ifportup(443)` only checks if Traefik port is open — backend service (Zitadel, NetBird, Gatus) could be dead while Traefik serves 502s | Replaced with `ifurlup()` for service domains — checks actual health endpoints (`/debug/ready`, `/api/instance`, `/health`). Base domain keeps `ifportup(443)` since Traefik being up is the correct check |
+| 116 | `selector='all'` round-robin returns both IPs equally — no primary/backup preference | Changed to priority groups `{ {ns1}, {ns2} }` — PowerDNS returns first group with a healthy member. `dns_failover_primary` (default: `ns1`) controls preference |
+| 117 | Jinja2 `{{` conflicts with Lua table-of-tables syntax `{{'ip'}, {'ip'}}` | Use `{ {'ip'}, {'ip'} }` with spaces — Lua ignores whitespace in tables, Jinja2 only interprets `{{` (no space) as expression delimiter |
 
 ---
 
@@ -367,25 +375,21 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml
 # Specific test groups
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags dns
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags postgresql
-ansible-playbook -i inventory/hosts.yml test-suite.yml --tags oidc
-
 # Destructive failover tests (stops services temporarily, then restores)
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 ```
 
-Tags: `dns`, `tls`, `postgresql`, `netbird`, `zitadel`, `oidc`, `gatus`, `portainer`,
-`powerdns_admin`, `backup`, `maintenance`, `cross_node`, `failover`
+Tags: `dns`, `tls`, `postgresql`, `netbird`, `zitadel`, `gatus`, `portainer`,
+`backup`, `maintenance`, `cross_node`, `failover`
 
-The test suite auto-creates a `test-runner` user in Zitadel (via `zitadel_service_pat`) to verify
-OIDC redirect chains on all protected services. Prints a pass/fail summary table and exits non-zero
-on any failure (CI-compatible).
+Prints a pass/fail summary table and exits non-zero on any failure (CI-compatible).
 
 Failover tests (destructive, opt-in via `--tags failover`):
 - DNS LUA failover — stops Traefik, verifies `ifportup()` excludes dead node, restores
 - PostgreSQL HA — stops primary, waits for repmgrd promotion, tests writes, verifies rejoin
 - NetBird management — stops management server, verifies API via surviving node, restores
-- Zitadel IAM — stops Zitadel, verifies OIDC discovery via surviving node, restores
-- Full node outage — stops all services on one node, verifies DNS/OIDC/PG/Gatus on survivor, restores all
+- Zitadel IAM — stops Zitadel, verifies health on surviving node, restores
+- Full node outage — stops all services on one node, verifies DNS/PG/Gatus on survivor, restores all
 
 ### Ansible Lint (CI)
 ```bash

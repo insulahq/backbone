@@ -87,6 +87,6 @@ query-logging=no
 # LUA Records
 ####################
 
-# Enables ifportup() for health-checked DNS failover.
-# LUA records check TCP port reachability and exclude dead servers from responses.
+# Enables ifurlup()/ifportup() for health-checked DNS failover.
+# LUA records check actual service health and exclude dead servers from responses.
 enable-lua-records={{ 'yes' if powerdns_lua_records_enabled else 'no' }}
