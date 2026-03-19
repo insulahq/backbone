@@ -18,8 +18,11 @@
 # The secondary only receives traffic when the primary fails health checks.
 #
 # Phase tags (phase1, phase2, phase3, phase4) allow running specific phases.
-# Service tags (traefik, zitadel, etc.) match plays in both phases 2 and 3,
+# Service tags (traefik, zitadel, etc.) match roles in both phases 2 and 3,
 # deploying primary first then secondary automatically.
+#
+# Performance: Phase 2 and 3 each use a SINGLE play with multiple roles,
+# sharing one SSH connection and skipping redundant fact gathering.
 #
 # SSH keys: Per-server ED25519 keypairs are auto-generated in .generated_secrets/ssh/.
 # First run (bootstrapping SSH key):
@@ -65,107 +68,42 @@
       when: inventory_hostname != postgresql_primary_node
 
 # ============================================================================
-# Phase 2: Services on primary node
+# Phase 2: Services on primary node (single play, shared SSH connection)
 # ============================================================================
-# The primary node (dns_failover_primary) gets all services first.
-# After this phase, the primary is fully operational and serving traffic.
+# All services deploy in dependency order on the primary node.
+# DB migrations (Zitadel, Gatus) run here first; the secondary just starts.
+# gather_facts: false — facts already gathered and cached in Phase 1.
 
-# Step 4: PowerDNS authoritative DNS
-- name: "Phase 2: PowerDNS (primary node)"
+- name: "Phase 2: All services (primary node)"
   hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [powerdns, dns, phase2]
+  gather_facts: false
+  tags: [phase2, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
   roles:
-    - powerdns
-
-# Step 5: Traefik reverse proxy + ACME wildcard TLS cert
-- name: "Phase 2: Traefik (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [traefik, phase2]
-  roles:
-    - traefik
-
-# Step 6: Zitadel IAM (OIDC provider)
-- name: "Phase 2: Zitadel (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [zitadel, phase2]
-  roles:
-    - zitadel
-
-# Step 7: NetBird VPN mesh management
-- name: "Phase 2: NetBird management (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [netbird, netbird_management, phase2]
-  roles:
-    - netbird_management
-
-# Step 8: Gatus monitoring dashboard
-- name: "Phase 2: Gatus monitoring (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [gatus, phase2]
-  roles:
-    - gatus
-
-# Step 9: Portainer Docker management
-- name: "Phase 2: Portainer (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [portainer, phase2]
-  roles:
-    - portainer
-
-# Step 10: Backup to Hetzner Storagebox
-- name: "Phase 2: Backup (primary node)"
-  hosts: "{{ dns_failover_primary | default('ns1') }}"
-  tags: [backup, phase2]
-  roles:
-    - backup
+    - { role: powerdns,            tags: [powerdns, dns, phase2] }
+    - { role: traefik,             tags: [traefik, phase2] }
+    - { role: zitadel,             tags: [zitadel, phase2] }
+    - { role: netbird_management,  tags: [netbird, netbird_management, phase2] }
+    - { role: gatus,               tags: [gatus, phase2] }
+    - { role: portainer,           tags: [portainer, phase2] }
+    - { role: backup,              tags: [backup, phase2] }
 
 # ============================================================================
-# Phase 3: Services on secondary node
+# Phase 3: Services on secondary node (single play, shared SSH connection)
 # ============================================================================
-# Same services deployed to the secondary node. DB migrations already ran
-# on the primary in Phase 2, so the secondary just starts the services.
+# Same services on the secondary. DB migrations already complete from Phase 2.
 
-- name: "Phase 3: PowerDNS (secondary node)"
+- name: "Phase 3: All services (secondary node)"
   hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [powerdns, dns, phase3]
+  gather_facts: false
+  tags: [phase3, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
   roles:
-    - powerdns
-
-- name: "Phase 3: Traefik (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [traefik, phase3]
-  roles:
-    - traefik
-
-- name: "Phase 3: Zitadel (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [zitadel, phase3]
-  roles:
-    - zitadel
-
-- name: "Phase 3: NetBird management (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [netbird, netbird_management, phase3]
-  roles:
-    - netbird_management
-
-- name: "Phase 3: Gatus monitoring (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [gatus, phase3]
-  roles:
-    - gatus
-
-- name: "Phase 3: Portainer (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [portainer, phase3]
-  roles:
-    - portainer
-
-- name: "Phase 3: Backup (secondary node)"
-  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
-  tags: [backup, phase3]
-  roles:
-    - backup
+    - { role: powerdns,            tags: [powerdns, dns, phase3] }
+    - { role: traefik,             tags: [traefik, phase3] }
+    - { role: zitadel,             tags: [zitadel, phase3] }
+    - { role: netbird_management,  tags: [netbird, netbird_management, phase3] }
+    - { role: gatus,               tags: [gatus, phase3] }
+    - { role: portainer,           tags: [portainer, phase3] }
+    - { role: backup,              tags: [backup, phase3] }
 
 # ============================================================================
 # Phase 4: Peer enrollment (both nodes)
@@ -173,6 +111,7 @@
 
 - name: "Phase 4: NetBird peer enrollment"
   hosts: netbird_peers
+  gather_facts: false
   tags: [netbird, netbird_peer, phase4]
   roles:
     - netbird_peer
