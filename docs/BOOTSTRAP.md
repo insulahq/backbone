@@ -3,13 +3,9 @@
 This guide walks through deploying the Hosting Platform infrastructure from scratch
 on two Debian 13 servers.
 
-The deployment follows a **strictly linear** order with **no circular dependencies**.
-WireGuard provides the private backbone from Step 2, so all subsequent services
-can bind to stable internal IPs from the start.
-
-> **WARNING:** Do NOT run `site.yml` without `--tags` during initial bootstrap.
-> Step 8 requires manual input (`netbird_setup_key`) that is only available
-> after Step 7. Run each step individually as documented below.
+The deployment uses a **three-phase approach**: infrastructure backbone on both nodes,
+then all services on the primary node, then the secondary node joins as replica.
+This ensures the primary is fully operational before the secondary is added.
 
 ## Prerequisites
 
@@ -73,7 +69,7 @@ Before starting, gather the following:
 > - Set `example.com` NS records to `ns1.example.com` and `ns2.example.com`
 >
 > DNS propagation takes 24-48 hours. Configure this BEFORE starting deployment.
-> Note: ACME certificate issuance (Step 5) queries the authoritative nameservers
+> Note: ACME certificate issuance (Phase 2) queries the authoritative nameservers
 > directly, so it works as soon as the glue records are resolvable — you don't need
 > to wait for full global propagation.
 
@@ -89,22 +85,23 @@ Edit both files:
 - WireGuard IPs are pre-assigned: ns1=`10.100.0.1`, ns2=`10.100.0.2` (adjust if needed)
 - Set `platform_domain`, `timezone`, and PostgreSQL passwords in `group_vars/all.yml`
 
-## Step 2: Deploy Common + WireGuard
+## Phase 1: Infrastructure Backbone (both nodes)
 
-This step hardens the OS, installs Docker, generates per-server SSH keys, and
-establishes the WireGuard tunnel between both servers.
+This phase hardens both servers, establishes the WireGuard tunnel, and deploys
+PostgreSQL HA. All three components need both nodes to function.
 
 ```bash
 cd ansible
-ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard \
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 \
   -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 ```
 
 > All subsequent commands assume you are in the `ansible/` directory.
 
-After this step:
+After Phase 1:
 - Per-server SSH keys are deployed (no more `-e` override needed)
 - WireGuard tunnel is active between ns1 (`10.100.0.1`) and ns2 (`10.100.0.2`)
+- PostgreSQL HA: ns1 is primary (read-write), ns2 is standby (read-only)
 
 > **Verify:**
 > ```bash
@@ -115,156 +112,86 @@ After this step:
 > **Note:** The bootstrapping SSH key is NOT removed from `authorized_keys` — it
 > remains as a recovery fallback (`exclusive: false`).
 
-## Step 3: Deploy PostgreSQL HA
+## Phase 2: Services on Primary Node (ns1)
 
-PostgreSQL binds to WireGuard IPs. Replication works immediately.
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml
-```
-
-The primary (default: ns2) starts first, then the standby clones from it via the
-WireGuard tunnel.
-
-## Step 4: Deploy PowerDNS
-
-Both nodes run PowerDNS in Native mode, sharing the same PostgreSQL HA backend.
-Zone data replicates automatically via PostgreSQL streaming replication.
+Deploy all services to ns1 only. After this phase, ns1 is fully operational
+and serving all traffic.
 
 ```bash
-ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase2
 ```
 
-The role creates the platform DNS zone and all required records (A, AAAA, NS glue).
-The API is accessible only via the WireGuard IP (not publicly exposed).
-
-## Step 5: Deploy Traefik + ACME Wildcard Certificate
-
-Traefik uses the PowerDNS API (via WireGuard IP) for DNS-01 ACME challenges.
-Since both nodes share the same zone via PostgreSQL, the certificate issues
-successfully on the first attempt.
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-traefik.yml
-```
+After Phase 2:
+- PowerDNS: zone created, DNS records pointing to ns1
+- Traefik: Let's Encrypt wildcard certificate issued
+- Zitadel: IAM running at `auth.<domain>` (DB migrations completed)
+- NetBird: management server at `vpn.<domain>` with embedded Dex IdP
+- Gatus: monitoring dashboard at `status.<domain>`
+- Portainer: Docker management at `http://10.100.0.1:9000`
+- Backup: Restic timer configured
 
 > **Verify** (wait ~2 minutes for Let's Encrypt):
 > ```bash
 > echo | openssl s_client -connect <NS1_IP>:443 -servername auth.<domain> 2>/dev/null | openssl x509 -noout -subject -issuer
 > ```
 > Expected: `issuer=... Let's Encrypt ...`
->
-> **If the certificate doesn't appear after 2 minutes**, check Traefik logs:
-> ```bash
-> ansible -i inventory/hosts.yml ns1 -m command -a "docker logs traefik --tail 50"
-> ```
-> Common issues:
-> - `context deadline exceeded` — Traefik can't reach the PowerDNS API
-> - `NXDOMAIN` — DNS zone not created (re-run Step 4)
-> - `rate limited` — too many failed attempts, wait 1 hour
 
-## Step 6: Deploy Zitadel IAM
+### Manual Steps (before Phase 3)
 
-Zitadel provides the central OIDC/OAuth2 identity provider. OIDC integration
-with downstream services (NetBird, PowerDNS Admin, Gatus) is configured
-manually after all services are confirmed running.
+**Zitadel admin login:**
+1. `cat .generated_secrets/zitadel_admin_password`
+2. Open `https://auth.<domain>`, log in with `admin` + password from step 1
 
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml
-```
+**NetBird admin account:**
+1. Open `https://vpn.<domain>` — redirected to `/setup`
+2. Create admin account (email + password)
 
-After deployment, verify Zitadel is running:
+**NetBird setup key (required for peer enrollment):**
+1. Log in to `https://vpn.<domain>`
+2. Settings > Setup Keys > Add Key (Reusable, no usage limit)
+3. Set `netbird_setup_key` in `group_vars/all.yml`
 
-1. Find the admin credentials:
-   ```bash
-   cat .generated_secrets/zitadel_admin_password
-   ```
+## Phase 3: Services on Secondary Node (ns2)
 
-2. Open `https://auth.<domain>` in your browser
-
-3. Log in with username `admin` and the password from step 1.
-   You may be prompted to change the password on first login.
-
-## Step 7: Deploy NetBird VPN Mesh
-
-NetBird uses an embedded Dex IdP for local authentication. External identity
-providers (Zitadel, Google, etc.) can be added later through the dashboard
-Settings > Identity Providers.
+Deploy the same services to ns2. DB migrations already ran on ns1 in Phase 2,
+so ns2 just starts the services and connects to the PG primary via WireGuard.
 
 ```bash
-ansible-playbook -i inventory/hosts.yml deploy-netbird.yml
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase3
 ```
 
-The NetBird dashboard is available at `https://vpn.<domain>`.
+After Phase 3:
+- All services running on both nodes
+- DNS active-passive: ns1 preferred, ns2 is failover
+- Zitadel and Gatus use multi-host PG connections (`target_session_attrs=read-write`)
+  to always reach the current PG primary, regardless of failover state
 
-### Manual Step: Create Admin Account
-
-1. Open `https://vpn.<domain>` — you'll be redirected to `/setup`
-2. Create your admin account (email + password)
-3. Log in with the new credentials
-
-### Manual Step: Sync `idp.db` to the second node
+### Manual Step: Sync NetBird `idp.db` to ns2
 
 The embedded Dex IdP stores user credentials in `/var/lib/netbird/idp.db`
-(a SQLite file inside the Docker volume). This file is **NOT replicated** via
+(SQLite inside the Docker volume). This file is **NOT replicated** via
 PostgreSQL — it exists only on the node where the admin account was created.
-Without syncing it, logins on the other node will fail.
 
 ```bash
-# Copy idp.db from ns2 (where admin was created) to ns1:
-ssh root@<NS2_IP> "docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db"
-scp root@<NS2_IP>:/tmp/idp.db /tmp/idp.db
-scp /tmp/idp.db root@<NS1_IP>:/tmp/idp.db
-ssh root@<NS1_IP> "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
+ssh root@<NS1_IP> "docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db"
+scp root@<NS1_IP>:/tmp/idp.db /tmp/idp.db
+scp /tmp/idp.db root@<NS2_IP>:/tmp/idp.db
+ssh root@<NS2_IP> "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
 ```
 
 > **Note:** Repeat this sync whenever new local users are created. If you add
 > Zitadel as an external IdP (via Settings > Identity Providers), SSO users
 > authenticate against Zitadel directly and don't need `idp.db` sync.
 
-## Step 8: Enroll NetBird Peers
+## Phase 4: NetBird Peer Enrollment
 
-### Manual Step: Create Setup Key
-
-1. Log in to `https://vpn.<domain>`
-2. Go to Settings > Setup Keys > Add Key
-3. Type: Reusable, no usage limit
-4. Set `netbird_setup_key` in `group_vars/all.yml`
-
-Then enroll the peers:
+Enroll both servers as NetBird peers (requires `netbird_setup_key` from Phase 2).
 
 ```bash
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase4
 ```
 
 Peers resolve as `ns1.netbird`, `ns2.netbird` within the mesh.
-
-## Step 9: Deploy Portainer
-
-Docker management UI, accessible only via WireGuard IP (`http://10.100.0.x:9000`).
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
-```
-
-## Step 10: Deploy Gatus Monitoring
-
-HA monitoring dashboard with push alerting.
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
-```
-
-## Step 11: Deploy Backup
-
-Restic incremental backup to Hetzner Storagebox.
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-backup.yml
-```
-
-> **Manual step:** Register the SSH public key with Hetzner Storagebox
-> (displayed by the playbook, add via Hetzner Robot console).
 
 ## Post-Deployment Verification
 
@@ -289,6 +216,9 @@ set, you can run `site.yml` without `--tags` to deploy or update everything at o
 ansible-playbook -i inventory/hosts.yml site.yml
 ```
 
+This deploys Phase 1 → Phase 2 → Phase 3 → Phase 4 in order, ensuring the
+primary node is always updated first.
+
 ## Troubleshooting
 
 ### Recovery from failed bootstrap
@@ -298,10 +228,24 @@ are idempotent — they detect existing state and skip or update as needed.
 
 If PostgreSQL fails on the standby node after the primary is running:
 ```bash
-# Re-run just the standby
-ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <STANDBY_NODE>
+ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit ns2
 ```
 
 OIDC integration for downstream services (Gatus, PowerDNS Admin, NetBird, Portainer)
 is configured manually after all services are confirmed running. See Zitadel Console
 documentation for creating OIDC applications.
+
+### Existing deployment: switching PG primary from ns2 to ns1
+
+If you have an existing deployment where ns2 is the PG primary, perform a
+repmgr switchover before redeploying:
+
+```bash
+# On ns2 (current primary), inside the PG container:
+docker exec -it postgresql repmgr standby switchover --siblings-follow
+
+# Verify ns1 is now primary:
+docker exec -it postgresql repmgr cluster show
+```
+
+Then redeploy with the updated `postgresql_primary_node: ns1` default.

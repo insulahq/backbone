@@ -1,22 +1,18 @@
 ---
 # Deploy Gatus monitoring dashboard
-# PG primary node runs first — DB creation and schema migration need write
-# access. The standby node's local PG is read-only (gotcha 86).
+# Primary node runs first — DB creation and schema migration need write
+# access to PostgreSQL (gotcha 86).
 
 - import_playbook: _ssh-keys.yml
 
-- name: Deploy Gatus on PostgreSQL primary node first
-  hosts: dns_servers
-  serial: 1
+- name: Deploy Gatus on primary node first
+  hosts: "{{ dns_failover_primary | default('ns1') }}"
   tags: [gatus]
   roles:
-    - role: gatus
-      when: inventory_hostname == postgresql_primary_node
+    - gatus
 
-- name: Deploy Gatus on remaining nodes
-  hosts: dns_servers
-  serial: 1
+- name: Deploy Gatus on secondary node
+  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
   tags: [gatus]
   roles:
-    - role: gatus
-      when: inventory_hostname != postgresql_primary_node
+    - gatus

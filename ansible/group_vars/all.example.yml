@@ -48,8 +48,8 @@ platform_domain: example.com
 # ============================================================================
 # Which node is the initial primary (ns1 or ns2)
 # postgresql_primary_node is set in roles/postgresql_repmgr/defaults/main.yml
-# Override here if your primary differs from the role default (ns2).
-# postgresql_primary_node: ns2
+# This should match dns_failover_primary (default: ns1) — ns1 is primary for everything.
+# postgresql_primary_node: ns1
 
 # REQUIRED: These must be set before first deploy.
 # Generate once with: openssl rand -base64 22

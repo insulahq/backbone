@@ -12,6 +12,11 @@ services:
     command: 'start-from-init --config /etc/zitadel/config.yaml --steps /etc/zitadel/steps.yaml --masterkeyFromEnv --tlsMode external'
     environment:
       ZITADEL_MASTERKEY: "{{ zitadel_masterkey }}"
+      # pgx reads this env var to filter multi-host connections.
+      # Only connects to the PG node that is currently read-write (primary).
+      # Without this, pgx connects to the first reachable host which may be
+      # the read-only standby, causing all writes to fail.
+      PGTARGETSESSIONATTRS: "read-write"
     networks:
       - traefik_public
       # Connect to postgresql_default so Zitadel can reach PostgreSQL via Docker DNS

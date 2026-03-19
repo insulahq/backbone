@@ -70,7 +70,7 @@ Must be deployed after:
 |----------|---------|---------|
 | `postgresql_image` | `sourcemation/postgres-repmgr:5.5.0` | Pinned Docker image |
 | `postgresql_install_dir` | `/opt/postgresql` | Host directory |
-| `postgresql_primary_node` | `ns2` | Initial primary (only matters on first boot) |
+| `postgresql_primary_node` | `ns1` | Initial primary (only matters on first boot) |
 | `postgresql_node_ids` | `{ns1: 1, ns2: 2}` | Maps hostname to repmgr node_id |
 | `postgresql_databases` | `[{name: netbird, ...}]` | Application databases to create |
 | `postgresql_superuser_password` | (group_vars) | PostgreSQL superuser password |

@@ -22,7 +22,7 @@ postgresql_repmgr_cluster: "hosting-platform"
 
 # Primary server -- determines which node runs as primary vs standby
 # Detection uses inventory_hostname (avoids breakage when NetBird IPs change)
-postgresql_primary_node: "ns2"
+postgresql_primary_node: "ns1"
 
 # Node IDs — maps inventory_hostname to repmgr node_id
 postgresql_node_ids:

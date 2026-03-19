@@ -3,9 +3,14 @@
 # To add notification targets, set variables in group_vars/all.yml
 # and re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
 
+{% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
 storage:
   type: postgres
-  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432/{{ gatus_db_name }}?sslmode=disable"
+  # Multi-host: local PG container first, peer via WireGuard second.
+  # target_session_attrs=read-write ensures Gatus connects to the PG primary
+  # regardless of which node it's running on. After PG failover, Gatus
+  # reconnects to whichever node is the new primary.
+  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432,{{ hostvars[peer]['wireguard_ip'] }}:5432/{{ gatus_db_name }}?sslmode=disable&target_session_attrs=read-write"
 
 ui:
   title: "Hosting Platform"

@@ -1,22 +1,18 @@
 ---
 # Deploy Zitadel IAM
-# PG primary node runs first — start-from-init runs DB migrations that need
-# write access. The standby node's local PG is read-only (gotcha 86).
+# Primary node runs first — start-from-init runs DB migrations that need
+# write access to PostgreSQL (gotcha 86).
 
 - import_playbook: _ssh-keys.yml
 
-- name: Deploy Zitadel on PostgreSQL primary node first
-  hosts: dns_servers
-  serial: 1
+- name: Deploy Zitadel on primary node first
+  hosts: "{{ dns_failover_primary | default('ns1') }}"
   tags: [zitadel]
   roles:
-    - role: zitadel
-      when: inventory_hostname == postgresql_primary_node
+    - zitadel
 
-- name: Deploy Zitadel on remaining nodes
-  hosts: dns_servers
-  serial: 1
+- name: Deploy Zitadel on secondary node
+  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
   tags: [zitadel]
   roles:
-    - role: zitadel
-      when: inventory_hostname != postgresql_primary_node
+    - zitadel

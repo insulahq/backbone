@@ -14,8 +14,8 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 
 | Server | Location | WireGuard IP | Role |
 |--------|----------|-------------|------|
-| ns1 | Hetzner Falkenstein | 10.100.0.1 | PowerDNS (read-write), NetBird management, PostgreSQL standby |
-| ns2 | Hetzner Helsinki | 10.100.0.2 | PowerDNS (read-write), NetBird management, PostgreSQL primary |
+| ns1 | Hetzner Falkenstein | 10.100.0.1 | **Primary** — PostgreSQL primary, DNS preferred, all services |
+| ns2 | Hetzner Helsinki | 10.100.0.2 | **Secondary** — PostgreSQL standby, DNS failover, all services |
 
 **Network Architecture:**
 - **WireGuard (`wg0`)** — Infrastructure backbone. All internal services (PostgreSQL, PowerDNS API, Portainer) bind to WireGuard IPs. Zero external dependencies, established in Step 2.
@@ -70,7 +70,17 @@ Gatus also performs **active monitoring**: DNS resolution on both servers, Traef
 
 ```bash
 cd ansible
-ansible-playbook -i inventory/hosts.yml site.yml                 # Everything
+
+# Full deploy (phases 1-4: backbone → primary → secondary → peers)
+ansible-playbook -i inventory/hosts.yml site.yml
+
+# Phase-specific deployment
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase1   # Infrastructure backbone
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase2   # Services on primary (ns1)
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase3   # Services on secondary (ns2)
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase4   # NetBird peers
+
+# Service-specific deployment (deploys primary first, then secondary)
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml       # Traefik only
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml    # PostgreSQL HA only
 ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml      # PowerDNS only
@@ -83,11 +93,12 @@ ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer Doc
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
 
-**Fresh deployment** follows a strictly linear order (no circular dependencies). See `docs/BOOTSTRAP.md`.
+**Fresh deployment** uses a three-phase approach: infrastructure backbone on both
+nodes, services on the primary node (ns1), then the secondary (ns2). See `docs/BOOTSTRAP.md`.
 
 **SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform.key`) is only needed for the first run:
 ```bash
-ansible-playbook -i inventory/hosts.yml site.yml --tags common -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
 ```
 All subsequent runs use the per-server keys automatically (configured in `group_vars/all.yml`).
 
@@ -289,6 +300,18 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 115 | `ifportup(443)` only checks if Traefik port is open — backend service (Zitadel, NetBird, Gatus) could be dead while Traefik serves 502s | Replaced with `ifurlup()` for service domains — checks actual health endpoints (`/debug/ready`, `/api/instance`, `/health`). Base domain keeps `ifportup(443)` since Traefik being up is the correct check |
 | 116 | `selector='all'` round-robin returns both IPs equally — no primary/backup preference | Changed to priority groups `{ {ns1}, {ns2} }` — PowerDNS returns first group with a healthy member. `dns_failover_primary` (default: `ns1`) controls preference |
 | 117 | Jinja2 `{{` conflicts with Lua table-of-tables syntax `{{'ip'}, {'ip'}}` | Use `{ {'ip'}, {'ip'} }` with spaces — Lua ignores whitespace in tables, Jinja2 only interprets `{{` (no space) as expression delimiter |
+
+### Zitadel
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 118 | Zitadel connects to local `postgresql` (Docker DNS) — fails on standby node (read-only) | Multi-host `Host: postgresql,<peer_wg_ip>` + `PGTARGETSESSIONATTRS=read-write` env var; pgx skips read-only hosts |
+
+### Gatus
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 119 | Gatus DSN uses single-host `@postgresql:5432` — fails on standby node (read-only) | Multi-host URI `@postgresql:5432,<peer_wg_ip>:5432` with `target_session_attrs=read-write` query param |
 
 ---
 

@@ -10,9 +10,13 @@ ExternalDomain: {{ zitadel_domain }}
 ExternalPort: {{ zitadel_external_port }}
 ExternalSecure: {{ zitadel_external_secure | lower }}
 
+{% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
 Database:
   postgres:
-    Host: postgresql
+    # Multi-host: local PG container first, peer via WireGuard second.
+    # Combined with PGTARGETSESSIONATTRS=read-write (set in docker-compose),
+    # pgx connects to whichever node is the current PG primary.
+    Host: "postgresql,{{ hostvars[peer]['wireguard_ip'] }}"
     Port: 5432
     Database: {{ zitadel_db_name }}
     MaxOpenConns: {{ zitadel_db_max_open_conns }}
