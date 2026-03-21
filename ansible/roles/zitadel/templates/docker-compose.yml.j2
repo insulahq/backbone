@@ -31,6 +31,7 @@ services:
       - traefik.http.routers.zitadel.rule=Host(`{{ zitadel_domain }}`)
       - traefik.http.routers.zitadel.entrypoints=websecure
       - traefik.http.routers.zitadel.tls=true
+      - traefik.http.routers.zitadel.middlewares=ratelimit@docker
       - traefik.http.routers.zitadel.service=zitadel
       # Backend service — HTTP for web, gRPC uses content-type detection
       - traefik.http.services.zitadel.loadbalancer.server.port={{ zitadel_port }}

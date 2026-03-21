@@ -53,3 +53,7 @@ disk_monitor_enabled: true
 disk_monitor_schedule: "*-*-* *:00:00"    # Every hour
 disk_monitor_warn_percent: 80             # Warn at 80% disk usage
 disk_monitor_crit_percent: 90             # Critical at 90% disk usage
+
+# Container image update monitoring
+image_monitor_enabled: true
+image_monitor_schedule: "*-*-* 06:00:00"  # Daily at 6 AM UTC

@@ -13,3 +13,7 @@ portainer_install_dir: /opt/portainer
 
 # Port — blocked on public interfaces by nftables (gotcha 114)
 portainer_port: 9000
+
+# Automated admin user creation (eliminates 5-minute manual window — gotcha 113)
+portainer_admin_username: admin
+# portainer_admin_password: auto-generated and persisted in .generated_secrets/

@@ -41,5 +41,9 @@ traefik_pdns_api_url: >-
      if (inventory_hostname == (postgresql_primary_node | default('ns1')))
      else 'http://' + hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] + ':8081' }}
 
+# Rate limiting middleware (applied to public service routers)
+traefik_ratelimit_average: 100        # Requests per second average
+traefik_ratelimit_burst: 200          # Maximum burst size
+
 # Logging
 traefik_log_level: INFO

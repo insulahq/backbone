@@ -1,0 +1,8 @@
+[Unit]
+Description=Container image update monitor — check for available updates
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/image-monitor.sh
+StandardOutput=journal
+StandardError=journal

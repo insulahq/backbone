@@ -157,6 +157,7 @@ endpoints:
       insecure: true
     conditions:
       - "[STATUS] < 500"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 60s
 {% if zitadel_domain is defined %}
   - name: "Zitadel"
@@ -166,5 +167,26 @@ endpoints:
       insecure: true
     conditions:
       - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 60s
 {% endif %}
+{% if netbird_dashboard_domain is defined %}
+  - name: "NetBird"
+    group: platform
+    url: "https://{{ netbird_dashboard_domain }}"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] < 500"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 60s
+{% endif %}
+  - name: "Gatus"
+    group: platform
+    url: "https://{{ gatus_domain }}/health"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 60s

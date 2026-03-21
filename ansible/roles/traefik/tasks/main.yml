@@ -38,7 +38,7 @@
     state: present
   tags: [traefik]
 
-- name: Ensure powerdns_internal Docker network exists (for ACME DNS-01)
+- name: Ensure powerdns_internal Docker network exists (also created by PowerDNS role)
   community.docker.docker_network:
     name: powerdns_internal
     driver: bridge

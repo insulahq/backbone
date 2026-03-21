@@ -1,0 +1,58 @@
+#!/bin/bash
+# Container image update monitor — deployed by Ansible (common role).
+# Compares running container image digests against registry manifests.
+# Reports via platform_alert (Gatus external endpoint + fallback webhook).
+# Runs daily via systemd timer.
+
+set -euo pipefail
+source /usr/local/lib/platform-alert.sh
+
+log() {
+    echo "[$(date -Iseconds)] IMAGE-MONITOR: $*"
+}
+
+OUTDATED=""
+OUTDATED_COUNT=0
+CHECKED_COUNT=0
+ERRORS=""
+
+while IFS='|' read -r CONTAINER_NAME IMAGE; do
+    # Skip images without a tag (local builds, sha256 references)
+    if [[ "$IMAGE" == *"sha256:"* ]]; then
+        continue
+    fi
+
+    CHECKED_COUNT=$((CHECKED_COUNT + 1))
+
+    # Get local image ID
+    LOCAL_ID=$(docker image inspect --format='{% raw %}{{.Id}}{% endraw %}' "$IMAGE" 2>/dev/null || echo "unknown")
+
+    # Pull latest manifest (metadata only, does not download layers)
+    if docker pull --quiet "$IMAGE" > /dev/null 2>&1; then
+        REMOTE_ID=$(docker image inspect --format='{% raw %}{{.Id}}{% endraw %}' "$IMAGE" 2>/dev/null || echo "unknown")
+    else
+        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — could not pull manifest"
+        ERRORS="${ERRORS}${CONTAINER_NAME} "
+        continue
+    fi
+
+    if [ "$LOCAL_ID" = "unknown" ] || [ "$REMOTE_ID" = "unknown" ]; then
+        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — could not compare"
+        continue
+    fi
+
+    if [ "$LOCAL_ID" != "$REMOTE_ID" ]; then
+        log "UPDATE AVAILABLE: ${CONTAINER_NAME} (${IMAGE})"
+        OUTDATED="${OUTDATED}${CONTAINER_NAME} "
+        OUTDATED_COUNT=$((OUTDATED_COUNT + 1))
+    else
+        log "UP TO DATE: ${CONTAINER_NAME} (${IMAGE})"
+    fi
+done < <(docker ps --format '{% raw %}{{.Names}}|{{.Image}}{% endraw %}')
+
+if [ "$OUTDATED_COUNT" -gt 0 ]; then
+    platform_alert "warning" "docker" "${OUTDATED_COUNT}/${CHECKED_COUNT} containers have updates: ${OUTDATED}"
+else
+    log "All ${CHECKED_COUNT} containers are up to date"
+    platform_alert "info" "docker" "All ${CHECKED_COUNT} container images are up to date"
+fi

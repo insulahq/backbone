@@ -28,11 +28,63 @@
     state: present
   tags: [portainer]
 
+# --- Automated admin user creation (eliminates 5-minute manual window — gotcha 113) ---
+
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [portainer]
+
+- name: Generate Portainer admin password if not set
+  set_fact:
+    portainer_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/portainer_admin_password length=24 chars=ascii_letters,digits') }}"
+  when: portainer_admin_password is not defined or portainer_admin_password | length == 0
+  no_log: true
+  tags: [portainer]
+
+- name: Wait for Portainer API to be ready
+  uri:
+    url: "http://127.0.0.1:{{ portainer_port }}/api/system/status"
+    method: GET
+    status_code: 200
+  retries: 20
+  delay: 3
+  register: portainer_status
+  until: portainer_status.status == 200
+  tags: [portainer]
+
+- name: Check if Portainer admin user already exists
+  uri:
+    url: "http://127.0.0.1:{{ portainer_port }}/api/users/admin/check"
+    method: GET
+    status_code: [200, 204, 404]
+  register: portainer_admin_check
+  tags: [portainer]
+
+- name: Create initial Portainer admin user via API
+  uri:
+    url: "http://127.0.0.1:{{ portainer_port }}/api/users/admin/init"
+    method: POST
+    body_format: json
+    body:
+      Username: "{{ portainer_admin_username }}"
+      Password: "{{ portainer_admin_password }}"
+    status_code: [200, 409]
+  when: portainer_admin_check.status == 404
+  no_log: true
+  tags: [portainer]
+
 - name: Display Portainer deployment status
   debug:
     msg:
       - "Portainer CE {{ portainer_version }} deployed on {{ inventory_hostname }}"
       - "Dashboard: http://<wireguard-or-netbird-ip>:{{ portainer_port }}"
       - "Accessible via WireGuard and NetBird only (public access blocked by nftables)."
-      - "On first visit, create an admin user within 5 minutes (gotcha 113)."
+      - "Admin user: {{ portainer_admin_username }}"
+      - "Admin password: stored in ansible/.generated_secrets/portainer_admin_password"
   tags: [portainer]

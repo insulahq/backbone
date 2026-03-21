@@ -18,6 +18,12 @@
     state: directory
     mode: '0755'
 
+- name: Ensure powerdns_internal Docker network exists
+  community.docker.docker_network:
+    name: powerdns_internal
+    driver: bridge
+    state: present
+
 - name: Ensure secrets directory exists on controller
   file:
     path: "{{ playbook_dir }}/.generated_secrets"
