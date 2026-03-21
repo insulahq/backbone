@@ -123,12 +123,12 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags phase2
 
 After Phase 2:
 - PowerDNS: zone created, DNS records pointing to ns1
-- Traefik: Let's Encrypt wildcard certificate issued
+- Traefik: Let's Encrypt wildcard certificate issued (PowerDNS API available immediately)
 - Zitadel: IAM running at `auth.<domain>` (DB migrations completed)
 - NetBird: management server at `vpn.<domain>` with embedded Dex IdP
 - Gatus: monitoring dashboard at `status.<domain>`
-- Portainer: Docker management at `http://10.100.0.1:9000`
-- Backup: Restic timer configured
+- Portainer: Docker management at `http://10.100.0.1:9000` (admin user auto-created)
+- Backup: Restic timer configured (with nightly pg_dumpall)
 
 > **Verify** (wait ~2 minutes for Let's Encrypt):
 > ```bash
@@ -141,6 +141,10 @@ After Phase 2:
 **Zitadel admin login:**
 1. `cat .generated_secrets/zitadel_admin_password`
 2. Open `https://auth.<domain>`, log in with `admin` + password from step 1
+
+**Portainer admin:**
+- Auto-created during deployment. Password in `.generated_secrets/portainer_admin_password`
+- Dashboard: `http://10.100.0.1:9000` (via WireGuard tunnel)
 
 **NetBird admin account:**
 1. Open `https://vpn.<domain>` — redirected to `/setup`

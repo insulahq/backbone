@@ -9,6 +9,7 @@
 #            common, wireguard, postgresql
 #   Phase 2: Services on primary node (dns_failover_primary, default: ns1)
 #            powerdns, traefik, zitadel, netbird, gatus, portainer, backup
+#            PowerDNS runs first so Traefik can issue certs via DNS-01 immediately
 #   Phase 3: Services on secondary node
 #            Same services, same order — joins as replica
 #   Phase 4: Peer enrollment (both nodes)

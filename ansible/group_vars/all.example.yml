@@ -151,6 +151,7 @@ backup_storagebox_path: /backups
 
 # Backup paths per server
 ns1_backup_paths:
+  - /opt/postgresql/backups  # pg_dumpall output (all database content)
   - /opt/powerdns
   - /opt/netbird
   - /opt/zitadel
@@ -161,6 +162,7 @@ ns1_backup_paths:
   - /etc/wireguard
 
 ns2_backup_paths:
+  - /opt/postgresql/backups  # pg_dumpall output (all database content)
   - /opt/powerdns
   - /opt/netbird
   - /opt/zitadel

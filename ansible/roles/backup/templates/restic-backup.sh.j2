@@ -56,6 +56,24 @@ curl -fsS --retry 3 "{{ restic_healthcheck_url }}/start" > /dev/null 2>&1 || tru
 
 log "Starting backup for {{ inventory_hostname }}"
 
+# PostgreSQL dump — capture all database content before file backup
+{% if restic_pgdump_enabled %}
+PGDUMP_DIR="{{ restic_pgdump_dir }}"
+mkdir -p "$PGDUMP_DIR"
+if docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q '^postgresql$'; then
+    log "Dumping all PostgreSQL databases"
+    if docker exec postgresql pg_dumpall -U postgres > "$PGDUMP_DIR/pg_dumpall.sql" 2>>"$LOG_FILE"; then
+        DUMP_SIZE=$(du -sh "$PGDUMP_DIR/pg_dumpall.sql" | cut -f1)
+        log "PostgreSQL dump completed ($DUMP_SIZE)"
+    else
+        error "pg_dumpall failed — continuing with file backup"
+        rm -f "$PGDUMP_DIR/pg_dumpall.sql"
+    fi
+else
+    log "PostgreSQL container not running — skipping database dump"
+fi
+{% endif %}
+
 # Pre-backup hook
 {% if restic_pre_backup_hook %}
 log "Running pre-backup hook"
