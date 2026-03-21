@@ -1,11 +1,18 @@
 ---
-# NetBird-only deployment playbook
-# Deploys NetBird management server on both ns1 and ns2
+# Deploy NetBird management server
+# Primary node runs first — NetBird creates database tables on first start.
+# Running both nodes simultaneously could cause schema creation race conditions.
 
 - import_playbook: _ssh-keys.yml
 
-- name: Deploy NetBird management server
-  hosts: dns_servers
+- name: Deploy NetBird management on primary node first
+  hosts: "{{ dns_failover_primary | default('ns1') }}"
+  tags: [netbird, netbird_management]
+  roles:
+    - netbird_management
+
+- name: Deploy NetBird management on secondary node
+  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
   tags: [netbird, netbird_management]
   roles:
     - netbird_management

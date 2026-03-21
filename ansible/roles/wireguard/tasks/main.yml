@@ -121,6 +121,16 @@
   failed_when: wireguard_ip not in _wg_ip.stdout
   tags: [wireguard]
 
+- name: Test WireGuard peer connectivity
+  ansible.builtin.command: "ping -c 3 -W 5 {{ hostvars[item]['wireguard_ip'] }}"
+  loop: "{{ groups['dns_servers'] | difference([inventory_hostname]) }}"
+  register: _wg_ping
+  retries: 6
+  delay: 5
+  until: _wg_ping.rc == 0
+  changed_when: false
+  tags: [wireguard]
+
 - name: Display WireGuard status
   ansible.builtin.debug:
     msg:

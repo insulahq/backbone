@@ -67,7 +67,10 @@ send_alert() {
 
   # Map level to Gatus success/failure
   local gatus_success="true"
-  [ "$level" = "warning" ] || [ "$level" = "critical" ] && gatus_success="false"
+  # Use if/then — set -e exits on failed [ ] || [ ] && pattern (gotcha 67)
+  if [ "$level" = "warning" ] || [ "$level" = "critical" ]; then
+    gatus_success="false"
+  fi
 
   # Push to Gatus external endpoint (primary path)
   if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
@@ -463,10 +466,18 @@ start_as_primary() {
 # Phase 5c: Start as standby (includes failback / rejoin logic)
 # ==========================================================================
 start_as_standby() {
-  # Wait for the primary to be available
-  echo "==> Waiting for primary ($PEER_NAME)..."
+  # Wait for the primary to be available (max 5 minutes)
+  local max_wait=300
+  local waited=0
+  echo "==> Waiting for primary ($PEER_NAME) — timeout ${max_wait}s..."
   until pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; do
-    echo "==> Primary ($PEER_NAME) unavailable — retrying in 5s..."
+    waited=$((waited + 5))
+    if [ "$waited" -ge "$max_wait" ]; then
+      echo "==> FATAL: Primary ($PEER_NAME) did not become ready after ${max_wait}s" >&2
+      send_alert "critical" "Standby ${NODE_NAME} timed out waiting for primary ${PEER_NAME} after ${max_wait}s"
+      exit 1
+    fi
+    echo "==> Primary ($PEER_NAME) unavailable — retrying in 5s... (${waited}/${max_wait}s)"
     sleep 5
   done
   echo "==> Primary ($PEER_NAME) is ready"

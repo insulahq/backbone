@@ -7,5 +7,6 @@ galaxy_info:
     - name: Debian
       versions:
         - trixie
-dependencies:
-  - role: postgresql_repmgr
+dependencies: []
+  # Removed: postgresql_repmgr meta-dependency caused redundant execution and
+  # broke primary-first ordering. site.yml enforces correct ordering.

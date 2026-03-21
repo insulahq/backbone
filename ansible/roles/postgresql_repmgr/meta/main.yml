@@ -7,6 +7,6 @@ galaxy_info:
     - name: Debian
       versions:
         - trixie
-dependencies:
-  - role: common
-  - role: traefik
+dependencies: []
+  # Removed: common and traefik meta-dependencies caused out-of-order execution
+  # in Phase 1 (traefik not yet deployed). site.yml enforces correct ordering.
