@@ -75,15 +75,21 @@ Before starting, gather the following:
 
 ## Step 1: Configure Inventory and Variables
 
+Run the interactive setup script — it asks for your server IPs, domain, and
+other details, then generates `inventory/hosts.yml` and `group_vars/all.yml`
+with all secrets auto-generated locally:
+
 ```bash
-cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
-cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
+cd ansible
+bash setup.sh
 ```
 
-Edit both files:
-- Set `ansible_host` and `public_ipv6` for each server in `inventory/hosts.yml`
-- WireGuard IPs are pre-assigned: ns1=`10.100.0.1`, ns2=`10.100.0.2` (adjust if needed)
-- Set `platform_domain`, `timezone`, and PostgreSQL passwords in `group_vars/all.yml`
+> **Alternative (manual):** Copy the example files and edit by hand:
+> ```bash
+> cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
+> cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
+> ```
+> Set server IPs, domain, and generate passwords with `openssl rand -base64 22`.
 
 ## Phase 1: Infrastructure Backbone (both nodes)
 

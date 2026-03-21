@@ -52,16 +52,14 @@ Both PowerDNS nodes run in **Native mode** (read-write). Zone data replicates vi
 ## Quick Start
 
 ```bash
-# 1. Configure inventory
-cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.yml
-# Edit with your server IPs and hostnames
+# 1. Run interactive setup (generates inventory + config with secrets)
+cd ansible
+bash setup.sh
 
-# 2. Configure variables
-cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
-# Edit with your domain, API keys, and passwords
+# 2. Install Ansible collections
+ansible-galaxy install -r requirements.yml
 
 # 3. Deploy everything
-cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml
 ```
 
