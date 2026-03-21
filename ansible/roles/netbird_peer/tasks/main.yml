@@ -3,6 +3,17 @@
 # Installs NetBird peer client via official apt repository and enrolls with management server.
 # Compatible with NetBird v0.66+ combined server architecture.
 
+- name: Validate netbird_setup_key is set
+  assert:
+    that:
+      - netbird_setup_key is defined
+      - netbird_setup_key | length > 0
+    fail_msg: >-
+      netbird_setup_key is empty. Create a setup key in the NetBird dashboard
+      (Settings > Setup Keys > Add Key) and set it in group_vars/all.yml
+      before running peer enrollment. See docs/BOOTSTRAP.md Phase 2 manual steps.
+  tags: [netbird, netbird_peer]
+
 - name: Install apt dependencies for NetBird repo
   apt:
     name:

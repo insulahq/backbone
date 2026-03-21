@@ -138,7 +138,7 @@ gatus_domain: "status.example.com"
 # Backup (Restic to Hetzner Storagebox)
 # ============================================================================
 # Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
-backup_enabled: true
+backup_enabled: false
 backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
 backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
 backup_storagebox_path: /backups
@@ -147,7 +147,7 @@ backup_storagebox_path: /backups
 # restic_ssh_key_src: "~/hosting-platform.key"
 # If left undefined, auto-generated and persisted in .generated_secrets/
 # WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
-restic_password: "<GENERATE: openssl rand -base64 22>"
+# restic_password: "<GENERATE: openssl rand -base64 22>"
 
 # Backup paths per server
 ns1_backup_paths:

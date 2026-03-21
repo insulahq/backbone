@@ -87,7 +87,7 @@ ssh root@<OLD_PRIMARY_IP> "docker exec postgresql repmgr standby clone --force -
 ssh root@<OLD_PRIMARY_IP> "docker restart postgresql"
 ```
 
-**Important:** Update `postgresql_primary_node` in `roles/postgresql_repmgr/defaults/main.yml` to reflect the new primary, so future Ansible runs deploy in the correct order.
+**Important:** Update `postgresql_primary_node` in `group_vars/all.yml` to reflect the new primary, so future Ansible runs deploy in the correct order.
 
 ---
 
@@ -116,7 +116,7 @@ cd ansible
 
 # 1. Deploy base OS hardening + Docker + WireGuard tunnel
 ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard --limit <DEAD_NODE> \
-  -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+  -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
 # The `-e` override is needed because the re-provisioned server does not
 # have the per-server SSH public key in its `authorized_keys` yet.
 

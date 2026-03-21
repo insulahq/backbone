@@ -98,7 +98,7 @@ nodes, services on the primary node (ns1), then the secondary (ns2). See `docs/B
 
 **SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform.key`) is only needed for the first run:
 ```bash
-ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
 ```
 All subsequent runs use the per-server keys automatically (configured in `group_vars/all.yml`).
 

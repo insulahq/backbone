@@ -33,6 +33,80 @@
 - import_playbook: _ssh-keys.yml
 
 # ============================================================================
+# Pre-flight: Validate required variables before any deployment
+# ============================================================================
+# Catches placeholder values and missing credentials BEFORE deployment starts.
+# Runs with tags: [always] so it executes regardless of --tags filtering.
+
+- name: "Pre-flight: Validate required variables"
+  hosts: all
+  gather_facts: false
+  become: false
+  tags: [always]
+  tasks:
+    - name: Validate PostgreSQL passwords are not placeholders
+      run_once: true
+      assert:
+        that:
+          - postgresql_superuser_password is defined
+          - postgresql_superuser_password | length > 0
+          - "'GENERATE' not in postgresql_superuser_password"
+          - postgresql_repmgr_password is defined
+          - postgresql_repmgr_password | length > 0
+          - "'GENERATE' not in postgresql_repmgr_password"
+          - postgresql_netbird_password is defined
+          - postgresql_netbird_password | length > 0
+          - "'GENERATE' not in postgresql_netbird_password"
+        fail_msg: >-
+          PostgreSQL passwords must be set in group_vars/all.yml.
+          Generate with: openssl rand -base64 22
+
+    - name: Validate PowerDNS API key is not a placeholder
+      run_once: true
+      assert:
+        that:
+          - powerdns_api_key is defined
+          - powerdns_api_key | length > 0
+          - "'GENERATE' not in powerdns_api_key"
+        fail_msg: >-
+          powerdns_api_key must be set in group_vars/all.yml.
+          Generate with: openssl rand -base64 48
+
+    - name: Validate platform_domain is not example.com
+      run_once: true
+      assert:
+        that:
+          - platform_domain is defined
+          - platform_domain != 'example.com'
+        fail_msg: >-
+          platform_domain is still set to 'example.com'.
+          Set your actual domain in group_vars/all.yml.
+
+    - name: Validate server IPs are not placeholders
+      when: inventory_hostname in groups.get('dns_servers', [])
+      assert:
+        that:
+          - ansible_host is defined
+          - "'<' not in ansible_host"
+        fail_msg: >-
+          ansible_host for {{ inventory_hostname }} is still a placeholder.
+          Set the public IPv4 address in inventory/hosts.yml.
+
+    - name: Validate backup credentials (when backups enabled)
+      run_once: true
+      when: backup_enabled | default(false) | bool
+      assert:
+        that:
+          - backup_storagebox_user is defined
+          - "'<' not in (backup_storagebox_user | string)"
+          - backup_storagebox_host is defined
+          - "'<' not in (backup_storagebox_host | string)"
+        fail_msg: >-
+          backup_enabled is true but Storagebox credentials are still placeholders.
+          Set backup_storagebox_user and backup_storagebox_host in group_vars/all.yml,
+          or set backup_enabled: false to skip backup deployment.
+
+# ============================================================================
 # Phase 1: Infrastructure backbone (both nodes)
 # ============================================================================
 

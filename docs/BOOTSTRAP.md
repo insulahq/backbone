@@ -93,7 +93,7 @@ PostgreSQL HA. All three components need both nodes to function.
 ```bash
 cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 \
-  -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+  -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
 ```
 
 > All subsequent commands assume you are in the `ansible/` directory.
