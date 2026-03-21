@@ -71,14 +71,14 @@ powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 # Zitadel IAM (central identity provider)
 # ============================================================================
 # Domain for the Zitadel login/console UI
-zitadel_domain: "auth.example.com"
+zitadel_domain: "auth.{{ platform_domain }}"
 
 # Organization name shown in the console
 zitadel_org_name: "Hosting Platform"
 
 # Initial admin user (password change required on first login)
 zitadel_admin_username: "admin"
-zitadel_admin_email: "admin@example.com"
+zitadel_admin_email: "admin@{{ platform_domain }}"
 
 # If left undefined, auto-generated and persisted in .generated_secrets/
 # zitadel_db_password: "<GENERATE>"
@@ -98,7 +98,7 @@ zitadel_admin_email: "admin@example.com"
 # NetBird VPN Mesh
 # ============================================================================
 # Management URL (vpn.<domain>, served via Traefik)
-netbird_management_url: "https://vpn.example.com"
+netbird_management_url: "https://vpn.{{ platform_domain }}"
 
 # Reusable setup key for peer enrollment — created in Step 8 via the dashboard.
 # Create via dashboard (Settings > Setup Keys) after Zitadel + NetBird are deployed.
@@ -117,7 +117,7 @@ netbird_setup_key: ""
 # Gatus Monitoring (HA status dashboard + alert receiver)
 # ============================================================================
 # Dashboard domain (A/AAAA records auto-created via PowerDNS API)
-gatus_domain: "status.example.com"
+gatus_domain: "status.{{ platform_domain }}"
 
 # Notification targets — configure at least one to receive alerts.
 # After setting, re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
