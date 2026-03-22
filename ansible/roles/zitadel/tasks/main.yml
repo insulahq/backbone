@@ -40,9 +40,20 @@
 
 - name: Generate Zitadel admin password if not set
   set_fact:
-    zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=20 chars=ascii_letters,digits') + '!1Ax' }}"
+    zitadel_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/zitadel_admin_password length=20 chars=ascii_letters,digits') }}!1Ax"
   when: zitadel_admin_password is not defined or zitadel_admin_password | length == 0
   no_log: true
+  tags: [zitadel]
+
+- name: Persist full admin password (with complexity suffix) to secrets file
+  copy:
+    content: "{{ zitadel_admin_password }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/zitadel_admin_password"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: zitadel_admin_password is defined and zitadel_admin_password | length > 0
   tags: [zitadel]
 
 # --- Deploy configuration files ---
