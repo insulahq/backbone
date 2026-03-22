@@ -13,7 +13,7 @@ FirstInstance:
       Email:
         Address: "{{ zitadel_admin_email }}"
         Verified: true
-      Password: "{{ zitadel_admin_password }}"
+      Password: {{ zitadel_admin_password | to_json }}
       PasswordChangeRequired: true
     # Login Client — required by Zitadel v4 login v2 UI.
     # Creates a service user with IAM_LOGIN_CLIENT role + PAT so the
