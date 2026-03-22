@@ -24,7 +24,7 @@ services:
       - traefik.http.routers.gatus.rule=Host(`{{ gatus_domain }}`)
       - traefik.http.routers.gatus.entrypoints=websecure
       - traefik.http.routers.gatus.tls=true
-      - traefik.http.routers.gatus.middlewares=ratelimit@docker
+      - traefik.http.routers.gatus.middlewares=ratelimit@file
       - traefik.http.routers.gatus.service=gatus
       - traefik.http.services.gatus.loadbalancer.server.port={{ gatus_port }}
     # No Docker healthcheck — image has no wget/curl (gotcha 74)

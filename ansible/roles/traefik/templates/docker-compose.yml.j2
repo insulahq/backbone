@@ -61,10 +61,6 @@ services:
     environment:
       PDNS_API_URL: "{{ traefik_pdns_api_url }}"
       PDNS_API_KEY: "{{ powerdns_api_key | default('') }}"
-    labels:
-      # Shared rate-limiting middleware — referenced by downstream services as ratelimit@docker
-      - traefik.http.middlewares.ratelimit.ratelimit.average={{ traefik_ratelimit_average }}
-      - traefik.http.middlewares.ratelimit.ratelimit.burst={{ traefik_ratelimit_burst }}
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s

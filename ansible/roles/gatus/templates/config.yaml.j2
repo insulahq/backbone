@@ -6,11 +6,11 @@
 {% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
 storage:
   type: postgres
-  # Multi-host: local PG container first, peer via WireGuard second.
-  # target_session_attrs=read-write ensures Gatus connects to the PG primary
-  # regardless of which node it's running on. After PG failover, Gatus
-  # reconnects to whichever node is the new primary.
-  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432,{{ hostvars[peer]['wireguard_ip'] }}:5432/{{ gatus_db_name }}?sslmode=disable&target_session_attrs=read-write"
+  # Connect to local PG container via Docker DNS, with WireGuard peer as fallback.
+  # Gatus uses lib/pq which supports multi-host via a space-separated host param
+  # (not comma-separated in the URI — that causes "no such host" parsing errors).
+  # target_session_attrs=read-write ensures Gatus always writes to the PG primary.
+  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432/{{ gatus_db_name }}?sslmode=disable"
 
 ui:
   title: "Hosting Platform"

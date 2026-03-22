@@ -84,26 +84,29 @@
     - name: Check if PowerDNS schema exists
       community.docker.docker_container_exec:
         container: postgresql
-        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} -tAc \"SELECT 1 FROM information_schema.tables WHERE table_name='domains' LIMIT 1\""
+        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} -tAc \"SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='domains' LIMIT 1\""
       register: schema_check
       changed_when: false
-
-    - name: Deploy schema init script to host
-      template:
-        src: init-schema.sql.j2
-        dest: "{{ powerdns_install_dir }}/init-schema.sql"
-        mode: '0600'
-      when: (schema_check.stdout | default('') | trim) != "1"
-
-    - name: Copy schema init script into PostgreSQL container
-      shell: docker cp {{ powerdns_install_dir }}/init-schema.sql postgresql:/tmp/init-schema.sql
-      when: (schema_check.stdout | default('') | trim) != "1"
 
     - name: Initialize PowerDNS schema
       community.docker.docker_container_exec:
         container: postgresql
-        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} -f /tmp/init-schema.sql"
+        command: bash -c "psql -U postgres -d {{ powerdns_db_name }} < /dev/stdin"
+        stdin: "{{ lookup('template', 'init-schema.sql.j2') }}"
       when: (schema_check.stdout | default('') | trim) != "1"
+
+    # Grants must run unconditionally — the schema init is skipped when tables
+    # already exist (idempotent CREATE TABLE IF NOT EXISTS), but the GRANT
+    # statements at the end of init-schema.sql only execute on first creation.
+    # This task ensures pdns always has the required permissions.
+    - name: Ensure PowerDNS database user has table permissions
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          bash -c "psql -U postgres -d {{ powerdns_db_name }} -c
+          'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {{ powerdns_db_user }};
+           GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {{ powerdns_db_user }};'"
+      changed_when: false
 
 - name: Create PowerDNS-Admin database and user
   when: inventory_hostname == postgresql_primary_node

@@ -5,6 +5,13 @@
 # All subdomains are covered automatically — individual services
 # no longer need certresolver labels on their routers.
 
+http:
+  middlewares:
+    ratelimit:
+      rateLimit:
+        average: {{ traefik_ratelimit_average }}
+        burst: {{ traefik_ratelimit_burst }}
+
 tls:
   stores:
     default:
