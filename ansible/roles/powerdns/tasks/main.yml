@@ -275,6 +275,9 @@
     body:
       rrsets:
         - name: "{{ platform_domain }}."
+          type: LUA
+          changetype: DELETE
+        - name: "{{ platform_domain }}."
           type: A
           ttl: 300
           changetype: REPLACE

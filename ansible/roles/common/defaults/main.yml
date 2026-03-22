@@ -28,7 +28,7 @@ alert_webhook_url: ""
 # Active-passive: dns_failover_primary is preferred; other nodes are fallback.
 # PowerDNS connects to each IP, fetches the health URL, and only returns
 # IPs where the service responds. First group with a healthy member wins.
-dns_health_check_enabled: true
+dns_health_check_enabled: false
 dns_health_check_ttl: 30             # Short TTL for fast failover (seconds)
 dns_health_check_timeout: 5          # HTTP health check timeout (seconds)
 dns_failover_primary: "ns1"          # Preferred server for all DNS responses
