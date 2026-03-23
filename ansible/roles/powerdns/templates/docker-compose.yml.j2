@@ -96,7 +96,7 @@ services:
     networks:
       - powerdns_internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/v1/servers/localhost || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

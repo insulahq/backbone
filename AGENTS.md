@@ -311,7 +311,53 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 119 | Gatus DSN uses single-host `@postgresql:5432` — fails on standby node (read-only) | Multi-host URI `@postgresql:5432,<peer_wg_ip>:5432` with `target_session_attrs=read-write` query param |
+| 119 | Gatus DSN uses single-host `@postgresql:5432` — fails on standby node (read-only) | Gatus uses `lib/pq` which doesn't support `target_session_attrs` or multi-host DSN; primary connects via Docker DNS, standby connects to primary via WireGuard IP |
+
+### PowerDNS (continued)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 120 | Schema check `WHERE table_name='domains'` matched `information_schema.domains` (PG built-in) — schema init skipped, PowerDNS gets "relation does not exist" | Added `table_schema='public'` filter to schema check query |
+| 121 | `GRANT` statements in `init-schema.sql` only execute on first creation — skipped when schema check finds existing tables | Added unconditional `GRANT` task that runs every time |
+| 122 | `docker cp` into PG container creates root-owned files in `/tmp` — `psql` can't read them (sticky bit) | Pipe SQL via `stdin` instead of file copy |
+| 123 | `pda-legacy` ignores `PORT` env var — always listens on 8000, nginx proxied to 9191 | Hardcoded port 8000 in nginx upstream |
+| 124 | `pda-legacy` ignores individual `SQLA_DB_*` env vars — falls back to SQLite | Use `SQLALCHEMY_DATABASE_URI` with full PostgreSQL connection string |
+| 125 | PDA on standby node fails — writes to local read-only PG | Standby PDA connects to primary PG via WireGuard IP (same as Gatus) |
+| 126 | `powerdns-nginx` healthcheck hits API endpoint requiring auth — always unhealthy | Changed healthcheck to `wget http://localhost:8081/` (root path, no auth needed) |
+
+### Traefik & ACME (continued)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 127 | ACME propagation check queries all authoritative NS servers — fails when ns2 DNS isn't running yet | Added `disablepropagationcheck=true` to Traefik ACME config |
+| 128 | Stale `_acme-challenge` TXT records from failed attempts cause "Incorrect TXT record" errors | Clean up TXT records before retrying; records auto-managed by Traefik |
+
+### Traefik Rate Limiting
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 129 | Rate limit middleware defined via Docker labels on Traefik container — Traefik doesn't read its own labels | Define middleware in `dynamic.yml` file provider; reference as `ratelimit@file` |
+
+### DNS Failover
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 130 | LUA `ifportup()`/`ifurlup()` fails inside Docker — hairpin NAT prevents container from reaching host's own forwarded ports | Use static A/AAAA round-robin records instead; `dns_health_check_enabled` defaults to `false` |
+| 131 | Static round-robin returns both IPs during single-node deploy — half of requests fail | Accepted tradeoff: both IPs always in DNS, clients retry; Phase 2 bootstrap has brief window where ns2 is unreachable |
+
+### Zitadel
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 132 | Auto-generated admin password with `punctuation` chars breaks YAML double-quote escaping in `steps.yaml` — Human user silently not created | Use `\| to_json` filter for password in template; append `!1Ax` suffix for complexity policy |
+| 133 | `lookup('password')` writes base password to file but Jinja2 `+ '!1Ax'` suffix only exists in memory — secrets file has wrong password | Added separate `copy` task to persist full password (including suffix) to `.generated_secrets/` |
+
+### NetBird
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 134 | External IdP (Zitadel OIDC) login creates new orphan account — NetBird matches by IdP user ID, not email | Must invite user via NetBird Team settings before OIDC login; or enable "Check authorization on authentication" in Zitadel project |
+| 135 | `idp.db` sync via raw SSH from controller fails — controller not on WireGuard network | Use `delegate_to` with explicit `ansible_ssh_private_key_file` for cross-host Ansible delegation |
 
 ---
 

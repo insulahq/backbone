@@ -15,5 +15,9 @@
 - name: Deploy PowerDNS (both nodes, shared PostgreSQL HA)
   hosts: dns_servers
   tags: [powerdns, dns]
+  vars:
+    # Needed by powerdns role for DB tasks and DNS record creation.
+    # Defaults to ns1 if not set in group_vars/all.yml.
+    postgresql_primary_node: "{{ postgresql_primary_node | default('ns1') }}"
   roles:
     - powerdns
