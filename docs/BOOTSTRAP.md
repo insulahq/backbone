@@ -148,6 +148,19 @@ After Phase 2:
 1. `cat .generated_secrets/zitadel_admin_password`
 2. Open `https://auth.<domain>`, log in with `admin` + password from step 1
 
+**PowerDNS Admin setup:**
+1. Open `http://10.100.0.1:8180/register` (via WireGuard or NetBird)
+2. Create admin account (first registered user gets admin privileges)
+3. Log in and configure the PowerDNS API connection:
+   - **PowerDNS API URL:** `http://pdns:8081`
+   - **PowerDNS API Key:** `cat .generated_secrets/powerdns_api_key`
+   - **PowerDNS Version:** `4.9.13`
+4. **Disable registration** to prevent unauthorized accounts:
+   - Settings > Authentication > Local Authentication > disable "Allow users to signup"
+
+> PowerDNS Admin runs on both nodes (port 8180, WireGuard + NetBird only).
+> Shared PostgreSQL database — same credentials work on both.
+
 **Portainer admin:**
 - Auto-created during deployment. Password in `.generated_secrets/portainer_admin_password`
 - Dashboard: `http://10.100.0.1:9000` (via WireGuard tunnel)
