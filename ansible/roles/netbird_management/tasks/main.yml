@@ -91,9 +91,10 @@
 # Only runs on non-primary nodes when the primary has an idp.db to copy.
 
 - name: Check if idp.db exists on primary node
-  shell: "ssh -o StrictHostKeyChecking=no -i {{ playbook_dir }}/.generated_secrets/ssh/{{ netbird_idp_source | default(dns_failover_primary | default('ns1')) }} root@{{ hostvars[netbird_idp_source | default(dns_failover_primary | default('ns1'))]['wireguard_ip'] }} 'docker exec netbird-server test -f /var/lib/netbird/idp.db && echo exists || echo missing'"
-  delegate_to: localhost
-  become: false
+  shell: "docker exec netbird-server test -f /var/lib/netbird/idp.db && echo exists || echo missing"
+  delegate_to: "{{ dns_failover_primary | default('ns1') }}"
+  vars:
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ dns_failover_primary | default('ns1') }}"
   register: _idp_db_check
   changed_when: false
   when: inventory_hostname != (dns_failover_primary | default('ns1'))
@@ -102,12 +103,25 @@
 - name: Sync idp.db from primary to secondary
   when:
     - inventory_hostname != (dns_failover_primary | default('ns1'))
-    - _idp_db_check.stdout | default('') == 'exists'
+    - _idp_db_check.stdout | default('') is search('exists')
+  vars:
+    _primary: "{{ dns_failover_primary | default('ns1') }}"
+    _primary_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ dns_failover_primary | default('ns1') }}"
   block:
-    - name: Copy idp.db from primary NetBird container to temp file
-      shell: "ssh -o StrictHostKeyChecking=no -i {{ playbook_dir }}/.generated_secrets/ssh/{{ dns_failover_primary | default('ns1') }} root@{{ hostvars[dns_failover_primary | default('ns1')]['wireguard_ip'] }} 'docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db && cat /tmp/idp.db' > /tmp/netbird-idp.db"
-      delegate_to: localhost
-      become: false
+    - name: Extract idp.db from primary NetBird container to host
+      shell: "docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db"
+      delegate_to: "{{ _primary }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _primary_key }}"
+
+    - name: Fetch idp.db from primary to controller
+      fetch:
+        src: /tmp/idp.db
+        dest: /tmp/netbird-idp.db
+        flat: yes
+      delegate_to: "{{ _primary }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _primary_key }}"
 
     - name: Upload idp.db to secondary node
       copy:
@@ -115,11 +129,10 @@
         dest: /tmp/idp.db
         mode: '0600'
 
-    - name: Import idp.db into secondary NetBird container
+    - name: Import idp.db into secondary NetBird container and restart
       shell: "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
-      notify: restart netbird
 
-    - name: Clean up temp files
+    - name: Clean up temp files on controller
       file:
         path: /tmp/netbird-idp.db
         state: absent

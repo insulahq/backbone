@@ -4,13 +4,17 @@
 # and re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
 
 {% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
+{% set is_primary = (inventory_hostname == (postgresql_primary_node | default('ns1'))) %}
 storage:
   type: postgres
-  # Connect to local PG container via Docker DNS, with WireGuard peer as fallback.
-  # Gatus uses lib/pq which supports multi-host via a space-separated host param
-  # (not comma-separated in the URI — that causes "no such host" parsing errors).
-  # target_session_attrs=read-write ensures Gatus always writes to the PG primary.
+  # Gatus uses lib/pq which doesn't support target_session_attrs or multi-host DSN.
+  # On the PG primary: connect to local container via Docker DNS.
+  # On the PG standby: connect to the primary via WireGuard IP (local PG is read-only).
+{% if is_primary %}
   path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432/{{ gatus_db_name }}?sslmode=disable"
+{% else %}
+  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@{{ hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] }}:5432/{{ gatus_db_name }}?sslmode=disable"
+{% endif %}
 
 ui:
   title: "Hosting Platform"
