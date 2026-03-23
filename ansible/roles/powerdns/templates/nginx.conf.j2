@@ -63,7 +63,7 @@ http {
         server_name _;
 
         location / {
-            proxy_pass http://pdns-admin:{{ powerdns_admin_port }};
+            proxy_pass http://pdns-admin:8000;
             # Use $http_host (preserves port) instead of $host (strips port).
             # PDA uses Flask url_for(_external=True) which reads the Host
             # header — without the port, generated URLs are incorrect.
@@ -88,7 +88,7 @@ http {
 
         # Static assets
         location /static/ {
-            proxy_pass http://pdns-admin:{{ powerdns_admin_port }}/static/;
+            proxy_pass http://pdns-admin:8000/static/;
             expires 1d;
             add_header Cache-Control "public, immutable";
         }
