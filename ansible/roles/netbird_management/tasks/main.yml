@@ -299,7 +299,7 @@
           changetype: REPLACE
           records: >-
             {{
-              ansible_play_hosts_all
+              groups['dns_servers']
               | map('extract', hostvars, 'ansible_host')
               | map('community.general.dict_kv', 'content')
               | map('combine', {'disabled': false})
@@ -313,7 +313,7 @@
   when:
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
-    - ansible_play_hosts_all | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
   run_once: true
   uri:
     url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
@@ -330,7 +330,7 @@
           changetype: REPLACE
           records: >-
             {{
-              ansible_play_hosts_all
+              groups['dns_servers']
               | map('extract', hostvars, 'public_ipv6')
               | select('defined')
               | map('community.general.dict_kv', 'content')
