@@ -39,6 +39,17 @@
   when: powerdns_api_key is not defined or powerdns_api_key | length == 0
   no_log: true
 
+- name: Persist PowerDNS API key to secrets file
+  copy:
+    content: "{{ powerdns_api_key }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/powerdns_api_key"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  changed_when: false
+
 - name: Generate PowerDNS DB password if not set
   set_fact:
     powerdns_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/powerdns_db_password length=32 chars=ascii_letters,digits') }}"

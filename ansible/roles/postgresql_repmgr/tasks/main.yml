@@ -1,6 +1,33 @@
 ---
 # PostgreSQL + repmgr Role — Main Tasks
 
+# Persist PostgreSQL passwords to .generated_secrets/ for consistency.
+# These are set in group_vars/all.yml (via setup.sh) but should also
+# exist as individual files alongside all other auto-generated secrets.
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Persist PostgreSQL passwords to secrets files
+  copy:
+    content: "{{ item.value }}"
+    dest: "{{ playbook_dir }}/.generated_secrets/{{ item.name }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  changed_when: false
+  loop:
+    - { name: postgresql_superuser_password, value: "{{ postgresql_superuser_password }}" }
+    - { name: postgresql_repmgr_password, value: "{{ postgresql_repmgr_password }}" }
+    - { name: postgresql_netbird_password, value: "{{ postgresql_netbird_password }}" }
+
 - name: Create PostgreSQL installation directory
   file:
     path: "{{ postgresql_install_dir }}"
