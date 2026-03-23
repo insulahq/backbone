@@ -59,10 +59,17 @@ table inet filter {
   
   chain forward {
     type filter hook forward priority filter; policy accept;
-    
+
     # Allow established and related connections
     ct state established,related accept
-    
+
+    # Allow internal-only ports from WireGuard and NetBird interfaces
+    iifname { "{{ wireguard_interface | default('wg0') }}", "wt0", "lo" } accept
+
+    # Block internal-only service ports from public interfaces (Docker binds to 0.0.0.0)
+    # Portainer (9000), PowerDNS API (8081), PowerDNS Admin (8180)
+    tcp dport { 8081, 8180, 9000 } drop
+
     # Docker will inject its own rules here
     # DO NOT add custom DNAT or SNAT rules — let Docker manage forwarding
   }
