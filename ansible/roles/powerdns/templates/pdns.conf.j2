@@ -37,8 +37,10 @@ api={{ 'yes' if powerdns_api_enabled else 'no' }}
 api-key={{ powerdns_api_key }}
 
 webserver={{ 'yes' if powerdns_webserver_enabled else 'no' }}
-webserver-address=0.0.0.0
-webserver-port={{ powerdns_webserver_port }}
+# Bind to 127.0.0.1 — PowerDNS runs with network_mode: host, so 0.0.0.0
+# would expose the API publicly. Nginx proxies from port 8081 to this port.
+webserver-address=127.0.0.1
+webserver-port={{ powerdns_webserver_internal_port | default(8091) }}
 webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80::/10
 
 ####################
@@ -47,9 +49,10 @@ webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80:
 
 launch=gpgsql
 
-# Connect to the local PostgreSQL container via Docker network.
-# 'postgresql' resolves via Docker DNS on the shared postgresql_default network.
-gpgsql-host=postgresql
+# Connect to local PostgreSQL via WireGuard IP.
+# PowerDNS runs with network_mode: host (for LUA health checks),
+# so Docker DNS is unavailable. PG is bound to the WireGuard interface.
+gpgsql-host={{ wireguard_ip }}
 gpgsql-port=5432
 gpgsql-dbname={{ powerdns_db_name }}
 gpgsql-user={{ powerdns_db_user }}

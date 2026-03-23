@@ -14,16 +14,13 @@ services:
     container_name: powerdns-auth
     restart: unless-stopped
     hostname: {{ inventory_hostname }}.{{ platform_domain }}
+    # network_mode: host allows LUA ifportup() health checks to reach
+    # the host's own forwarded ports (Docker hairpin NAT workaround).
+    # PG connection uses 127.0.0.1 instead of Docker DNS 'postgresql'.
+    network_mode: host
+    user: root  # Required: pdns user can't bind to port 53 on host network
     volumes:
       - {{ powerdns_install_dir }}/pdns.conf:/etc/powerdns/pdns.conf:ro
-    ports:
-      - "0.0.0.0:53:53/tcp"
-      - "0.0.0.0:53:53/udp"
-      - "[::]:53:53/tcp"
-      - "[::]:53:53/udp"
-    networks:
-      - powerdns_internal
-      - postgresql_default  # Connect to HA PostgreSQL cluster via Docker DNS
     healthcheck:
       test: ["CMD-SHELL", "pdns_control uptime > /dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -41,9 +38,8 @@ services:
     image: {{ powerdns_admin_image }}
     container_name: powerdns-admin
     restart: unless-stopped
-    depends_on:
-      pdns:
-        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       SECRET_KEY: "{{ powerdns_admin_secret_key }}"
       BIND_ADDRESS: "0.0.0.0"
@@ -54,7 +50,7 @@ services:
       SQLALCHEMY_DATABASE_URI: "postgresql://{{ powerdns_admin_sqla_db_user }}:{{ powerdns_admin_sqla_db_password }}@{{ hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] }}:5432/{{ powerdns_admin_sqla_db_name }}"
 {% endif %}
       PDNS_API_KEY: "{{ powerdns_api_key }}"
-      PDNS_API_URL: "http://pdns:{{ powerdns_webserver_port }}"
+      PDNS_API_URL: "http://host.docker.internal:{{ powerdns_webserver_internal_port | default(8091) }}"
       PDNS_VERSION: "{{ powerdns_version }}"
     volumes:
       - pdns_admin_data:/data
@@ -79,11 +75,8 @@ services:
     image: {{ nginx_image }}
     container_name: powerdns-nginx
     restart: unless-stopped
-    depends_on:
-      - pdns
-{% if powerdns_admin_enabled | bool %}
-      - pdns-admin
-{% endif %}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - {{ powerdns_install_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro
     # Bind to 0.0.0.0 — accessible via WireGuard (wg0) and NetBird (wt0).

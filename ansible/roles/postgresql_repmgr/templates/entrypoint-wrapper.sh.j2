@@ -173,6 +173,14 @@ if command -v curl &>/dev/null; then
       -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"$MSG\", \"timestamp\": \"$TS\"}" \
       "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
   fi
+  # Restart Gatus — it connects to a hardcoded PG host. After promotion,
+  # the local PG is now read-write and Gatus needs to reconnect.
+  if [ -S /var/run/docker.sock ]; then
+    curl -fsS --unix-socket /var/run/docker.sock -X POST \
+      "http://localhost/v1.41/containers/gatus/restart?t=5" \
+      > /dev/null 2>&1 || true
+    echo "PROMOTE CHECK: Restarted Gatus container to reconnect to new primary"
+  fi
 fi
 exit 0
 SCRIPT
@@ -634,6 +642,14 @@ self_demote() {
 
   # Kill repmgrd
   [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
+
+  # Restart Gatus — after demotion, this node's PG is no longer writable.
+  # Gatus will reconnect when the container restarts with the standby PG config.
+  if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
+    curl -fsS --unix-socket /var/run/docker.sock -X POST \
+      "http://localhost/v1.41/containers/gatus/restart?t=5" \
+      > /dev/null 2>&1 || true
+  fi
 
   echo "==> Container will restart and rejoin as standby" >&2
   exit 1

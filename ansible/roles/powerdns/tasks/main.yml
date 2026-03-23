@@ -71,9 +71,19 @@
 # --- Database setup (on PostgreSQL HA primary only) ---
 # PowerDNS and PowerDNS-Admin databases live in the HA cluster.
 # Schema is created on the primary and replicated to standby automatically.
+# Check the ACTUAL PG role at runtime — after failover, the configured
+# postgresql_primary_node may be the standby.
+
+- name: Check if local PostgreSQL is the actual primary
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: psql -U postgres -tAc "SELECT NOT pg_is_in_recovery();"
+  register: _pg_is_primary
+  changed_when: false
+  ignore_errors: true
 
 - name: Create PowerDNS database user and database
-  when: inventory_hostname == postgresql_primary_node
+  when: (_pg_is_primary.stdout | default('') | trim) == 't'
   block:
     - name: Create PowerDNS database user if not exists
       community.docker.docker_container_exec:
@@ -120,7 +130,7 @@
       changed_when: false
 
 - name: Create PowerDNS-Admin database and user
-  when: inventory_hostname == postgresql_primary_node
+  when: (_pg_is_primary.stdout | default('') | trim) == 't'
   block:
     - name: Create PowerDNS-Admin database user if not exists
       community.docker.docker_container_exec:
@@ -200,7 +210,7 @@
       soa_edit_api: "INCEPTION-INCREMENT"
     status_code: [201, 409]  # 409 = already exists
   register: zone_create_result
-  when: inventory_hostname == postgresql_primary_node
+  when: (_pg_is_primary.stdout | default('') | trim) == 't'
   ignore_errors: yes
 
 - name: Increment SOA serial after zone creation (gotcha 33)
@@ -208,7 +218,7 @@
     container: powerdns-auth
     command: pdnsutil increase-serial {{ platform_domain }}
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - zone_create_result.status | default(0) == 201
   changed_when: true
 
@@ -222,7 +232,7 @@
     _dns_primary: "{{ dns_failover_primary | default('ns1') }}"
     _dns_secondary: "{{ groups['dns_servers'] | difference([dns_failover_primary | default('ns1')]) | first }}"
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - dns_health_check_enabled | default(false) | bool
   tags: [powerdns, dns]
@@ -237,14 +247,14 @@
       { {\'' + hostvars[_dns_primary]['public_ipv6'] + '\'}, {\'' + hostvars[_dns_secondary]['public_ipv6'] + '\'} })"', 'disabled': false}])
       }}
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - dns_health_check_enabled | default(false) | bool
   tags: [powerdns, dns]
 
 - name: Create base domain DNS records (health-checked LUA)
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - dns_health_check_enabled | default(false) | bool
   uri:
@@ -273,7 +283,7 @@
 
 - name: Create base domain A records (static round-robin fallback)
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
   uri:
@@ -306,7 +316,7 @@
 
 - name: Create base domain AAAA records (static round-robin fallback)
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
     - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
@@ -362,7 +372,7 @@
               disabled: false
     status_code: [200, 204]
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
   ignore_errors: true
   tags: [powerdns, dns]
@@ -373,7 +383,7 @@
     command: pdnsutil increase-serial {{ platform_domain }}
   changed_when: true
   when:
-    - inventory_hostname == postgresql_primary_node
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
   ignore_errors: true
   tags: [powerdns, dns]

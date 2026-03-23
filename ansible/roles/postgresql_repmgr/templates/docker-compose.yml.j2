@@ -8,6 +8,7 @@ services:
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Restart Gatus after PG failover
     # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real WireGuard IP: WAL streaming replication + cross-wire repmgrd
