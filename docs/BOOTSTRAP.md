@@ -176,22 +176,11 @@ After Phase 3:
 - Zitadel and Gatus use multi-host PG connections (`target_session_attrs=read-write`)
   to always reach the current PG primary, regardless of failover state
 
-### Manual Step: Sync NetBird `idp.db` to ns2
-
-The embedded Dex IdP stores user credentials in `/var/lib/netbird/idp.db`
-(SQLite inside the Docker volume). This file is **NOT replicated** via
-PostgreSQL — it exists only on the node where the admin account was created.
-
-```bash
-ssh root@<NS1_IP> "docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db"
-scp root@<NS1_IP>:/tmp/idp.db /tmp/idp.db
-scp /tmp/idp.db root@<NS2_IP>:/tmp/idp.db
-ssh root@<NS2_IP> "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
-```
-
-> **Note:** Repeat this sync whenever new local users are created. If you add
-> Zitadel as an external IdP (via Settings > Identity Providers), SSO users
-> authenticate against Zitadel directly and don't need `idp.db` sync.
+> **Note:** The NetBird embedded Dex IdP stores user credentials in `idp.db`
+> (SQLite inside the Docker volume). This is automatically synced from the
+> primary to the secondary during Phase 3 deployment. If you add local users
+> later, re-run `deploy-netbird.yml` to sync again. SSO users (via Zitadel
+> as external IdP) don't need syncing.
 
 ## Phase 4: NetBird Peer Enrollment
 

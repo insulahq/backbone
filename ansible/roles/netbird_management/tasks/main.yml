@@ -84,6 +84,49 @@
     pull: missing
     state: present
 
+# --- Sync embedded Dex idp.db from primary to secondary (gotcha 111) ---
+# The embedded Dex IdP stores user credentials in a SQLite file inside the
+# Docker volume. This is NOT replicated via PostgreSQL. Without syncing,
+# local users created on the primary can't log in on the secondary.
+# Only runs on non-primary nodes when the primary has an idp.db to copy.
+
+- name: Check if idp.db exists on primary node
+  shell: "ssh -o StrictHostKeyChecking=no -i {{ playbook_dir }}/.generated_secrets/ssh/{{ netbird_idp_source | default(dns_failover_primary | default('ns1')) }} root@{{ hostvars[netbird_idp_source | default(dns_failover_primary | default('ns1'))]['wireguard_ip'] }} 'docker exec netbird-server test -f /var/lib/netbird/idp.db && echo exists || echo missing'"
+  delegate_to: localhost
+  become: false
+  register: _idp_db_check
+  changed_when: false
+  when: inventory_hostname != (dns_failover_primary | default('ns1'))
+  tags: [netbird, netbird_management]
+
+- name: Sync idp.db from primary to secondary
+  when:
+    - inventory_hostname != (dns_failover_primary | default('ns1'))
+    - _idp_db_check.stdout | default('') == 'exists'
+  block:
+    - name: Copy idp.db from primary NetBird container to temp file
+      shell: "ssh -o StrictHostKeyChecking=no -i {{ playbook_dir }}/.generated_secrets/ssh/{{ dns_failover_primary | default('ns1') }} root@{{ hostvars[dns_failover_primary | default('ns1')]['wireguard_ip'] }} 'docker cp netbird-server:/var/lib/netbird/idp.db /tmp/idp.db && cat /tmp/idp.db' > /tmp/netbird-idp.db"
+      delegate_to: localhost
+      become: false
+
+    - name: Upload idp.db to secondary node
+      copy:
+        src: /tmp/netbird-idp.db
+        dest: /tmp/idp.db
+        mode: '0600'
+
+    - name: Import idp.db into secondary NetBird container
+      shell: "docker cp /tmp/idp.db netbird-server:/var/lib/netbird/idp.db && docker restart netbird-server"
+      notify: restart netbird
+
+    - name: Clean up temp files
+      file:
+        path: /tmp/netbird-idp.db
+        state: absent
+      delegate_to: localhost
+      become: false
+  tags: [netbird, netbird_management]
+
 - name: Wait for NetBird API to be ready
   uri:
     # Use the server's public IP with Host header to bypass DNS dependency —
