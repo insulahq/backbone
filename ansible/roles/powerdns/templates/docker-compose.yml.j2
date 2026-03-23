@@ -62,7 +62,7 @@ services:
       - powerdns_internal
       - postgresql_default  # For PowerDNS-Admin database
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:{{ powerdns_admin_port }}/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8000/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
