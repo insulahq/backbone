@@ -36,7 +36,7 @@ services:
         max-file: "2"
 
 {% if powerdns_admin_enabled | bool %}
-  # PowerDNS-Admin — Web UI for managing PowerDNS ({{ powerdns_admin_node }} only)
+  # PowerDNS-Admin — Web UI for managing PowerDNS
   pdns-admin:
     image: {{ powerdns_admin_image }}
     container_name: powerdns-admin
@@ -48,7 +48,11 @@ services:
       SECRET_KEY: "{{ powerdns_admin_secret_key }}"
       BIND_ADDRESS: "0.0.0.0"
       PORT: "{{ powerdns_admin_port }}"
+{% if inventory_hostname == (postgresql_primary_node | default('ns1')) %}
       SQLALCHEMY_DATABASE_URI: "postgresql://{{ powerdns_admin_sqla_db_user }}:{{ powerdns_admin_sqla_db_password }}@postgresql:5432/{{ powerdns_admin_sqla_db_name }}"
+{% else %}
+      SQLALCHEMY_DATABASE_URI: "postgresql://{{ powerdns_admin_sqla_db_user }}:{{ powerdns_admin_sqla_db_password }}@{{ hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] }}:5432/{{ powerdns_admin_sqla_db_name }}"
+{% endif %}
       PDNS_API_KEY: "{{ powerdns_api_key }}"
       PDNS_API_URL: "http://pdns:{{ powerdns_webserver_port }}"
       PDNS_VERSION: "{{ powerdns_version }}"
