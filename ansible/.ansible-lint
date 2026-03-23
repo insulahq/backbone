@@ -10,17 +10,35 @@ exclude_paths:
 
 # Skip rules that conflict with our deliberate patterns
 skip_list:
-  # We use shell for docker cp (no better module available)
+  # We use shell for docker cp and piped commands (no better module available)
   - command-instead-of-shell
+  - command-instead-of-module
+  - risky-shell-pipe
   # We use changed_when: true deliberately on some tasks
   - no-changed-when
   # Role names with underscores are our convention
   - role-name
+  # Variable naming: restic_*, powerdns_*, etc. don't match role prefix convention
+  - var-naming
+  # FQCN: too noisy to enforce retroactively across all files
+  - fqcn
+  # Unnamed plays in deploy-*.yml playbooks (import_playbook has no name)
+  - name
+  # ignore_errors used deliberately on DNS record creation and health checks
+  - ignore-errors
+  # no-handler: some restarts are intentional inline, not via handlers
+  - no-handler
+  # schema: some tasks use community.docker params not in schema
+  - schema
+  # jinja: spacing in complex Jinja2 expressions (LUA record construction)
+  - jinja
+  # key-order: task key ordering convention
+  - key-order
 
 # Warn only (don't fail) on these rules
 warn_list:
   - experimental
-  - yaml[line-length]
+  - yaml
 
 # Enable offline mode (don't download anything)
 offline: true

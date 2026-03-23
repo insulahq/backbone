@@ -1,5 +1,8 @@
 ---
 # yamllint configuration
+# Must comply with ansible-lint requirements:
+#   - comments-indentation: false
+#   - octal-values: forbid-implicit-octal + forbid-explicit-octal
 extends: default
 
 rules:
@@ -10,6 +13,7 @@ rules:
     allowed-values: ['true', 'false', 'yes', 'no']
   comments:
     min-spaces-from-content: 1
+  comments-indentation: disable
   braces:
     max-spaces-inside: 1
   brackets:
@@ -17,3 +21,6 @@ rules:
   indentation:
     spaces: 2
     indent-sequences: true
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
