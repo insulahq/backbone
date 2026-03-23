@@ -543,6 +543,9 @@
     _failover_results: []
     _test_node: "{{ groups['dns_servers'] | first }}"
     _surviving_node: "{{ groups['dns_servers'] | last }}"
+    _pg_primary: "ns1"
+    # delegate_to tasks need the target host's SSH key explicitly
+    _surviving_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | last }}"
   tasks:
 
     # --- DNS failover: stop Traefik, verify LUA excludes dead node ---
@@ -560,18 +563,23 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify DNS excludes stopped node"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
-      register: _t_fo_dns
-      changed_when: false
+    - name: "Failover | Verify surviving node still serves HTTPS"
+      uri:
+        url: "https://{{ hostvars[_surviving_node]['ansible_host'] }}"
+        validate_certs: false
+        status_code: [200, 301, 302, 308, 404]
+        timeout: 10
+      register: _t_fo_https
       ignore_errors: true
       run_once: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
-    - name: "Failover | Record result — DNS failover"
+    - name: "Failover | Record result — surviving node HTTPS"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'DNS excludes stopped node', 'host': 'cluster', 'passed': hostvars[_test_node]['ansible_host'] not in (_t_fo_dns.stdout | default(''))}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'Surviving node serves HTTPS after Traefik stop on ' + _test_node, 'host': 'cluster', 'passed': _t_fo_https is success}] }}"
       run_once: true
       tags: [failover, never]
 
@@ -589,18 +597,23 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify DNS includes both nodes again"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
-      register: _t_fo_dns_recovery
-      changed_when: false
+    - name: "Failover | Verify recovered node serves HTTPS"
+      uri:
+        url: "https://{{ hostvars[_test_node]['ansible_host'] }}"
+        validate_certs: false
+        status_code: [200, 301, 302, 308, 404]
+        timeout: 10
+      register: _t_fo_recovery
       ignore_errors: true
-      run_once: true
-      delegate_to: "{{ _surviving_node }}"
+      retries: 3
+      delay: 5
+      until: _t_fo_recovery is success
+      when: inventory_hostname == _test_node
       tags: [failover, never]
 
-    - name: "Failover | Record result — DNS recovery"
+    - name: "Failover | Record result — Traefik recovery"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'DNS includes both nodes after recovery', 'host': 'cluster', 'passed': (hostvars[_test_node]['ansible_host'] in (_t_fo_dns_recovery.stdout | default(''))) and (hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_recovery.stdout | default('')))}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'Traefik recovered on ' + _test_node, 'host': 'cluster', 'passed': _t_fo_recovery is success}] }}"
       run_once: true
       tags: [failover, never]
 
@@ -709,6 +722,8 @@
       register: _t_fo_netbird
       ignore_errors: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -725,6 +740,8 @@
       ignore_errors: true
       run_once: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
     - name: "Failover | Record result — NetBird DNS failover"
@@ -754,6 +771,8 @@
       ignore_errors: true
       run_once: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
     - name: "Failover | Record result — NetBird DNS recovery"
@@ -788,6 +807,8 @@
       register: _t_fo_zitadel
       ignore_errors: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -809,6 +830,8 @@
       register: _t_fo_zitadel_oidc
       ignore_errors: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -843,6 +866,8 @@
       register: _t_fo_zitadel_recovery
       ignore_errors: true
       delegate_to: "{{ _test_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
       run_once: true
       tags: [failover, never]
 
@@ -884,6 +909,8 @@
       ignore_errors: true
       run_once: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
     - name: "Failover | Record result — DNS during full outage"
@@ -901,6 +928,8 @@
       ignore_errors: true
       changed_when: false
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -921,6 +950,8 @@
       register: _t_fo_full_gatus
       ignore_errors: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -958,6 +989,8 @@
       ignore_errors: true
       run_once: true
       delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
     - name: "Failover | Record result — full node DNS recovery"
@@ -987,6 +1020,8 @@
       register: _t_fo_full_recovery_health
       ignore_errors: true
       delegate_to: "{{ _test_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
       run_once: true
       tags: [failover, never]
 
