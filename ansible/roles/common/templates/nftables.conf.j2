@@ -67,8 +67,9 @@ table inet filter {
     iifname { "{{ wireguard_interface | default('wg0') }}", "wt0", "lo" } accept
 
     # Block internal-only service ports from public interfaces (Docker binds to 0.0.0.0)
-    # Portainer (9000), PowerDNS API (8081), PowerDNS Admin (8180)
-    tcp dport { 8081, 8180, 9000 } drop
+    # Portainer (9000), PowerDNS API proxy (8081), PowerDNS Admin (8180),
+    # PowerDNS API internal (8091, host network)
+    tcp dport { 8081, 8091, 8180, 9000 } drop
 
     # Docker will inject its own rules here
     # DO NOT add custom DNAT or SNAT rules — let Docker manage forwarding

@@ -37,9 +37,10 @@ api={{ 'yes' if powerdns_api_enabled else 'no' }}
 api-key={{ powerdns_api_key }}
 
 webserver={{ 'yes' if powerdns_webserver_enabled else 'no' }}
-# Bind to 127.0.0.1 — PowerDNS runs with network_mode: host, so 0.0.0.0
-# would expose the API publicly. Nginx proxies from port 8081 to this port.
-webserver-address=127.0.0.1
+# Bind to 0.0.0.0 — PowerDNS runs with network_mode: host.
+# Access restricted by webserver-allow-from (loopback + private ranges only).
+# Nginx container reaches this via host.docker.internal (Docker bridge gateway).
+webserver-address=0.0.0.0
 webserver-port={{ powerdns_webserver_internal_port | default(8091) }}
 webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80::/10
 
