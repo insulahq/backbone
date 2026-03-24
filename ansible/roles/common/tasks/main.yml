@@ -76,6 +76,21 @@
     enabled: yes
   tags: [common, security, firewall]
 
+# Docker's iptables-nft rules bypass the nftables FORWARD chain entirely.
+# The DOCKER-USER chain is the official way to add custom filtering for
+# Docker-NATed traffic. It's evaluated BEFORE Docker's own ACCEPT rules.
+- name: Deploy DOCKER-USER firewall rules script
+  template:
+    src: docker-user-rules.sh.j2
+    dest: /usr/local/bin/docker-user-rules.sh
+    mode: '0755'
+  tags: [common, security, firewall]
+
+- name: Apply DOCKER-USER firewall rules
+  command: /usr/local/bin/docker-user-rules.sh
+  changed_when: true
+  tags: [common, security, firewall]
+
 # Docker CE installation — official apt repository
 # Uses DEB822 .sources format per Docker's official Debian 13 install guide.
 # https://docs.docker.com/engine/install/debian/
@@ -131,6 +146,24 @@
     mode: '0644'
   notify: restart docker
   tags: [common, docker]
+
+# Re-apply DOCKER-USER rules after every Docker restart (Docker flushes them)
+- name: Ensure Docker systemd override directory exists
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: '0755'
+  tags: [common, docker, security]
+
+- name: Deploy Docker service override for DOCKER-USER rules
+  copy:
+    dest: /etc/systemd/system/docker.service.d/docker-user-rules.conf
+    content: |
+      [Service]
+      ExecStartPost=/usr/local/bin/docker-user-rules.sh
+    mode: '0644'
+  notify: restart docker
+  tags: [common, docker, security]
 
 - name: Start and enable Docker
   systemd:

@@ -1,0 +1,21 @@
+#!/bin/bash
+# DOCKER-USER chain rules — applied after Docker starts.
+# Blocks internal-only ports from public-facing interfaces.
+# Docker evaluates DOCKER-USER before its own ACCEPT rules.
+
+iptables -N DOCKER-USER 2>/dev/null || true
+iptables -F DOCKER-USER
+
+# Allow VPN interfaces (WireGuard, NetBird, loopback)
+iptables -A DOCKER-USER -i {{ wireguard_interface | default('wg0') }} -j RETURN
+iptables -A DOCKER-USER -i wt0 -j RETURN
+iptables -A DOCKER-USER -i lo -j RETURN
+
+# Block internal-only ports from all other interfaces
+# PowerDNS API (8081), PowerDNS Admin (8180), Portainer (9000)
+iptables -A DOCKER-USER -p tcp --dport 8081 -j DROP
+iptables -A DOCKER-USER -p tcp --dport 8180 -j DROP
+iptables -A DOCKER-USER -p tcp --dport 9000 -j DROP
+
+# Allow everything else through
+iptables -A DOCKER-USER -j RETURN

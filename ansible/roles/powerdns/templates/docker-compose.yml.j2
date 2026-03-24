@@ -78,13 +78,12 @@ services:
     restart: unless-stopped
     volumes:
       - {{ powerdns_install_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro
-    # Bind to WireGuard IP only — NOT 0.0.0.0. Docker's iptables-nft rules
-    # bypass nftables FORWARD chain, so binding to 0.0.0.0 exposes these
-    # ports publicly despite firewall drop rules.
+    # Bind to 0.0.0.0 — public access blocked by DOCKER-USER iptables chain
+    # (nftables FORWARD rules are bypassed by Docker's iptables-nft NAT).
     ports:
-      - "{{ wireguard_ip }}:{{ powerdns_nginx_api_port }}:8081"
+      - "0.0.0.0:{{ powerdns_nginx_api_port }}:8081"
 {% if powerdns_admin_enabled | bool %}
-      - "{{ wireguard_ip }}:{{ powerdns_nginx_admin_port }}:8080"
+      - "0.0.0.0:{{ powerdns_nginx_admin_port }}:8080"
 {% endif %}
     networks:
       - powerdns_internal
