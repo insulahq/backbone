@@ -67,30 +67,12 @@
     dest: "{{ postgresql_install_dir }}/pgproxy-target"
     mode: '0666'
 
-- name: Ensure socat is installed (host-level PG write proxy for PowerDNS)
-  apt:
-    name: socat
-    state: present
-
-- name: Deploy host-level pgproxy systemd service (for PowerDNS)
-  template:
-    src: pgproxy-host.service.j2
-    dest: /etc/systemd/system/pgproxy-host.service
-    mode: '0644'
-  notify: restart pgproxy-host
-
-- name: Enable and start host-level pgproxy
+- name: Stop and disable host-level pgproxy (no longer needed — PowerDNS on Docker bridge)
   systemd:
     name: pgproxy-host.service
-    daemon_reload: true
-    enabled: true
-    state: started
-
-- name: Verify pgproxy-host is listening on 127.0.0.2:5432
-  wait_for:
-    host: 127.0.0.2
-    port: 5432
-    timeout: 10
+    state: stopped
+    enabled: false
+  ignore_errors: true
 
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:

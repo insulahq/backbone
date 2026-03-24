@@ -50,12 +50,10 @@ webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80:
 
 launch=gpgsql
 
-# Connect via host-level pgproxy (socat on 127.0.0.2:5432) which always
-# routes to the current PG primary. PowerDNS runs with network_mode: host
-# so it can't use Docker DNS — the host-level socat bridges the gap.
-# After PG failover, the entrypoint-wrapper updates pgproxy-target and
-# restarts the pgproxy-host systemd service.
-gpgsql-host=127.0.0.2
+# Connect via pgproxy container (on postgresql_default network) which always
+# routes to the current PG primary. After PG failover, the entrypoint-wrapper
+# updates pgproxy-target and restarts the pgproxy container.
+gpgsql-host=pgproxy
 gpgsql-port=5432
 gpgsql-dbname={{ powerdns_db_name }}
 gpgsql-user={{ powerdns_db_user }}

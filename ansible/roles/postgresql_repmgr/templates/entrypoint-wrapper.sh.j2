@@ -193,17 +193,11 @@ if command -v curl &>/dev/null; then
   if [ -S /var/run/docker.sock ]; then
     # Point pgproxy to local PG (our own WireGuard IP resolves to 127.0.0.1 via extra_hosts)
     echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
-    for ctr in pgproxy gatus netbird-server; do
+    for ctr in pgproxy gatus netbird-server powerdns-auth; do
       curl -fsS --unix-socket /var/run/docker.sock -X POST \
         "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
         > /dev/null 2>&1 || true
     done
-    # Restart host-level pgproxy (for PowerDNS) and trigger PG backend reconnect
-    if command -v nsenter &>/dev/null; then
-      nsenter -t 1 -m -u -i -n -p -- systemctl restart pgproxy-host.service 2>/dev/null || true
-    else
-      echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
-    fi
     # Switch DNS to this node (we just promoted — peer is down)
     switch_dns "primary-only"
     echo "PROMOTE CHECK: Updated pgproxy + DNS to local PG and restarted consumers"
@@ -483,17 +477,11 @@ start_as_primary() {
   # Update pgproxy to route writes to local PG (our hostname → 127.0.0.1 via extra_hosts)
   echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
   if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-    for ctr in pgproxy gatus netbird-server; do
+    for ctr in pgproxy gatus netbird-server powerdns-auth; do
       curl -fsS --unix-socket /var/run/docker.sock -X POST \
         "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
         > /dev/null 2>&1 || true
     done
-    # Restart host-level pgproxy (for PowerDNS) and trigger PG backend reconnect
-    if command -v nsenter &>/dev/null; then
-      nsenter -t 1 -m -u -i -n -p -- systemctl restart pgproxy-host.service 2>/dev/null || true
-    else
-      echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
-    fi
     # Point DNS to this node (we're the primary — all traffic comes here)
     switch_dns "primary-only"
     echo "==> Updated pgproxy target to local, DNS to self, restarted consumers"
@@ -589,17 +577,11 @@ start_as_standby() {
   # Update pgproxy to route writes to the primary (peer) and restart consumers
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
   if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-    for ctr in pgproxy gatus netbird-server; do
+    for ctr in pgproxy gatus netbird-server powerdns-auth; do
       curl -fsS --unix-socket /var/run/docker.sock -X POST \
         "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
         > /dev/null 2>&1 || true
     done
-    # Restart host-level pgproxy (for PowerDNS) and trigger PG backend reconnect
-    if command -v nsenter &>/dev/null; then
-      nsenter -t 1 -m -u -i -n -p -- systemctl restart pgproxy-host.service 2>/dev/null || true
-    else
-      echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
-    fi
     # Point DNS to peer (the PG primary) — this node is standby, shouldn't receive traffic
     switch_dns "drain-self"
     echo "==> Updated pgproxy target to ${PEER_NAME}, DNS to peer, restarted consumers"
@@ -711,17 +693,11 @@ self_demote() {
   # Update pgproxy to point to peer (the real primary) and restart consumers.
   if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
     echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
-    for ctr in pgproxy gatus netbird-server; do
+    for ctr in pgproxy gatus netbird-server powerdns-auth; do
       curl -fsS --unix-socket /var/run/docker.sock -X POST \
         "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
         > /dev/null 2>&1 || true
     done
-    # Restart host-level pgproxy (for PowerDNS) and trigger PG backend reconnect
-    if command -v nsenter &>/dev/null; then
-      nsenter -t 1 -m -u -i -n -p -- systemctl restart pgproxy-host.service 2>/dev/null || true
-    else
-      echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
-    fi
   fi
 
   # Switch DNS to peer only (we're demoted, peer is the real primary)

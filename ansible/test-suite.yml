@@ -293,32 +293,6 @@
       when: inventory_hostname == _pg_primary
       tags: [postgresql, pgproxy]
 
-    - name: "pgproxy | Host-level socat service running"
-      command: systemctl is-active pgproxy-host.service
-      register: _t_pgproxy_host
-      ignore_errors: true
-      changed_when: false
-      tags: [postgresql, pgproxy]
-
-    - name: "pgproxy | Record result — host-level socat"
-      set_fact:
-        _test_results: "{{ _test_results + [{'name': 'pgproxy-host systemd service active', 'host': inventory_hostname, 'passed': _t_pgproxy_host.stdout | default('') == 'active'}] }}"
-      tags: [postgresql, pgproxy]
-
-    - name: "pgproxy | Host proxy listening on 127.0.0.2:5432"
-      wait_for:
-        host: 127.0.0.2
-        port: 5432
-        timeout: 5
-      register: _t_pgproxy_host_listen
-      ignore_errors: true
-      tags: [postgresql, pgproxy]
-
-    - name: "pgproxy | Record result — host proxy listening"
-      set_fact:
-        _test_results: "{{ _test_results + [{'name': 'pgproxy-host listening on 127.0.0.2:5432', 'host': inventory_hostname, 'passed': _t_pgproxy_host_listen is success}] }}"
-      tags: [postgresql, pgproxy]
-
     - name: "pgproxy | Target file exists"
       stat:
         path: /opt/postgresql/pgproxy-target

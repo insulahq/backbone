@@ -4,8 +4,3 @@
     project_src: "{{ postgresql_install_dir }}"
     state: present
     recreate: always
-
-- name: restart pgproxy-host
-  systemd:
-    name: pgproxy-host.service
-    state: restarted
