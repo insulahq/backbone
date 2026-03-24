@@ -223,7 +223,7 @@
         container: postgresql
         command: >
           psql -U postgres -tAc
-          "SELECT datname FROM pg_database WHERE datname IN ('netbird','pdns','pdnsadmin','zitadel','gatus') ORDER BY datname"
+          "SELECT datname FROM pg_database WHERE datname IN ('netbird','netbird_dex','netbird_events','pdns','pdnsadmin','zitadel','gatus') ORDER BY datname"
       register: _t_pg_dbs
       ignore_errors: true
       changed_when: false
@@ -253,6 +253,82 @@
         _test_results: "{{ _test_results + [{'name': 'Replication streaming (' + (_t_pg_repl_primary.stdout | default('none') | trim) + ')', 'host': inventory_hostname, 'passed': 'streaming' in (_t_pg_repl_primary.stdout | default(''))}] }}"
       when: inventory_hostname == _pg_primary
       tags: [postgresql]
+
+    # ------------------------------------------------------------------
+    # PG Write Proxy Tests (pgproxy)
+    # ------------------------------------------------------------------
+
+    - name: "pgproxy | Docker container running"
+      community.docker.docker_container_info:
+        name: pgproxy
+      register: _t_pgproxy_container
+      ignore_errors: true
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Record result — container running"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy container running', 'host': inventory_hostname, 'passed': _t_pgproxy_container.container.State.Running | default(false)}] }}"
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Docker container healthy"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy container healthy', 'host': inventory_hostname, 'passed': _t_pgproxy_container.container.State.Health.Status | default('') == 'healthy'}] }}"
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Write test via pgproxy (primary only)"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -h pgproxy -c
+          "CREATE TABLE IF NOT EXISTS _pgproxy_test (id int); DROP TABLE _pgproxy_test;"
+      register: _t_pgproxy_write
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname == _pg_primary
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Record result — write via pgproxy"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy write test', 'host': inventory_hostname, 'passed': _t_pgproxy_write.rc | default(1) == 0}] }}"
+      when: inventory_hostname == _pg_primary
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Host-level socat service running"
+      command: systemctl is-active pgproxy-host.service
+      register: _t_pgproxy_host
+      ignore_errors: true
+      changed_when: false
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Record result — host-level socat"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy-host systemd service active', 'host': inventory_hostname, 'passed': _t_pgproxy_host.stdout | default('') == 'active'}] }}"
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Host proxy listening on 127.0.0.2:5432"
+      wait_for:
+        host: 127.0.0.2
+        port: 5432
+        timeout: 5
+      register: _t_pgproxy_host_listen
+      ignore_errors: true
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Record result — host proxy listening"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy-host listening on 127.0.0.2:5432', 'host': inventory_hostname, 'passed': _t_pgproxy_host_listen is success}] }}"
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Target file exists"
+      stat:
+        path: /opt/postgresql/pgproxy-target
+      register: _t_pgproxy_target
+      tags: [postgresql, pgproxy]
+
+    - name: "pgproxy | Record result — target file"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'pgproxy-target file exists', 'host': inventory_hostname, 'passed': _t_pgproxy_target.stat.exists | default(false)}] }}"
+      tags: [postgresql, pgproxy]
 
     # ------------------------------------------------------------------
     # NetBird Tests
@@ -548,7 +624,7 @@
     _surviving_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | last }}"
   tasks:
 
-    # --- DNS failover: stop Traefik, verify LUA excludes dead node ---
+    # --- DNS failover: stop Traefik, verify other node still serves ---
     - name: "Failover | Stop Traefik on {{ _test_node }} to test DNS failover"
       community.docker.docker_compose_v2:
         project_src: /opt/traefik
@@ -557,7 +633,7 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Wait for LUA health check to detect failure (35s)"
+    - name: "Failover | Wait for DNS cache expiry (35s)"
       pause:
         seconds: 35
       run_once: true
@@ -693,6 +769,60 @@
     - name: "Failover | Record result — cluster rejoined"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'Original primary rejoined cluster', 'host': 'cluster', 'passed': (_t_fo_pg_rejoin.stdout | default('') | regex_findall('running') | length) >= 2}] }}"
+      when: inventory_hostname != _pg_primary
+      tags: [failover, never]
+
+    # --- DNS switching: verify DNS records updated after failover/failback ---
+
+    - name: "Failover | Verify DNS switched to surviving node after PG failover"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ platform_domain }} A +short +time=5"
+      register: _t_fo_dns_switch
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — DNS points to surviving node"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'DNS switched to surviving node after PG failover', 'host': 'cluster', 'passed': hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_switch.stdout | default(''))}] }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify round-robin DNS restored after cluster rejoin"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ platform_domain }} A +short +time=5"
+      register: _t_fo_dns_roundrobin
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — round-robin DNS restored"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'Round-robin DNS restored after failback (IPs: ' + (_t_fo_dns_roundrobin.stdout | default('') | trim) + ')', 'host': 'cluster', 'passed': (_t_fo_dns_roundrobin.stdout_lines | default([]) | length) >= 2}] }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify pgproxy write via surviving node after PG failover"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -h pgproxy -c
+          "CREATE TABLE IF NOT EXISTS _pgproxy_fo_test (id int); DROP TABLE _pgproxy_fo_test;"
+      register: _t_fo_pgproxy_write
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname != _pg_primary
+      tags: [failover, never]
+
+    - name: "Failover | Record result — pgproxy write after failover"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'pgproxy write works after PG failover', 'host': 'cluster', 'passed': _t_fo_pgproxy_write.rc | default(1) == 0}] }}"
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
