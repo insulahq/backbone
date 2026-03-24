@@ -8,6 +8,7 @@ services:
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
+      - /opt/postgresql/pgproxy-target:/opt/postgresql/pgproxy-target  # PG write proxy target (updated by wrapper)
       - /var/run/docker.sock:/var/run/docker.sock:ro  # Restart Gatus after PG failover
     # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
@@ -85,7 +86,7 @@ services:
         echo "pgproxy: forwarding to $$TARGET:5432"
         exec socat TCP-LISTEN:5432,fork,reuseaddr TCP:$$TARGET:5432
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 5432"]
+      test: ["CMD-SHELL", "socat -T1 /dev/null TCP:localhost:5432,connect-timeout=2"]
       interval: 10s
       timeout: 3s
       retries: 3
