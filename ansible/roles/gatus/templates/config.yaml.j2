@@ -3,18 +3,12 @@
 # To add notification targets, set variables in group_vars/all.yml
 # and re-deploy: ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
 
-{% set peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
-{% set is_primary = (inventory_hostname == (postgresql_primary_node | default('ns1'))) %}
 storage:
   type: postgres
-  # Gatus uses lib/pq which doesn't support target_session_attrs or multi-host DSN.
-  # On the PG primary: connect to local container via Docker DNS.
-  # On the PG standby: connect to the primary via WireGuard IP (local PG is read-only).
-{% if is_primary %}
-  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@postgresql:5432/{{ gatus_db_name }}?sslmode=disable"
-{% else %}
-  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@{{ hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] }}:5432/{{ gatus_db_name }}?sslmode=disable"
-{% endif %}
+  # Gatus uses lib/pq which doesn't support multi-host DSN (gotcha 119).
+  # Connects via pgproxy which always routes to the current PG primary.
+  # After failover, the PG entrypoint-wrapper updates pgproxy and restarts Gatus.
+  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@pgproxy:5432/{{ gatus_db_name }}?sslmode=disable"
 
 ui:
   title: "Hosting Platform"

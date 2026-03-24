@@ -58,6 +58,40 @@
     mode: '0644'
   notify: restart postgresql
 
+- name: Write initial pgproxy target (points to current primary via WireGuard IP)
+  copy:
+    # Both Docker containers (pgproxy) and host-level services (PowerDNS socat)
+    # can reach the WireGuard IP, so we use it for both.
+    # On the primary: own WireGuard IP (local PG). On the standby: peer's WireGuard IP.
+    content: "{{ wireguard_ip if postgresql_is_primary else hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+    dest: "{{ postgresql_install_dir }}/pgproxy-target"
+    mode: '0644'
+
+- name: Ensure socat is installed (host-level PG write proxy for PowerDNS)
+  apt:
+    name: socat
+    state: present
+
+- name: Deploy host-level pgproxy systemd service (for PowerDNS)
+  template:
+    src: pgproxy-host.service.j2
+    dest: /etc/systemd/system/pgproxy-host.service
+    mode: '0644'
+  notify: restart pgproxy-host
+
+- name: Enable and start host-level pgproxy
+  systemd:
+    name: pgproxy-host.service
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Verify pgproxy-host is listening on 127.0.0.2:5432
+  wait_for:
+    host: 127.0.0.2
+    port: 5432
+    timeout: 10
+
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:
     project_src: "{{ postgresql_install_dir }}"

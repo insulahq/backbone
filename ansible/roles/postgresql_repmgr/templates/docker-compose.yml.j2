@@ -46,6 +46,10 @@ services:
       GATUS_TOKEN: "{{ gatus_external_token | default('') }}"
       ALERT_WEBHOOK_URL: "{{ alert_webhook_url | default('') }}"
 
+      # WireGuard IPs for pgproxy target resolution (entrypoint-wrapper uses these)
+      LOCAL_WG_IP: "{{ wireguard_ip }}"
+      PEER_WG_IP: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []
     healthcheck:
@@ -58,6 +62,35 @@ services:
       driver: "json-file"
       options:
         max-size: "200m"
+        max-file: "2"
+
+  # PG write proxy — always routes to the current primary.
+  # Services with drivers that lack multi-host DSN support (lib/pq < 1.11, gpgsql)
+  # connect to pgproxy:5432 instead of postgresql:5432 directly.
+  # Target is read from /pgproxy-target at startup (mounted from host).
+  # The PG entrypoint-wrapper updates this file after failover and restarts pgproxy.
+  pgproxy:
+    image: alpine/socat:1.8.0.1
+    container_name: pgproxy
+    restart: unless-stopped
+    volumes:
+      - /opt/postgresql/pgproxy-target:/pgproxy-target:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        TARGET=$$(cat /pgproxy-target 2>/dev/null || echo postgresql)
+        echo "pgproxy: forwarding to $$TARGET:5432"
+        exec socat TCP-LISTEN:5432,fork,reuseaddr TCP:$$TARGET:5432
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 5432"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
         max-file: "2"
 
 networks:

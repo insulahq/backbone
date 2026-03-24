@@ -40,17 +40,11 @@ server:
     encryptionKey: "{{ netbird_datastore_encryption_key }}"
 
   # Embedded Dex IdP — authStore (PR #5443, available since v0.66.1)
-  # Must be under server: (not root level). Uses lib/pq — no multi-host DSN (gotcha 119).
-  # Primary connects via Docker DNS; standby connects to primary via WireGuard IP.
-{% set is_primary = (inventory_hostname == (postgresql_primary_node | default('ns1'))) %}
-{% if is_primary %}
-{% set auth_pg_host = 'postgresql' %}
-{% else %}
-{% set auth_pg_host = hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] %}
-{% endif %}
+  # Must be under server: (not root level). Connects via pgproxy which always
+  # routes to the current PG primary (updated by entrypoint-wrapper after failover).
   authStore:
     engine: "postgres"
-    dsn: "host={{ auth_pg_host }} port=5432 user=netbird_dex password={{ postgresql_netbird_dex_password }} dbname=netbird_dex sslmode=disable"
+    dsn: "host=pgproxy port=5432 user=netbird_dex password={{ postgresql_netbird_dex_password }} dbname=netbird_dex sslmode=disable"
 
 # Activity events store uses env vars (NB_ACTIVITY_EVENT_STORE_ENGINE +
 # NB_ACTIVITY_EVENT_POSTGRES_DSN) set in docker-compose.yml — the config.yaml

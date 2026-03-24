@@ -50,10 +50,12 @@ webserver-allow-from=127.0.0.0/8,172.16.0.0/12,10.0.0.0/8,::1/128,fd00::/8,fe80:
 
 launch=gpgsql
 
-# Connect to local PostgreSQL via WireGuard IP.
-# PowerDNS runs with network_mode: host (for LUA health checks),
-# so Docker DNS is unavailable. PG is bound to the WireGuard interface.
-gpgsql-host={{ wireguard_ip }}
+# Connect via host-level pgproxy (socat on 127.0.0.2:5432) which always
+# routes to the current PG primary. PowerDNS runs with network_mode: host
+# so it can't use Docker DNS — the host-level socat bridges the gap.
+# After PG failover, the entrypoint-wrapper updates pgproxy-target and
+# restarts the pgproxy-host systemd service.
+gpgsql-host=127.0.0.2
 gpgsql-port=5432
 gpgsql-dbname={{ powerdns_db_name }}
 gpgsql-user={{ powerdns_db_user }}

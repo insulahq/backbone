@@ -1,0 +1,18 @@
+# Host-level PG write proxy for services running with network_mode: host
+# (e.g., PowerDNS). Routes TCP connections on 127.0.0.2:5432 to the current
+# PostgreSQL primary. The PG entrypoint-wrapper updates pgproxy-target and
+# restarts this service after failover.
+[Unit]
+Description=PostgreSQL HA Write Proxy (host-level)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'TARGET=$(cat /opt/postgresql/pgproxy-target 2>/dev/null || echo 127.0.0.1); echo "pgproxy-host: forwarding 127.0.0.2:5432 → $TARGET:5432"'
+ExecStart=/bin/sh -c 'TARGET=$(cat /opt/postgresql/pgproxy-target 2>/dev/null || echo 127.0.0.1); exec socat TCP-LISTEN:5432,bind=127.0.0.2,fork,reuseaddr TCP:$TARGET:5432'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
