@@ -101,7 +101,7 @@ send_alert() {
 # ==========================================================================
 # Delegates to /usr/local/bin/platform-dns-switch on the host (via nsenter).
 # The script is deployed by the common Ansible role and reads its config from
-# /etc/platform-dns-switch.env. It supports: round-robin, primary-only, drain-self.
+# /etc/platform-dns-switch.env. Modes: primary-only (traffic to self), drain-self (traffic to peer).
 switch_dns() {
   local mode="$1"  # "primary-only", "round-robin", or "drain-self"
   if command -v nsenter &>/dev/null; then
@@ -204,7 +204,7 @@ if command -v curl &>/dev/null; then
     else
       echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
     fi
-    # Switch DNS to this node only (peer is down, round-robin would send 50% to dead node)
+    # Switch DNS to this node (we just promoted — peer is down)
     switch_dns "primary-only"
     echo "PROMOTE CHECK: Updated pgproxy + DNS to local PG and restarted consumers"
   fi
@@ -494,9 +494,9 @@ start_as_primary() {
     else
       echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
     fi
-    # Restore round-robin DNS (both nodes should be healthy on primary start)
-    switch_dns "round-robin"
-    echo "==> Updated pgproxy target to local, restored round-robin DNS, restarted consumers"
+    # Point DNS to this node (we're the primary — all traffic comes here)
+    switch_dns "primary-only"
+    echo "==> Updated pgproxy target to local, DNS to self, restarted consumers"
   fi
 
   echo "==> Registering as primary (--force for idempotency)..."
@@ -600,9 +600,9 @@ start_as_standby() {
     else
       echo "WARNING: nsenter not available — pgproxy-host NOT restarted; PowerDNS may route to stale primary" >&2
     fi
-    # Restore round-robin DNS (we're back as standby, both nodes healthy)
-    switch_dns "round-robin"
-    echo "==> Updated pgproxy target to ${PEER_NAME}, restored round-robin DNS, restarted consumers"
+    # Point DNS to peer (the PG primary) — this node is standby, shouldn't receive traffic
+    switch_dns "drain-self"
+    echo "==> Updated pgproxy target to ${PEER_NAME}, DNS to peer, restarted consumers"
   fi
 
   echo "==> Registering as standby (--force for idempotency)..."

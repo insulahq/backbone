@@ -2,7 +2,7 @@
 # Rolling Update Playbook — Zero-Downtime Container Updates
 # ==========================================================
 # Updates containers on each node one at a time, draining DNS traffic
-# before updating and restoring round-robin after health checks pass.
+# before updating and restoring to the active node after health checks pass.
 #
 # Usage:
 #   ansible-playbook -i inventory/hosts.yml rolling-update.yml
@@ -15,7 +15,7 @@
 #   2. Wait for TTL expiry (30s) + grace period
 #   3. Pull new images and recreate containers
 #   4. Health check — verify services respond
-#   5. Restore round-robin DNS (both nodes serving)
+#   5. Restore DNS to this node (active-passive)
 #   6. Repeat for the other node
 
 - name: "Rolling update"
@@ -88,8 +88,8 @@
       tags: [rolling-update]
 
     # --- Step 4: Restore DNS ---
-    - name: "Restore | Add {{ inventory_hostname }} back to round-robin DNS"
-      command: /usr/local/bin/platform-dns-switch round-robin
+    - name: "Restore | Point DNS back to {{ inventory_hostname }}"
+      command: /usr/local/bin/platform-dns-switch primary-only
       changed_when: true
       tags: [rolling-update]
 

@@ -12,9 +12,16 @@
 #   platform-dns-switch <mode> [--primary-ip IP] [--peer-ip IP]
 #
 # Modes:
-#   round-robin   — Both node IPs in DNS (normal operation, both healthy)
-#   primary-only  — Only the primary-ip in DNS (failover, or draining peer)
-#   drain-self    — Only the peer-ip in DNS (draining this node for maintenance)
+#   primary-only  — Only this node's IP in DNS (active-passive: this node serves)
+#   drain-self    — Only the peer's IP in DNS (draining this node for maintenance/failover)
+#
+# Architecture: Active-passive. All service domains always point to ONE node.
+# NetBird requires single-server signal exchange; other services benefit from
+# simplicity. The standby runs all containers (hot standby) but receives no
+# external traffic until failover.
+#
+# NOTE: NS glue records (ns1/ns2.<domain>) are NOT modified — both nameservers
+# always respond to DNS queries. Only service A/AAAA records are switched.
 #
 # Environment (set in /etc/platform-dns-switch.env, or passed directly):
 #   PDNS_API_KEY, PDNS_API_PORT, PLATFORM_DOMAIN
@@ -48,7 +55,7 @@ while [ $# -gt 0 ]; do
 done
 
 usage() {
-  echo "Usage: platform-dns-switch <round-robin|primary-only|drain-self>" >&2
+  echo "Usage: platform-dns-switch <primary-only|drain-self>" >&2
   exit 1
 }
 
@@ -75,12 +82,6 @@ case "$MODE" in
   drain-self)
     A_RECORDS="[{\"content\": \"${PEER_IP}\", \"disabled\": false}]"
     [ -n "$PEER_IPV6" ] && AAAA_RECORDS="[{\"content\": \"${PEER_IPV6}\", \"disabled\": false}]"
-    ;;
-  round-robin)
-    A_RECORDS="[{\"content\": \"${PRIMARY_IP}\", \"disabled\": false}, {\"content\": \"${PEER_IP}\", \"disabled\": false}]"
-    if [ -n "$PRIMARY_IPV6" ] && [ -n "$PEER_IPV6" ]; then
-      AAAA_RECORDS="[{\"content\": \"${PRIMARY_IPV6}\", \"disabled\": false}, {\"content\": \"${PEER_IPV6}\", \"disabled\": false}]"
-    fi
     ;;
   *)
     usage

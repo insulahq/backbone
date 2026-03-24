@@ -429,17 +429,17 @@
         _test_results: "{{ _test_results + [{'name': 'platform-dns-switch.env exists', 'host': inventory_hostname, 'passed': _t_dns_switch_env.stat.exists | default(false)}] }}"
       tags: [dns, maintenance]
 
-    - name: "DNS Switch | Dry-run round-robin mode (verify API connectivity)"
-      shell: "/usr/local/bin/platform-dns-switch round-robin 2>&1"
-      register: _t_dns_switch_rr
+    - name: "DNS Switch | Verify primary-only mode (API connectivity)"
+      shell: "/usr/local/bin/platform-dns-switch primary-only 2>&1"
+      register: _t_dns_switch_po
       changed_when: false
       ignore_errors: true
       when: inventory_hostname == _pg_primary
       tags: [dns, maintenance]
 
-    - name: "DNS Switch | Record result — round-robin API call"
+    - name: "DNS Switch | Record result — primary-only API call"
       set_fact:
-        _test_results: "{{ _test_results + [{'name': 'platform-dns-switch round-robin succeeds', 'host': inventory_hostname, 'passed': _t_dns_switch_rr.rc | default(1) == 0}] }}"
+        _test_results: "{{ _test_results + [{'name': 'platform-dns-switch primary-only succeeds', 'host': inventory_hostname, 'passed': _t_dns_switch_po.rc | default(1) == 0}] }}"
       when: inventory_hostname == _pg_primary
       tags: [dns, maintenance]
 
@@ -831,9 +831,9 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify round-robin DNS restored after cluster rejoin"
+    - name: "Failover | Verify DNS still points to surviving node after cluster rejoin"
       command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ platform_domain }} A +short +time=5"
-      register: _t_fo_dns_roundrobin
+      register: _t_fo_dns_after_rejoin
       changed_when: false
       ignore_errors: true
       run_once: true
@@ -842,9 +842,9 @@
         ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
-    - name: "Failover | Record result — round-robin DNS restored"
+    - name: "Failover | Record result — DNS stays on surviving node (active-passive)"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'Round-robin DNS restored after failback (IPs: ' + (_t_fo_dns_roundrobin.stdout | default('') | trim) + ')', 'host': 'cluster', 'passed': (_t_fo_dns_roundrobin.stdout_lines | default([]) | length) >= 2}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'DNS points to surviving node after rejoin (active-passive, IP: ' + (_t_fo_dns_after_rejoin.stdout | default('') | trim) + ')', 'host': 'cluster', 'passed': hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_after_rejoin.stdout | default('')) and (_t_fo_dns_after_rejoin.stdout_lines | default([]) | length) == 1}] }}"
       run_once: true
       tags: [failover, never]
 
