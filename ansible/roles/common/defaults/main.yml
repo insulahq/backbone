@@ -57,3 +57,6 @@ disk_monitor_crit_percent: 90             # Critical at 90% disk usage
 # Container image update monitoring
 image_monitor_enabled: true
 image_monitor_schedule: "*-*-* 06:00:00"  # Daily at 6 AM UTC
+
+# Unattended upgrades — automatic security patching
+unattended_upgrades_enabled: true

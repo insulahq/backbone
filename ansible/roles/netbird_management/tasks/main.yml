@@ -78,6 +78,13 @@
     mode: '0600'
   notify: restart netbird
 
+- name: Deploy dashboard nginx config (SPA routing fix — gotcha 108)
+  template:
+    src: dashboard-nginx.conf.j2
+    dest: "{{ netbird_install_dir }}/dashboard-nginx.conf"
+    mode: '0644'
+  notify: restart netbird
+
 - name: Start NetBird stack
   community.docker.docker_compose_v2:
     project_src: "{{ netbird_install_dir }}"
@@ -99,10 +106,10 @@
   tags: [netbird, netbird_management]
 
 # --- Sync embedded Dex idp.db from primary to secondary (gotcha 111) ---
-# The embedded Dex IdP stores user credentials in a SQLite file inside the
-# Docker volume. This is NOT replicated via PostgreSQL. Without syncing,
-# local users created on the primary can't log in on the secondary.
-# Only runs on non-primary nodes when the primary has an idp.db to copy.
+# The embedded Dex IdP stores user credentials and OIDC connector config in a
+# SQLite file inside the Docker volume. This is NOT replicated via PostgreSQL.
+# Without syncing, local users and OIDC providers configured on the primary
+# can't be used on the secondary. Only runs on non-primary nodes.
 
 - name: Check if idp.db exists on primary node
   shell: "docker exec netbird-server test -f /var/lib/netbird/idp.db && echo exists || echo missing"

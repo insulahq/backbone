@@ -1,0 +1,24 @@
+# Custom nginx config for NetBird Dashboard (SPA)
+# Fixes gotcha #108: SPA callback routes (/nb-auth, /nb-silent-auth) returning 404
+# because the default nginx try_files does not fall back to index.html.
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # SPA fallback — all unknown paths serve index.html so the
+    # client-side router can handle them (OIDC callbacks, deep links).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets aggressively
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+}

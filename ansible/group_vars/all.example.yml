@@ -57,6 +57,7 @@ platform_domain: example.com
 postgresql_superuser_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_netbird_dex_password: "<GENERATE: openssl rand -base64 22>"
 
 # ============================================================================
 # PowerDNS (both nodes, shared PostgreSQL HA backend)

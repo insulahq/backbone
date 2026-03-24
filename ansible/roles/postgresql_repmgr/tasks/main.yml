@@ -27,6 +27,7 @@
     - { name: postgresql_superuser_password, value: "{{ postgresql_superuser_password }}" }
     - { name: postgresql_repmgr_password, value: "{{ postgresql_repmgr_password }}" }
     - { name: postgresql_netbird_password, value: "{{ postgresql_netbird_password }}" }
+    - { name: postgresql_netbird_dex_password, value: "{{ postgresql_netbird_dex_password }}" }
 
 - name: Create PostgreSQL installation directory
   file:

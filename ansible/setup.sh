@@ -170,6 +170,7 @@ info "Generating secrets..."
 PG_SUPERUSER_PASS=$(openssl rand -base64 22)
 PG_REPMGR_PASS=$(openssl rand -base64 22)
 PG_NETBIRD_PASS=$(openssl rand -base64 22)
+PG_NETBIRD_DEX_PASS=$(openssl rand -base64 22)
 PDNS_API_KEY=$(openssl rand -base64 48)
 
 ok "All secrets generated locally"
@@ -255,6 +256,7 @@ platform_domain: ${DOMAIN}
 postgresql_superuser_password: "${PG_SUPERUSER_PASS}"
 postgresql_repmgr_password: "${PG_REPMGR_PASS}"
 postgresql_netbird_password: "${PG_NETBIRD_PASS}"
+postgresql_netbird_dex_password: "${PG_NETBIRD_DEX_PASS}"
 
 # PowerDNS
 powerdns_api_key: "${PDNS_API_KEY}"

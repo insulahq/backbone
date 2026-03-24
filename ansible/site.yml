@@ -58,6 +58,9 @@
           - postgresql_netbird_password is defined
           - postgresql_netbird_password | length > 0
           - "'GENERATE' not in postgresql_netbird_password"
+          - postgresql_netbird_dex_password is defined
+          - postgresql_netbird_dex_password | length > 0
+          - "'GENERATE' not in postgresql_netbird_dex_password"
         fail_msg: >-
           PostgreSQL passwords must be set in group_vars/all.yml.
           Generate with: openssl rand -base64 22
@@ -108,6 +111,69 @@
           or set backup_enabled: false to skip backup deployment.
 
 # ============================================================================
+# Pre-flight: Auto-detect PostgreSQL primary after failover
+# ============================================================================
+# On existing clusters, queries each node to find the actual primary.
+# If a failover has occurred (e.g., ns2 promoted), this overrides
+# postgresql_primary_node and dns_failover_primary for the entire run.
+# Skipped on fresh bootstrap (no containers running yet).
+
+- name: "Pre-flight: Auto-detect PostgreSQL primary node"
+  hosts: dns_servers
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Check if PostgreSQL container is running
+      shell: "docker ps --filter name=^postgresql$ --filter status=running --format 'running'"
+      register: _pg_container_running
+      changed_when: false
+      failed_when: false
+
+    - name: Query PostgreSQL primary status
+      command: docker exec postgresql psql -U postgres -tAc "SELECT NOT pg_is_in_recovery();"
+      register: _pg_is_primary
+      changed_when: false
+      failed_when: false
+      when: _pg_container_running.stdout | default('') == 'running'
+
+    - name: Detect actual primary node
+      run_once: true
+      block:
+        - name: Build list of nodes reporting as primary
+          set_fact:
+            _detected_primaries: >-
+              {{ groups['dns_servers']
+                 | select('in', (hostvars | dict2items
+                   | selectattr('value._pg_is_primary.stdout', 'defined')
+                   | selectattr('value._pg_is_primary.stdout', 'match', '^\s*t\s*$')
+                   | map(attribute='key') | list))
+                 | list }}
+
+        - name: Override postgresql_primary_node if failover detected
+          set_fact:
+            postgresql_primary_node: "{{ _detected_primaries[0] }}"
+            dns_failover_primary: "{{ _detected_primaries[0] }}"
+          delegate_to: "{{ item }}"
+          delegate_facts: true
+          loop: "{{ groups['all'] }}"
+          when:
+            - _detected_primaries | length == 1
+            - _detected_primaries[0] != (postgresql_primary_node | default('ns1'))
+
+        - name: Report primary detection result
+          debug:
+            msg: >-
+              {% if _detected_primaries | length == 1 and _detected_primaries[0] != (postgresql_primary_node | default('ns1')) %}
+              FAILOVER DETECTED: Configured primary={{ postgresql_primary_node | default('ns1') }}, actual primary={{ _detected_primaries[0] }}. Overriding for this run.
+              {% elif _detected_primaries | length == 1 %}
+              PostgreSQL primary confirmed: {{ _detected_primaries[0] }} (matches configuration)
+              {% elif _detected_primaries | length == 0 %}
+              No PostgreSQL containers detected (fresh deploy) — using configured primary: {{ postgresql_primary_node | default('ns1') }}
+              {% else %}
+              WARNING: Multiple nodes report as primary ({{ _detected_primaries | join(', ') }}). Split-brain? Using configured: {{ postgresql_primary_node | default('ns1') }}
+              {% endif %}
+
+# ============================================================================
 # Phase 1: Infrastructure backbone (both nodes)
 # ============================================================================
 
@@ -154,13 +220,13 @@
   gather_facts: false
   tags: [phase2, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
   roles:
-    - { role: powerdns,            tags: [powerdns, dns, phase2] }
-    - { role: traefik,             tags: [traefik, phase2] }
-    - { role: zitadel,             tags: [zitadel, phase2] }
-    - { role: netbird_management,  tags: [netbird, netbird_management, phase2] }
-    - { role: gatus,               tags: [gatus, phase2] }
-    - { role: portainer,           tags: [portainer, phase2] }
-    - { role: backup,              tags: [backup, phase2] }
+    - { role: powerdns, tags: [powerdns, dns, phase2] }
+    - { role: traefik, tags: [traefik, phase2] }
+    - { role: zitadel, tags: [zitadel, phase2] }
+    - { role: netbird_management, tags: [netbird, netbird_management, phase2] }
+    - { role: gatus, tags: [gatus, phase2] }
+    - { role: portainer, tags: [portainer, phase2] }
+    - { role: backup, tags: [backup, phase2] }
 
 # ============================================================================
 # Phase 3: Services on secondary node (single play, shared SSH connection)
@@ -172,13 +238,13 @@
   gather_facts: false
   tags: [phase3, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
   roles:
-    - { role: powerdns,            tags: [powerdns, dns, phase3] }
-    - { role: traefik,             tags: [traefik, phase3] }
-    - { role: zitadel,             tags: [zitadel, phase3] }
-    - { role: netbird_management,  tags: [netbird, netbird_management, phase3] }
-    - { role: gatus,               tags: [gatus, phase3] }
-    - { role: portainer,           tags: [portainer, phase3] }
-    - { role: backup,              tags: [backup, phase3] }
+    - { role: powerdns, tags: [powerdns, dns, phase3] }
+    - { role: traefik, tags: [traefik, phase3] }
+    - { role: zitadel, tags: [zitadel, phase3] }
+    - { role: netbird_management, tags: [netbird, netbird_management, phase3] }
+    - { role: gatus, tags: [gatus, phase3] }
+    - { role: portainer, tags: [portainer, phase3] }
+    - { role: backup, tags: [backup, phase3] }
 
 # ============================================================================
 # Phase 4: Peer enrollment (both nodes)

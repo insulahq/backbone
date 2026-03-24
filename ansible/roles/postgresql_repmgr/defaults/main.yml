@@ -33,12 +33,16 @@ postgresql_node_ids:
 # postgresql_superuser_password: ""
 # postgresql_repmgr_password: ""
 # postgresql_netbird_password: ""
+# postgresql_netbird_dex_password: ""
 
 # Application databases to create on primary
 postgresql_databases:
   - name: netbird
     user: netbird
     password: "{{ postgresql_netbird_password }}"
+  - name: netbird_dex
+    user: netbird_dex
+    password: "{{ postgresql_netbird_dex_password }}"
 
 # Data directory inside container
 postgresql_data_dir: /var/lib/postgresql/data

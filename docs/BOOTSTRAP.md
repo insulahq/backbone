@@ -58,6 +58,10 @@ Before starting, gather the following:
 | **NetBird peer DNS domain** | `netbird` | Internal mesh domain — peers resolve as `<host>.<domain>` (e.g., `ns1.netbird`). Default: `netbird` |
 | **Backup SFTP credentials** | (optional) | Hetzner Storagebox user/host; set `backup_enabled: false` to skip |
 
+> **Note:** After Phase 2, you will need to back up the **Zitadel masterkey** from
+> `.generated_secrets/zitadel_masterkey`. This key cannot be changed or recovered
+> after initialization — see the "Manual Steps (before Phase 3)" section below.
+
 > **CRITICAL — DNS Glue Records:** Before deploying, you MUST configure **glue records**
 > at your domain registrar. These servers will host the authoritative DNS for your domain.
 > Set the following at your registrar:
@@ -148,13 +152,31 @@ After Phase 2:
 1. `cat .generated_secrets/zitadel_admin_password`
 2. Open `https://auth.<domain>`, log in with `admin` + password from step 1
 
+> **CRITICAL — Back up the Zitadel masterkey:**
+>
+> The Zitadel masterkey encrypts all IAM data at rest. It **cannot be changed or
+> recovered** after initialization. If this key is lost, all Zitadel data (users,
+> OIDC apps, sessions) becomes permanently inaccessible.
+>
+> ```bash
+> # Display the masterkey (copy to your password manager / offline vault)
+> cat .generated_secrets/zitadel_masterkey
+> ```
+>
+> Store this key in **at least two** offline locations:
+> - Password manager (e.g., 1Password, Bitwarden)
+> - Printed copy in a secure physical location
+> - Encrypted USB drive in a safe
+>
+> Do NOT store it in the same infrastructure this platform manages.
+
 **PowerDNS Admin setup:**
 1. Open `http://10.100.0.1:8180/register` (via WireGuard or NetBird)
 2. Create admin account (first registered user gets admin privileges)
 3. Log in and configure the PowerDNS API connection:
    - **PowerDNS API URL:** `http://pdns:8081`
    - **PowerDNS API Key:** `cat .generated_secrets/powerdns_api_key`
-   - **PowerDNS Version:** `4.9.13`
+   - **PowerDNS Version:** `5.0`
 4. **Disable registration** to prevent unauthorized accounts:
    - Settings > Authentication > Local Authentication > disable "Allow users to signup"
 
@@ -189,11 +211,11 @@ After Phase 3:
 - Zitadel and Gatus use multi-host PG connections (`target_session_attrs=read-write`)
   to always reach the current PG primary, regardless of failover state
 
-> **Note:** The NetBird embedded Dex IdP stores user credentials in `idp.db`
-> (SQLite inside the Docker volume). This is automatically synced from the
-> primary to the secondary during Phase 3 deployment. If you add local users
-> later, re-run `deploy-netbird.yml` to sync again. SSO users (via Zitadel
-> as external IdP) don't need syncing.
+> **Note:** The NetBird embedded Dex IdP stores user credentials and OIDC
+> connector config in `idp.db` (SQLite inside the Docker volume). This is
+> automatically synced from the primary to the secondary during Phase 3
+> deployment. If you add local users or OIDC providers later, re-run
+> `deploy-netbird.yml` to sync again.
 
 ## Phase 4: NetBird Peer Enrollment
 

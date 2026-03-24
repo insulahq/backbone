@@ -1,5 +1,5 @@
 # PowerDNS Authoritative Server Configuration
-# PowerDNS 4.9 — Docker deployment on {{ inventory_hostname }}
+# PowerDNS 5.0 — Docker deployment on {{ inventory_hostname }}
 # Backend: PostgreSQL HA cluster (shared between ns1 and ns2)
 #
 # Both nodes run as Native (read-write). Zone data replicates via
@@ -67,14 +67,20 @@ gpgsql-dnssec={{ 'yes' if powerdns_dnssec_enabled else 'no' }}
 ####################
 
 # Security
-setuid=pdns
-setgid=pdns
 security-poll-suffix=
 
 # Cache settings
 cache-ttl=20
 negquery-cache-ttl=60
 query-cache-ttl=20
+
+####################
+# Cache Limits
+####################
+
+# Bound cache memory usage
+max-cache-entries={{ powerdns_max_cache_entries }}
+max-packet-cache-entries={{ powerdns_max_packet_cache_entries }}
 
 ####################
 # Logging

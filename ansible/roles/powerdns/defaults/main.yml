@@ -7,8 +7,8 @@
 # PowerDNS-Admin (web UI) runs on ns1 only.
 
 # PowerDNS versions — pin to specific tags
-powerdns_version: "4.9"
-powerdns_image: "powerdns/pdns-auth-49:4.9.13"
+powerdns_version: "5.0"
+powerdns_image: "powerdns/pdns-auth-50:5.0.3"
 powerdns_admin_version: "0.4.1"
 powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.1"
 
@@ -53,6 +53,10 @@ powerdns_db_user: pdns
 
 # API security
 # powerdns_api_key: <set in vault or group_vars>
+
+# Cache size limits (bounds memory usage)
+powerdns_max_cache_entries: 1000000
+powerdns_max_packet_cache_entries: 1000000
 
 # Logging
 powerdns_log_level: "4"  # 0=nothing, 9=very verbose

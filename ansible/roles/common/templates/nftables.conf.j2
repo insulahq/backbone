@@ -42,6 +42,10 @@ table inet filter {
     # WireGuard infrastructure tunnel (wg0)
     udp dport {{ wireguard_port | default(51810) }} accept
     
+    # Allow Docker bridge networks to reach host services
+    # Required for containers (e.g., nginx) to proxy to host-networked services (e.g., PDNS)
+    ip saddr 172.16.0.0/12 accept
+
     # Allow all traffic on WireGuard interface (trusted backbone)
     iifname "{{ wireguard_interface | default('wg0') }}" accept
     
@@ -66,10 +70,13 @@ table inet filter {
     # Allow internal-only ports from WireGuard and NetBird interfaces
     iifname { "{{ wireguard_interface | default('wg0') }}", "wt0", "lo" } accept
 
+    # Allow Docker bridge networks to reach host services (e.g., nginx → PDNS webserver)
+    # Docker bridge source ranges: 172.16.0.0/12 covers all default Docker networks
+    ip saddr 172.16.0.0/12 accept
+
     # Block internal-only service ports from public interfaces (Docker binds to 0.0.0.0)
-    # Portainer (9000), PowerDNS API proxy (8081), PowerDNS Admin (8180),
-    # PowerDNS API internal (8091, host network)
-    tcp dport { 8081, 8091, 8180, 9000 } drop
+    # Portainer (9000), PowerDNS API proxy (8081), PowerDNS Admin (8180)
+    tcp dport { 8081, 8180, 9000 } drop
 
     # Docker will inject its own rules here
     # DO NOT add custom DNAT or SNAT rules — let Docker manage forwarding

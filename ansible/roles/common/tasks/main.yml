@@ -25,6 +25,7 @@
       - python3-pip
       - python3-docker  # Required by community.docker.docker_network module (gotcha 87)
       - jq              # Used by image-monitor.sh and restic-backup.sh
+      - unattended-upgrades
     state: present
   tags: [common, packages]
 
@@ -326,3 +327,29 @@
     - { regexp: '^#?AuthenticationMethods', line: 'AuthenticationMethods publickey' }
   notify: restart sshd
   tags: [common, security, ssh]
+
+# Unattended upgrades — automatic security patching
+- name: Deploy unattended-upgrades configuration
+  template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    mode: '0644'
+  when: unattended_upgrades_enabled
+  tags: [common, security, unattended_upgrades]
+
+- name: Deploy auto-upgrades periodic configuration
+  template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: '0644'
+  when: unattended_upgrades_enabled
+  tags: [common, security, unattended_upgrades]
+
+- name: Enable and start unattended-upgrades systemd timer
+  systemd:
+    name: apt-daily-upgrade.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: unattended_upgrades_enabled
+  tags: [common, security, unattended_upgrades]

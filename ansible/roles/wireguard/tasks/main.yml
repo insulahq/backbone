@@ -40,14 +40,21 @@
     mode: '0700'
   tags: [wireguard]
 
+- name: Check if WireGuard private key exists
+  delegate_to: localhost
+  become: false
+  ansible.builtin.stat:
+    path: "{{ wireguard_secrets_dir }}/{{ inventory_hostname }}.key"
+  register: _wg_key_file
+  tags: [wireguard]
+
 - name: Generate WireGuard private key for {{ inventory_hostname }}
   delegate_to: localhost
   become: false
   ansible.builtin.command: wg genkey
-  args:
-    creates: "{{ wireguard_secrets_dir }}/{{ inventory_hostname }}.key"
   register: _wg_genkey
-  changed_when: _wg_genkey.rc == 0
+  changed_when: true
+  when: not _wg_key_file.stat.exists
   no_log: true
   tags: [wireguard]
 
@@ -85,6 +92,15 @@
     wireguard_public_key: "{{ _wg_pubkey.stdout.strip() }}"
     wireguard_private_key: "{{ (_wg_privkey.content | b64decode).strip() }}"
   no_log: true
+  tags: [wireguard]
+
+- name: Ensure WireGuard configuration directory exists
+  ansible.builtin.file:
+    path: "{{ wireguard_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
   tags: [wireguard]
 
 - name: Deploy WireGuard configuration

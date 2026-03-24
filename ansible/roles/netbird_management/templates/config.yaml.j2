@@ -38,3 +38,7 @@ server:
   store:
     engine: "postgres"
     encryptionKey: "{{ netbird_datastore_encryption_key }}"
+
+  # NOTE: Embedded Dex IdP stores credentials in SQLite (idp.db), NOT PostgreSQL.
+  # NetBird 0.66.x does not support idpStorage config. The idp.db file is synced
+  # from primary to secondary during deployment (see sync tasks in main.yml).
