@@ -43,6 +43,9 @@ postgresql_databases:
   - name: netbird_dex
     user: netbird_dex
     password: "{{ postgresql_netbird_dex_password }}"
+  - name: netbird_events
+    user: netbird_events
+    password: "{{ postgresql_netbird_events_password }}"
 
 # Data directory inside container
 postgresql_data_dir: /var/lib/postgresql/data

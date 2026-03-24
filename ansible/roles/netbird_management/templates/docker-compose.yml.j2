@@ -51,6 +51,16 @@ services:
       # Multi-host DSN: local PostgreSQL via Docker DNS first, peer via WireGuard IP as fallback.
       # Local-first ordering avoids 30s timeout when the peer is unreachable (gotcha 38).
       NB_STORE_ENGINE_POSTGRES_DSN: "host=postgresql,{{ peer_ip }} port=5432 user=netbird password={{ postgresql_netbird_password }} dbname=netbird sslmode=disable target_session_attrs=read-write"
+      # Activity events store — uses env vars (config.yaml activityStore key not read by v0.66.x).
+      # Same lib/pq driver as Gatus — no multi-host DSN support (gotcha 119).
+{% set is_primary = (inventory_hostname == (postgresql_primary_node | default('ns1'))) %}
+{% if is_primary %}
+      NB_ACTIVITY_EVENT_STORE_ENGINE: "postgres"
+      NB_ACTIVITY_EVENT_POSTGRES_DSN: "host=postgresql port=5432 user=netbird_events password={{ postgresql_netbird_events_password }} dbname=netbird_events sslmode=disable"
+{% else %}
+      NB_ACTIVITY_EVENT_STORE_ENGINE: "postgres"
+      NB_ACTIVITY_EVENT_POSTGRES_DSN: "host={{ hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] }} port=5432 user=netbird_events password={{ postgresql_netbird_events_password }} dbname=netbird_events sslmode=disable"
+{% endif %}
     ports:
       - '0.0.0.0:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
       - '[::]:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'

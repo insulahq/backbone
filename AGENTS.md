@@ -283,7 +283,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 108 | Dashboard nginx `try_files $uri $uri.html $uri/ =404` — SPA callback routes `/nb-auth` and `/nb-silent-auth` have no static files; returns 404 on OIDC redirect back | Needs nginx config override to `try_files $uri $uri.html $uri/ /index.html` (ephemeral fix on container restart) |
 | 109 | `dnsDomain` missing from `config.yaml` — defaults to `netbird.selfhosted` instead of configured value | Added `dnsDomain: "{{ netbird_peer_dns_domain }}"` to config template; existing accounts need DB update (`settings_dns_domain`) |
 | 110 | Zitadel access tokens are opaque by default — NetBird management server can't validate non-JWT tokens (`token is malformed: invalid number of segments`) | Set `accessTokenType: OIDC_TOKEN_TYPE_JWT` on the OIDC app via Zitadel API (only relevant if Zitadel is used as external IdP) |
-| 111 | `idp.db` (embedded Dex user credentials) stored as SQLite in Docker volume — not replicated via PostgreSQL; logins fail on the node missing it | Manual sync: `docker cp` from source node to target; documented in BOOTSTRAP.md Step 7 |
+| 111 | `idp.db` (embedded Dex user credentials) stored as SQLite in Docker volume — not replicated via PostgreSQL; logins fail on the node missing it | **Resolved**: `authStore` config (v0.66.1+) points embedded Dex at PostgreSQL HA cluster; `activityStore` also migrated. Dex uses lib/pq (no multi-host DSN) — same pattern as Gatus gotcha #119 |
 
 ### Portainer
 
@@ -357,7 +357,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | # | Issue | Fix |
 |---|-------|-----|
 | 134 | External IdP (Zitadel OIDC) login creates new orphan account — NetBird matches by IdP user ID, not email | Must invite user via NetBird Team settings before OIDC login; or enable "Check authorization on authentication" in Zitadel project |
-| 135 | `idp.db` sync via raw SSH from controller fails — controller not on WireGuard network | Use `delegate_to` with explicit `ansible_ssh_private_key_file` for cross-host Ansible delegation |
+| 135 | `idp.db` sync via raw SSH from controller fails — controller not on WireGuard network | **Obsolete**: idp.db sync removed — embedded Dex now uses PostgreSQL HA via `authStore` config |
 
 ---
 

@@ -30,7 +30,7 @@ platform_domain: example.com
 # DNS Failover (active-passive with health checks)
 # ============================================================================
 # dns_failover_primary: ns1        # Preferred server (default in role)
-# dns_health_check_enabled: true   # Use LUA ifurlup() health checks (default in role)
+# dns_health_check_enabled: false  # LUA ifurlup() disabled by default (gotcha 130); static A/AAAA used instead
 # dns_health_check_ttl: 30         # DNS TTL in seconds (default in role)
 # dns_health_check_timeout: 5      # HTTP check timeout in seconds (default in role)
 
@@ -58,6 +58,7 @@ postgresql_superuser_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_dex_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_netbird_events_password: "<GENERATE: openssl rand -base64 22>"
 
 # ============================================================================
 # PowerDNS (both nodes, shared PostgreSQL HA backend)

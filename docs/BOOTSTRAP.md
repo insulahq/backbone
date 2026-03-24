@@ -212,10 +212,10 @@ After Phase 3:
   to always reach the current PG primary, regardless of failover state
 
 > **Note:** The NetBird embedded Dex IdP stores user credentials and OIDC
-> connector config in `idp.db` (SQLite inside the Docker volume). This is
-> automatically synced from the primary to the secondary during Phase 3
-> deployment. If you add local users or OIDC providers later, re-run
-> `deploy-netbird.yml` to sync again.
+> connector config in PostgreSQL via the `authStore` config (since v0.66.1).
+> Activity events are also stored in PostgreSQL via `activityStore`. Both
+> are replicated automatically via the PostgreSQL HA cluster — no manual
+> sync is needed between nodes.
 
 ## Phase 4: NetBird Peer Enrollment
 

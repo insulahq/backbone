@@ -39,6 +39,19 @@ server:
     engine: "postgres"
     encryptionKey: "{{ netbird_datastore_encryption_key }}"
 
-  # NOTE: Embedded Dex IdP stores credentials in SQLite (idp.db), NOT PostgreSQL.
-  # NetBird 0.66.x does not support idpStorage config. The idp.db file is synced
-  # from primary to secondary during deployment (see sync tasks in main.yml).
+  # Embedded Dex IdP — authStore (PR #5443, available since v0.66.1)
+  # Must be under server: (not root level). Uses lib/pq — no multi-host DSN (gotcha 119).
+  # Primary connects via Docker DNS; standby connects to primary via WireGuard IP.
+{% set is_primary = (inventory_hostname == (postgresql_primary_node | default('ns1'))) %}
+{% if is_primary %}
+{% set auth_pg_host = 'postgresql' %}
+{% else %}
+{% set auth_pg_host = hostvars[postgresql_primary_node | default('ns1')]['wireguard_ip'] %}
+{% endif %}
+  authStore:
+    engine: "postgres"
+    dsn: "host={{ auth_pg_host }} port=5432 user=netbird_dex password={{ postgresql_netbird_dex_password }} dbname=netbird_dex sslmode=disable"
+
+# Activity events store uses env vars (NB_ACTIVITY_EVENT_STORE_ENGINE +
+# NB_ACTIVITY_EVENT_POSTGRES_DSN) set in docker-compose.yml — the config.yaml
+# activityStore key is not read by NetBird 0.66.x.

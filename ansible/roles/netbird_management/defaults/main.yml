@@ -2,7 +2,8 @@
 # NetBird Management Role -- Default Variables
 # Deploys NetBird Management + Signal + Relay on both ns1 and ns2.
 # Uses PostgreSQL HA backend (deployed by postgresql_repmgr role).
-# Uses embedded Dex IdP for local authentication.
+# Uses embedded Dex IdP for local authentication (authStore → PostgreSQL HA).
+# Activity events stored via activityStore → PostgreSQL HA.
 # External IdPs (Zitadel, Google, etc.) can be added manually via the dashboard.
 
 # NetBird versions -- combined server architecture (0.66+)
