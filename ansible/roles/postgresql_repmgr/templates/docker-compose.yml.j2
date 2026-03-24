@@ -83,6 +83,11 @@ services:
     command:
       - |
         TARGET=$$(cat /pgproxy-target 2>/dev/null || echo postgresql)
+        # Validate target is an IP address or hostname (prevent injection)
+        if ! echo "$$TARGET" | grep -qE '^[a-zA-Z0-9._-]+$$'; then
+          echo "pgproxy: INVALID target '$$TARGET' — falling back to postgresql"
+          TARGET=postgresql
+        fi
         echo "pgproxy: forwarding to $$TARGET:5432"
         exec socat TCP-LISTEN:5432,fork,reuseaddr TCP:$$TARGET:5432
     healthcheck:

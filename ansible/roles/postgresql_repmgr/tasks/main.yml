@@ -65,7 +65,9 @@
     # On the primary: own WireGuard IP (local PG). On the standby: peer's WireGuard IP.
     content: "{{ wireguard_ip if postgresql_is_primary else hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
     dest: "{{ postgresql_install_dir }}/pgproxy-target"
-    mode: '0666'
+    owner: '999'
+    group: '999'
+    mode: '0644'
 
 - name: Stop and disable host-level pgproxy (no longer needed — PowerDNS on Docker bridge)
   systemd:
