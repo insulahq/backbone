@@ -109,7 +109,7 @@ netbird_setup_key: ""
 # Internal peer DNS domain — peers resolve as <hostname>.<domain>
 # e.g., with "netbird": ns1.netbird, ns2.netbird
 # Default: "netbird" (override in group_vars/all.yml if needed)
-# netbird_peer_dns_domain: "netbird"
+netbird_peer_dns_domain: "netbird.vpn"
 
 # Secrets -- auto-generated and persisted in .generated_secrets/ if left undefined.
 # netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"

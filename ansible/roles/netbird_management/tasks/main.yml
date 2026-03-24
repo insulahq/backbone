@@ -100,7 +100,7 @@
     container: postgresql
     command: >
       psql -U netbird -d netbird -c
-      "UPDATE accounts SET domain='{{ netbird_peer_dns_domain | default('netbird') }}', settings_dns_domain='{{ netbird_peer_dns_domain | default('netbird') }}' WHERE domain='netbird.selfhosted' OR settings_dns_domain IS NULL OR settings_dns_domain='';"
+      "UPDATE accounts SET domain='{{ netbird_peer_dns_domain | default('netbird.vpn') }}', settings_dns_domain='{{ netbird_peer_dns_domain | default('netbird.vpn') }}' WHERE domain='netbird.selfhosted' OR domain='netbird' OR settings_dns_domain IS NULL OR settings_dns_domain='' OR settings_dns_domain='netbird';"
   changed_when: false
   when: inventory_hostname == (postgresql_primary_node | default('ns1'))
   tags: [netbird, netbird_management]

@@ -33,7 +33,7 @@ server:
       - "{{ traefik_container_ipv6 }}/128"
 {% endif %}
 
-  dnsDomain: "{{ netbird_peer_dns_domain | default('netbird') }}"
+  dnsDomain: "{{ netbird_peer_dns_domain | default('netbird.vpn') }}"
 
   store:
     engine: "postgres"
