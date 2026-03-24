@@ -1,0 +1,99 @@
+---
+# Rolling Update Playbook — Zero-Downtime Container Updates
+# ==========================================================
+# Updates containers on each node one at a time, draining DNS traffic
+# before updating and restoring round-robin after health checks pass.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml rolling-update.yml
+#
+# Optional: limit to specific services
+#   ansible-playbook -i inventory/hosts.yml rolling-update.yml -e "services=netbird,gatus"
+#
+# Flow per node:
+#   1. Drain DNS traffic away from this node
+#   2. Wait for TTL expiry (30s) + grace period
+#   3. Pull new images and recreate containers
+#   4. Health check — verify services respond
+#   5. Restore round-robin DNS (both nodes serving)
+#   6. Repeat for the other node
+
+- name: "Rolling update"
+  hosts: dns_servers
+  serial: 1
+  gather_facts: false
+  vars:
+    _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer')) | split(',') }}"
+    _service_dirs:
+      netbird: /opt/netbird
+      gatus: /opt/gatus
+      zitadel: /opt/zitadel
+      traefik: /opt/traefik
+      portainer: /opt/portainer
+    _health_checks:
+      netbird:
+        url: "https://{{ ansible_host }}/api/instance"
+        host_header: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
+      zitadel:
+        url: "https://{{ ansible_host }}/debug/ready"
+        host_header: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+      gatus:
+        url: "https://{{ ansible_host }}/health"
+        host_header: "{{ gatus_domain | default('status.' + platform_domain) }}"
+      traefik:
+        url: "https://{{ ansible_host }}/"
+        host_header: "{{ platform_domain }}"
+  tasks:
+
+    # --- Step 1: Drain DNS traffic from this node ---
+    - name: "Drain | Switch DNS away from {{ inventory_hostname }}"
+      command: /usr/local/bin/platform-dns-switch drain-self
+      changed_when: true
+      tags: [rolling-update]
+
+    - name: "Drain | Wait for DNS TTL expiry + grace (45s)"
+      pause:
+        seconds: 45
+      tags: [rolling-update]
+
+    # --- Step 2: Pull and recreate containers ---
+    - name: "Update | Pull new images and recreate containers on {{ inventory_hostname }}"
+      community.docker.docker_compose_v2:
+        project_src: "{{ _service_dirs[item] }}"
+        pull: always
+        state: present
+        recreate: always
+      loop: "{{ _update_services | select('in', _service_dirs.keys()) | list }}"
+      tags: [rolling-update]
+
+    - name: "Update | Wait for containers to start (15s)"
+      pause:
+        seconds: 15
+      tags: [rolling-update]
+
+    # --- Step 3: Health checks ---
+    - name: "Health | Verify services on {{ inventory_hostname }}"
+      uri:
+        url: "{{ _health_checks[item].url }}"
+        headers:
+          Host: "{{ _health_checks[item].host_header }}"
+        validate_certs: false
+        status_code: [200, 204, 301, 302, 401, 403]
+        timeout: 10
+      retries: 10
+      delay: 5
+      until: _health_result is success
+      register: _health_result
+      loop: "{{ _update_services | select('in', _health_checks.keys()) | list }}"
+      tags: [rolling-update]
+
+    # --- Step 4: Restore DNS ---
+    - name: "Restore | Add {{ inventory_hostname }} back to round-robin DNS"
+      command: /usr/local/bin/platform-dns-switch round-robin
+      changed_when: true
+      tags: [rolling-update]
+
+    - name: "Restore | Wait for DNS propagation (35s) before updating next node"
+      pause:
+        seconds: 35
+      tags: [rolling-update]

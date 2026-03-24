@@ -99,76 +99,13 @@ send_alert() {
 # ==========================================================================
 # DNS switching — update PowerDNS A/AAAA records after failover
 # ==========================================================================
-# Uses the PowerDNS API (via nsenter to reach host network) to set service
-# domain records. Called after promotion (single IP) and when both nodes
-# are healthy (round-robin with both IPs).
-#
-# Mode: "primary-only"  → all service domains point to this node only
-#       "round-robin"   → all service domains include both node IPs
+# Delegates to /usr/local/bin/platform-dns-switch on the host (via nsenter).
+# The script is deployed by the common Ansible role and reads its config from
+# /etc/platform-dns-switch.env. It supports: round-robin, primary-only, drain-self.
 switch_dns() {
-  local mode="$1"  # "primary-only" or "round-robin"
-
-  if [ -z "${PDNS_API_KEY:-}" ] || [ -z "${PLATFORM_DOMAIN:-}" ]; then
-    echo "DNS SWITCH: Skipped (PDNS_API_KEY or PLATFORM_DOMAIN not set)" >&2
-    return
-  fi
-
-  local api_url="http://127.0.0.1:${PDNS_API_PORT:-8081}/api/v1/servers/localhost/zones/${PLATFORM_DOMAIN}."
-  local local_ipv4="${LOCAL_PUBLIC_IP:-}"
-  local peer_ipv4="${PEER_PUBLIC_IP:-}"
-  local local_ipv6="${LOCAL_PUBLIC_IPV6:-}"
-  local peer_ipv6="${PEER_PUBLIC_IPV6:-}"
-
-  if [ -z "$local_ipv4" ] || [ -z "$peer_ipv4" ]; then
-    echo "DNS SWITCH: Skipped (PUBLIC_IP vars not set)" >&2
-    return
-  fi
-
-  # Build record sets based on mode
-  local a_records aaaa_records
-  if [ "$mode" = "primary-only" ]; then
-    a_records="[{\"content\": \"${local_ipv4}\", \"disabled\": false}]"
-    if [ -n "$local_ipv6" ]; then
-      aaaa_records="[{\"content\": \"${local_ipv6}\", \"disabled\": false}]"
-    fi
-  else
-    # round-robin: both IPs
-    a_records="[{\"content\": \"${local_ipv4}\", \"disabled\": false}, {\"content\": \"${peer_ipv4}\", \"disabled\": false}]"
-    if [ -n "$local_ipv6" ] && [ -n "$peer_ipv6" ]; then
-      aaaa_records="[{\"content\": \"${local_ipv6}\", \"disabled\": false}, {\"content\": \"${peer_ipv6}\", \"disabled\": false}]"
-    fi
-  fi
-
-  # Service domains to update (vpn, auth, status, base domain)
-  local domains="vpn.${PLATFORM_DOMAIN} auth.${PLATFORM_DOMAIN} status.${PLATFORM_DOMAIN} ${PLATFORM_DOMAIN}"
-
-  # Build the rrsets payload — delete any LUA records first, then set A/AAAA
-  local rrsets="["
-  local first=true
-  for domain in $domains; do
-    if [ "$first" = true ]; then first=false; else rrsets="${rrsets},"; fi
-    rrsets="${rrsets}{\"name\":\"${domain}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
-    rrsets="${rrsets},{\"name\":\"${domain}.\",\"type\":\"A\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${a_records}}"
-    if [ -n "${aaaa_records:-}" ]; then
-      rrsets="${rrsets},{\"name\":\"${domain}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${aaaa_records}}"
-    fi
-  done
-  rrsets="${rrsets}]"
-
-  # Call PowerDNS API via nsenter (API is on host network, we're in Docker)
-  local payload="{\"rrsets\":${rrsets}}"
+  local mode="$1"  # "primary-only", "round-robin", or "drain-self"
   if command -v nsenter &>/dev/null; then
-    nsenter -t 1 -m -u -i -n -p -- \
-      curl -fsS --max-time 10 -X PATCH "$api_url" \
-        -H "X-API-Key: ${PDNS_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "$payload" > /dev/null 2>&1
-
-    # Increment SOA serial so changes propagate
-    nsenter -t 1 -m -u -i -n -p -- \
-      docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
-
-    echo "DNS SWITCH: Set ${mode} for all service domains (TTL=30s)"
+    nsenter -t 1 -m -u -i -n -p -- /usr/local/bin/platform-dns-switch "$mode" 2>&1 || true
   else
     echo "WARNING: nsenter not available — DNS records NOT updated" >&2
   fi
@@ -787,9 +724,8 @@ self_demote() {
     fi
   fi
 
-  # Switch DNS to peer only (we're demoted, peer is the real primary).
-  # Swap LOCAL/PEER IPs so switch_dns points records to the peer.
-  LOCAL_PUBLIC_IP="${PEER_PUBLIC_IP}" LOCAL_PUBLIC_IPV6="${PEER_PUBLIC_IPV6:-}" switch_dns "primary-only"
+  # Switch DNS to peer only (we're demoted, peer is the real primary)
+  switch_dns "drain-self"
 
   echo "==> Container will restart and rejoin as standby" >&2
   exit 1

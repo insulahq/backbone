@@ -1,0 +1,120 @@
+#!/bin/bash
+# ==========================================================================
+# Platform DNS Switch — Manage service DNS records for failover & maintenance
+# ==========================================================================
+# Deployed to /usr/local/bin/platform-dns-switch by the common Ansible role.
+# Called by:
+#   - PG entrypoint-wrapper (via nsenter) after failover/failback
+#   - rolling-update.yml playbook for zero-downtime container updates
+#   - Operators for manual drain/restore
+#
+# Usage:
+#   platform-dns-switch <mode> [--primary-ip IP] [--peer-ip IP]
+#
+# Modes:
+#   round-robin   — Both node IPs in DNS (normal operation, both healthy)
+#   primary-only  — Only the primary-ip in DNS (failover, or draining peer)
+#   drain-self    — Only the peer-ip in DNS (draining this node for maintenance)
+#
+# Environment (set in /etc/platform-dns-switch.env, or passed directly):
+#   PDNS_API_KEY, PDNS_API_PORT, PLATFORM_DOMAIN
+#   LOCAL_PUBLIC_IP, PEER_PUBLIC_IP
+#   LOCAL_PUBLIC_IPV6, PEER_PUBLIC_IPV6 (optional)
+# ==========================================================================
+
+set -euo pipefail
+
+# Load environment from config file if it exists
+ENV_FILE="/etc/platform-dns-switch.env"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck source=/dev/null
+  . "$ENV_FILE"
+fi
+
+MODE="${1:-}"
+PRIMARY_IP="${LOCAL_PUBLIC_IP:-}"
+PEER_IP="${PEER_PUBLIC_IP:-}"
+PRIMARY_IPV6="${LOCAL_PUBLIC_IPV6:-}"
+PEER_IPV6="${PEER_PUBLIC_IPV6:-}"
+
+# Parse optional overrides
+shift || true
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --primary-ip) PRIMARY_IP="$2"; shift 2 ;;
+    --peer-ip)    PEER_IP="$2"; shift 2 ;;
+    *)            shift ;;
+  esac
+done
+
+usage() {
+  echo "Usage: platform-dns-switch <round-robin|primary-only|drain-self>" >&2
+  exit 1
+}
+
+[ -z "$MODE" ] && usage
+
+if [ -z "${PDNS_API_KEY:-}" ] || [ -z "${PLATFORM_DOMAIN:-}" ]; then
+  echo "ERROR: PDNS_API_KEY and PLATFORM_DOMAIN must be set" >&2
+  exit 1
+fi
+
+if [ -z "$PRIMARY_IP" ] || [ -z "$PEER_IP" ]; then
+  echo "ERROR: LOCAL_PUBLIC_IP and PEER_PUBLIC_IP must be set" >&2
+  exit 1
+fi
+
+API_URL="http://127.0.0.1:${PDNS_API_PORT:-8081}/api/v1/servers/localhost/zones/${PLATFORM_DOMAIN}."
+
+# Build A/AAAA record sets based on mode
+case "$MODE" in
+  primary-only)
+    A_RECORDS="[{\"content\": \"${PRIMARY_IP}\", \"disabled\": false}]"
+    [ -n "$PRIMARY_IPV6" ] && AAAA_RECORDS="[{\"content\": \"${PRIMARY_IPV6}\", \"disabled\": false}]"
+    ;;
+  drain-self)
+    A_RECORDS="[{\"content\": \"${PEER_IP}\", \"disabled\": false}]"
+    [ -n "$PEER_IPV6" ] && AAAA_RECORDS="[{\"content\": \"${PEER_IPV6}\", \"disabled\": false}]"
+    ;;
+  round-robin)
+    A_RECORDS="[{\"content\": \"${PRIMARY_IP}\", \"disabled\": false}, {\"content\": \"${PEER_IP}\", \"disabled\": false}]"
+    if [ -n "$PRIMARY_IPV6" ] && [ -n "$PEER_IPV6" ]; then
+      AAAA_RECORDS="[{\"content\": \"${PRIMARY_IPV6}\", \"disabled\": false}, {\"content\": \"${PEER_IPV6}\", \"disabled\": false}]"
+    fi
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+# Service domains to update
+DOMAINS="vpn.${PLATFORM_DOMAIN} auth.${PLATFORM_DOMAIN} status.${PLATFORM_DOMAIN} ${PLATFORM_DOMAIN}"
+
+# Build rrsets payload — delete any LUA records first, then set A/AAAA
+RRSETS="["
+FIRST=true
+for DOMAIN in $DOMAINS; do
+  if [ "$FIRST" = true ]; then FIRST=false; else RRSETS="${RRSETS},"; fi
+  RRSETS="${RRSETS}{\"name\":\"${DOMAIN}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
+  RRSETS="${RRSETS},{\"name\":\"${DOMAIN}.\",\"type\":\"A\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${A_RECORDS}}"
+  if [ -n "${AAAA_RECORDS:-}" ]; then
+    RRSETS="${RRSETS},{\"name\":\"${DOMAIN}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${AAAA_RECORDS}}"
+  fi
+done
+RRSETS="${RRSETS}]"
+
+# Call PowerDNS API
+PAYLOAD="{\"rrsets\":${RRSETS}}"
+HTTP_CODE=$(curl -fsS --max-time 10 -o /dev/null -w '%{http_code}' -X PATCH "$API_URL" \
+  -H "X-API-Key: ${PDNS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
+
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+  # Increment SOA serial so changes propagate to standby via PG replication
+  docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
+  echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, } (TTL=30s, HTTP ${HTTP_CODE})"
+else
+  echo "ERROR: PowerDNS API returned HTTP ${HTTP_CODE}" >&2
+  exit 1
+fi

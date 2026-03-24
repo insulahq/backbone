@@ -147,6 +147,21 @@
     mode: '0644'
   tags: [common, maintenance]
 
+# Platform DNS switch — used by PG failover and rolling-update playbook
+- name: Deploy platform-dns-switch script
+  template:
+    src: platform-dns-switch.sh.j2
+    dest: /usr/local/bin/platform-dns-switch
+    mode: '0755'
+  tags: [common, maintenance, dns]
+
+- name: Deploy platform-dns-switch environment
+  template:
+    src: platform-dns-switch.env.j2
+    dest: /etc/platform-dns-switch.env
+    mode: '0600'
+  tags: [common, maintenance, dns]
+
 # Docker cleanup — weekly prune of unused images, containers, networks, build cache
 - name: Deploy Docker cleanup script
   template:

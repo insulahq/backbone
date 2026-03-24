@@ -50,18 +50,8 @@ services:
       LOCAL_WG_IP: "{{ wireguard_ip }}"
       PEER_WG_IP: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
 
-      # DNS switching after failover — PowerDNS API credentials + public IPs
-      PDNS_API_KEY: "{{ powerdns_api_key | default('') }}"
-      PDNS_API_PORT: "{{ powerdns_nginx_api_port | default('8081') }}"
-      PLATFORM_DOMAIN: "{{ platform_domain }}"
-      LOCAL_PUBLIC_IP: "{{ ansible_host }}"
-      PEER_PUBLIC_IP: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['ansible_host'] }}"
-{% if public_ipv6 is defined %}
-      LOCAL_PUBLIC_IPV6: "{{ public_ipv6 }}"
-{% endif %}
-{% if hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['public_ipv6'] is defined %}
-      PEER_PUBLIC_IPV6: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['public_ipv6'] }}"
-{% endif %}
+      # DNS switching: delegated to /usr/local/bin/platform-dns-switch on the host
+      # (called via nsenter from entrypoint-wrapper). Config in /etc/platform-dns-switch.env.
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []

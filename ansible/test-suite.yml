@@ -404,6 +404,46 @@
       tags: [backup]
 
     # ------------------------------------------------------------------
+    # Platform DNS Switch Tests
+    # ------------------------------------------------------------------
+
+    - name: "DNS Switch | Script exists and is executable"
+      stat:
+        path: /usr/local/bin/platform-dns-switch
+      register: _t_dns_switch_script
+      tags: [dns, maintenance]
+
+    - name: "DNS Switch | Record result — script exists"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'platform-dns-switch script exists', 'host': inventory_hostname, 'passed': _t_dns_switch_script.stat.exists | default(false) and _t_dns_switch_script.stat.executable | default(false)}] }}"
+      tags: [dns, maintenance]
+
+    - name: "DNS Switch | Environment file exists"
+      stat:
+        path: /etc/platform-dns-switch.env
+      register: _t_dns_switch_env
+      tags: [dns, maintenance]
+
+    - name: "DNS Switch | Record result — env file exists"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'platform-dns-switch.env exists', 'host': inventory_hostname, 'passed': _t_dns_switch_env.stat.exists | default(false)}] }}"
+      tags: [dns, maintenance]
+
+    - name: "DNS Switch | Dry-run round-robin mode (verify API connectivity)"
+      shell: "/usr/local/bin/platform-dns-switch round-robin 2>&1"
+      register: _t_dns_switch_rr
+      changed_when: false
+      ignore_errors: true
+      when: inventory_hostname == _pg_primary
+      tags: [dns, maintenance]
+
+    - name: "DNS Switch | Record result — round-robin API call"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'platform-dns-switch round-robin succeeds', 'host': inventory_hostname, 'passed': _t_dns_switch_rr.rc | default(1) == 0}] }}"
+      when: inventory_hostname == _pg_primary
+      tags: [dns, maintenance]
+
+    # ------------------------------------------------------------------
     # Maintenance Timer Tests
     # ------------------------------------------------------------------
     - name: "Maintenance | Docker cleanup timer"
