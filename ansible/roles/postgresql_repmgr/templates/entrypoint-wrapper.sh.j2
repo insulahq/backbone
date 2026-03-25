@@ -256,11 +256,11 @@ exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
 
-  # Ensure postgres user can access Docker socket for container restarts
-  DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
-  if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
-    groupadd -g "$DOCKER_GID" -o docker 2>/dev/null || true
-    usermod -aG docker postgres 2>/dev/null || true
+  # Allow postgres user (repmgrd) to access Docker socket for post-promote restarts.
+  # The entrypoint runs as root; repmgrd runs as postgres. chmod at startup ensures
+  # the socket is accessible when the promote script runs later.
+  if [ -S /var/run/docker.sock ]; then
+    chmod 666 /var/run/docker.sock 2>/dev/null || true
   fi
 }
 
