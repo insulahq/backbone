@@ -199,9 +199,16 @@ if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
 fi
 
 # 3. Switch DNS to this node (peer is down)
-if command -v nsenter &>/dev/null; then
-  nsenter -t 1 -m -u -i -n -p -- /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
+# nsenter doesn't work from repmgrd (no SYS_ADMIN capability).
+# Mount platform-dns-switch into the container and call it directly.
+# The script reads /etc/platform-dns-switch.env (also mounted) and calls
+# the PowerDNS API at 127.0.0.1:8081 — reachable from the container because
+# the nginx proxy binds to 0.0.0.0:8081.
+if [ -x /usr/local/bin/platform-dns-switch ]; then
+  /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
   echo "POST-PROMOTE: DNS switched to primary-only"
+else
+  echo "POST-PROMOTE: WARNING — platform-dns-switch not mounted, DNS not updated"
 fi
 
 # 4. Send promotion alert

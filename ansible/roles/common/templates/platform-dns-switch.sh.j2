@@ -71,7 +71,14 @@ if [ -z "$PRIMARY_IP" ] || [ -z "$PEER_IP" ]; then
   exit 1
 fi
 
-API_URL="http://127.0.0.1:${PDNS_API_PORT:-8081}/api/v1/servers/localhost/zones/${PLATFORM_DOMAIN}."
+# Determine API host: use host.docker.internal if running inside a container
+# (127.0.0.1 inside a container points to the container, not the host)
+API_HOST="127.0.0.1"
+if [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+  # Running inside Docker — use host gateway
+  API_HOST="host.docker.internal"
+fi
+API_URL="http://${API_HOST}:${PDNS_API_PORT:-8081}/api/v1/servers/localhost/zones/${PLATFORM_DOMAIN}."
 
 # Build A/AAAA record sets based on mode
 case "$MODE" in
@@ -112,8 +119,11 @@ HTTP_CODE=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X PATCH "$API
   -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
 
 if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-  # Increment SOA serial so changes propagate to standby via PG replication
-  docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
+  # Increment SOA serial so changes propagate to standby via PG replication.
+  # docker CLI may not be available when called from inside PG container.
+  if command -v docker &>/dev/null; then
+    docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
+  fi
   echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, } (TTL=30s, HTTP ${HTTP_CODE})"
 else
   echo "ERROR: PowerDNS API returned HTTP ${HTTP_CODE}" >&2

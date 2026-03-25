@@ -11,6 +11,8 @@ services:
       - /opt/postgresql/pgproxy-target:/opt/postgresql/pgproxy-target  # PG write proxy target (updated by wrapper)
       - /var/run/docker.sock:/var/run/docker.sock  # Restart consumers after PG failover
       - /usr/bin/curl:/usr/bin/curl:ro  # Needed for post-promote Docker API calls (not in PG image)
+      - /usr/local/bin/platform-dns-switch:/usr/local/bin/platform-dns-switch:ro
+      - /etc/platform-dns-switch.env:/etc/platform-dns-switch.env:ro
     # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real WireGuard IP: WAL streaming replication + cross-wire repmgrd
@@ -18,6 +20,7 @@ services:
     extra_hosts:
       - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['wireguard_ip'] }}"
       - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['wireguard_ip'] }}"
+      - "host.docker.internal:host-gateway"
     environment:
       # Data directory — must match the volume mount target.
       # Explicit because the custom entrypoint replaces the image default.
