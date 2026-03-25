@@ -1,6 +1,6 @@
-# Hosting Platform Infrastructure
+# Hosting Platform Backbone
 
-Ansible automation for deploying two fully redundant DNS + VPN mesh servers on cloud provider.
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on VPS or bare metal servers.
 
 ## What It Deploys
 
@@ -26,16 +26,16 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
                        │
             ┌──────────┴──────────┐
             │                     │
-   ┌────────┴────────┐  ┌────────┴────────┐
-   │      ns1        │  │      ns2        │
-   │  Location A    │  │   Location B      │
-   ├─────────────────┤  ├─────────────────┤
-   │ PowerDNS (r/w)  │  │ PowerDNS (r/w)  │
-   │ Traefik         │  │ Traefik         │
-   │ PostgreSQL (HA) │  │ PostgreSQL (HA) │
-   │ NetBird mgmt    │  │ NetBird mgmt    │
-   │ Restic backup   │  │ Restic backup   │
-   └────────┬────────┘  └────────┬────────┘
+   ┌────────┴────────┐  ┌────────┴─────────┐
+   │      ns1        │  │      ns2         │
+   │  Location A     │  │   Location B     │
+   ├─────────────────┤  ├──────────────────┤
+   │ PowerDNS (r/w)  │  │ PowerDNS (r/w)   │
+   │ Traefik         │  │ Traefik          │
+   │ PostgreSQL (HA) │  │ PostgreSQL (HA)  │
+   │ NetBird mgmt    │  │ NetBird mgmt     │
+   │ Restic backup   │  │ Restic backup    │
+   └────────┬────────┘  └─────────┬────────┘
             │    WireGuard mesh   │
             └─────────────────────┘
 ```
