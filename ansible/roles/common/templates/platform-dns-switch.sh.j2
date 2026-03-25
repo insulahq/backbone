@@ -71,12 +71,11 @@ if [ -z "$PRIMARY_IP" ] || [ -z "$PEER_IP" ]; then
   exit 1
 fi
 
-# Determine API host: use host.docker.internal if running inside a container
+# Determine API host: use powerdns-nginx if running inside a Docker container
 # (127.0.0.1 inside a container points to the container, not the host)
 API_HOST="127.0.0.1"
 if [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
-  # Running inside Docker — use host gateway
-  API_HOST="host.docker.internal"
+  API_HOST="powerdns-nginx"
 fi
 API_URL="http://${API_HOST}:${PDNS_API_PORT:-8081}/api/v1/servers/localhost/zones/${PLATFORM_DOMAIN}."
 

@@ -13,6 +13,9 @@ services:
       - /usr/bin/curl:/usr/bin/curl:ro  # Needed for post-promote Docker API calls (not in PG image)
       - /usr/local/bin/platform-dns-switch:/usr/local/bin/platform-dns-switch:ro
       - /etc/platform-dns-switch.env:/etc/platform-dns-switch.env:ro
+    networks:
+      - default
+      - powerdns_internal  # For post-promote DNS switch (curl → powerdns-nginx:8081)
     # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real WireGuard IP: WAL streaming replication + cross-wire repmgrd
@@ -109,6 +112,8 @@ services:
 networks:
   default:
     name: postgresql_default
+  powerdns_internal:
+    external: true
 
 volumes:
   postgresql_data:
