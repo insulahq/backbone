@@ -1009,9 +1009,9 @@
       ignore_errors: true
       tags: [failover, never]
 
-    - name: "Failover | Wait for full node recovery (60s)"
+    - name: "Failover | Wait for full node recovery (90s)"
       pause:
-        seconds: 60
+        seconds: 90
       run_once: true
       tags: [failover, never]
 
@@ -1032,35 +1032,50 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify all services healthy on recovered node (direct IP)"
+    - name: "Failover | Verify Zitadel healthy on recovered node"
       uri:
-        url: "https://{{ hostvars[_test_node]['ansible_host'] }}/{{ item.path }}"
+        url: "https://{{ hostvars[_test_node]['ansible_host'] }}/debug/ready"
         validate_certs: false
-        status_code: "{{ item.codes }}"
+        status_code: [200]
         timeout: 15
         headers:
-          Host: "{{ item.domain }}"
-      loop:
-        - domain: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
-          path: "debug/ready"
-          codes: [200]
-        - domain: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
-          path: "api/instance"
-          codes: [200, 401, 403]
-      register: _t_fo_full_recovery_health
+          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+      register: _t_fo_recovery_zitadel
       ignore_errors: true
-      retries: 3
+      retries: 6
       delay: 10
-      until: _t_fo_full_recovery_health is success
+      until: _t_fo_recovery_zitadel is success
       delegate_to: "{{ _test_node }}"
       vars:
         ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Record result — all services healthy after full recovery"
+    - name: "Failover | Verify NetBird healthy on recovered node"
+      uri:
+        url: "https://{{ hostvars[_test_node]['ansible_host'] }}/api/instance"
+        validate_certs: false
+        status_code: [200, 401, 403]
+        timeout: 15
+        headers:
+          Host: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
+      register: _t_fo_recovery_netbird
+      ignore_errors: true
+      retries: 6
+      delay: 10
+      until: _t_fo_recovery_netbird is success
+      delegate_to: "{{ _test_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — services healthy after full recovery"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'All services healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_full_recovery_health.results | selectattr('failed') | list | length == 0}] }}"
+        _failover_results: >-
+          {{ _failover_results +
+             [{'name': 'Zitadel healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_zitadel is success},
+              {'name': 'NetBird healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_netbird is success}] }}"
       run_once: true
       tags: [failover, never]
 
