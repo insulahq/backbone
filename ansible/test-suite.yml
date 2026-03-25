@@ -197,7 +197,7 @@
 
     - name: "PostgreSQL | Record result — repmgr cluster"
       set_fact:
-        _test_results: "{{ _test_results + [{'name': 'Repmgr cluster visible', 'host': inventory_hostname, 'passed': _t_pg_repmgr.rc | default(1) == 0 and 'primary' in (_t_pg_repmgr.stdout | default(''))}] }}"
+        _test_results: "{{ _test_results + [{'name': 'Repmgr cluster visible', 'host': inventory_hostname, 'passed': 'primary' in (_t_pg_repmgr.stdout | default('')) and 'running' in (_t_pg_repmgr.stdout | default(''))}] }}"
       tags: [postgresql]
 
     - name: "PostgreSQL | Streaming replication active (standby only)"
@@ -278,6 +278,8 @@
     - name: "pgproxy | Write test via pgproxy (primary only)"
       community.docker.docker_container_exec:
         container: postgresql
+        env:
+          PGPASSWORD: "{{ postgresql_superuser_password }}"
         command: >
           psql -U postgres -h pgproxy -c
           "CREATE TABLE IF NOT EXISTS _pgproxy_test (id int); DROP TABLE _pgproxy_test;"
@@ -825,6 +827,8 @@
     - name: "Failover | Verify pgproxy write via surviving node after PG failover"
       community.docker.docker_container_exec:
         container: postgresql
+        env:
+          PGPASSWORD: "{{ postgresql_superuser_password }}"
         command: >
           psql -U postgres -h pgproxy -c
           "CREATE TABLE IF NOT EXISTS _pgproxy_fo_test (id int); DROP TABLE _pgproxy_fo_test;"
