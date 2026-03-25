@@ -9,7 +9,12 @@ services:
     image: {{ portainer_image }}
     container_name: portainer
     restart: unless-stopped
-    network_mode: host
+    # Docker bridge (not host network). DOCKER-USER iptables chain blocks
+    # ports 9000/8000/9443 from public interfaces; VPN access allowed.
+    ports:
+      - "0.0.0.0:9000:9000"
+      - "0.0.0.0:8000:8000"
+      - "0.0.0.0:9443:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
