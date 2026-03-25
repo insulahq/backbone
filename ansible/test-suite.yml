@@ -36,7 +36,21 @@
     _peer: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
     _peer_ip: "{{ hostvars[_peer]['ansible_host'] }}"
     _peer_wireguard_ip: "{{ hostvars[_peer]['wireguard_ip'] | default('') }}"
-    _pg_primary: "ns1"
+    # _pg_primary is detected dynamically in the first task
+  pre_tasks:
+    - name: "Detect current PostgreSQL primary"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT NOT pg_is_in_recovery();"
+      register: _pg_is_primary
+      changed_when: false
+      ignore_errors: true
+      tags: [always]
+
+    - name: "Set _pg_primary fact"
+      set_fact:
+        _pg_primary: "{{ inventory_hostname if (_pg_is_primary.stdout | default('') | trim) == 't' else groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+      tags: [always]
   tasks:
 
     # ------------------------------------------------------------------
@@ -633,11 +647,28 @@
   any_errors_fatal: false
   vars:
     _failover_results: []
-    _test_node: "{{ groups['dns_servers'] | first }}"
-    _surviving_node: "{{ groups['dns_servers'] | last }}"
-    _pg_primary: "ns1"
-    # delegate_to tasks need the target host's SSH key explicitly
-    _surviving_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | last }}"
+  pre_tasks:
+    - name: "Failover | Detect current PostgreSQL primary"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT NOT pg_is_in_recovery();"
+      register: _fo_pg_is_primary
+      changed_when: false
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Set dynamic test variables"
+      set_fact:
+        _pg_primary: "{{ inventory_hostname if (_fo_pg_is_primary.stdout | default('') | trim) == 't' else groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+      tags: [failover, never]
+
+    - name: "Failover | Resolve test nodes (primary = test node, standby = surviving)"
+      set_fact:
+        _test_node: "{{ _pg_primary }}"
+        _surviving_node: "{{ groups['dns_servers'] | difference([_pg_primary]) | first }}"
+        _surviving_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | difference([_pg_primary]) | first }}"
+      run_once: true
+      tags: [failover, never]
   tasks:
 
     # --- DNS failover: stop Traefik, verify other node still serves ---
