@@ -242,6 +242,18 @@ fi
 echo "POST-PROMOTE: pgproxy + DNS updated, consumers restarted"
 SCRIPT
   chmod +x /tmp/post-promote.sh
+
+  # Combined promote + update script (single file avoids quoting issues in repmgr.conf)
+  cat > /tmp/promote-and-update.sh <<PROMOTE_SCRIPT
+#!/bin/bash
+$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file
+RESULT=\$?
+if [ \$RESULT -eq 0 ]; then
+  /tmp/post-promote.sh
+fi
+exit \$RESULT
+PROMOTE_SCRIPT
+  chmod +x /tmp/promote-and-update.sh
 }
 
 # ==========================================================================
@@ -262,7 +274,7 @@ data_directory='${PGDATA}'
 
 # Automatic failover with promotion validation
 failover=automatic
-promote_command='/bin/bash -c "$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file && /tmp/post-promote.sh"'
+promote_command='/tmp/promote-and-update.sh'
 follow_command='$(which repmgr) standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
 
 # Detection window: 6 × 10s = 60s before declaring primary dead
