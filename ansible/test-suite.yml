@@ -1070,12 +1070,15 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Record result — services healthy after full recovery"
+    - name: "Failover | Record result — Zitadel recovery"
       set_fact:
-        _failover_results: >-
-          {{ _failover_results +
-             [{'name': 'Zitadel healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_zitadel is success},
-              {'name': 'NetBird healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_netbird is success}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_zitadel is success}] }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — NetBird recovery"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'NetBird healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_netbird is success}] }}"
       run_once: true
       tags: [failover, never]
 
