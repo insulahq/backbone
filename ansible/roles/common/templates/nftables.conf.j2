@@ -42,10 +42,6 @@ table inet filter {
     # WireGuard infrastructure tunnel (wg0)
     udp dport {{ wireguard_port | default(51810) }} accept
     
-    # Allow Docker bridge networks to reach host services
-    # Required for containers (e.g., nginx) to proxy to host-networked services (e.g., PDNS)
-    ip saddr 172.16.0.0/12 accept
-
     # Allow all traffic on WireGuard interface (trusted backbone)
     iifname "{{ wireguard_interface | default('wg0') }}" accept
     
