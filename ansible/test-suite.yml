@@ -614,9 +614,9 @@
     # ------------------------------------------------------------------
     # Cross-node DNS consistency
     # ------------------------------------------------------------------
-    - name: "Cross-node | Wait for PG replication to propagate SOA (10s)"
+    - name: "Cross-node | Wait for PG replication to propagate SOA (15s)"
       pause:
-        seconds: 10
+        seconds: 15
       run_once: true
       tags: [cross_node, dns]
 
@@ -627,9 +627,6 @@
       changed_when: false
       ignore_errors: true
       run_once: true
-      retries: 3
-      delay: 5
-      until: _t_cross_soa.results | map(attribute='stdout') | unique | list | length == 1
       tags: [cross_node, dns]
 
     - name: "Cross-node | Record result — SOA serial match"
