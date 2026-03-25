@@ -39,7 +39,7 @@ prompt() {
             read -r value
         done
     fi
-    eval "$var_name=\"\$value\""
+    printf -v "$var_name" '%s' "$value"
 }
 
 prompt_optional() {
@@ -56,7 +56,7 @@ prompt_optional() {
         echo -en "${prompt_text} (leave empty to skip): "
         read -r value
     fi
-    eval "$var_name=\"\$value\""
+    printf -v "$var_name" '%s' "$value"
 }
 
 echo ""
@@ -147,11 +147,15 @@ prompt_optional SFTP_HOST "backup server hostname"
 if [ -n "$SFTP_USER" ] && [ -n "$SFTP_HOST" ]; then
     BACKUP_ENABLED="true"
     prompt_optional SFTP_PATH "backup server base path" "/backups"
-    prompt_optional BACKUP_SSH_KEY "SSH key for backup server SFTP" "$SSH_KEY_PATH"
+    prompt_optional BACKUP_SSH_KEY "SSH key for backup server SFTP (use a SEPARATE key, not the bootstrap key)" ""
+    if [ -z "$BACKUP_SSH_KEY" ]; then
+        warn "No backup SSH key specified. Generate one with: ssh-keygen -t ed25519 -f ~/.ssh/backup-sftp.key"
+        BACKUP_SSH_KEY=""
+    fi
 else
     BACKUP_ENABLED="false"
     SFTP_PATH="/backups"
-    BACKUP_SSH_KEY="$SSH_KEY_PATH"
+    BACKUP_SSH_KEY=""
 fi
 echo ""
 

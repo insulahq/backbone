@@ -37,3 +37,23 @@
       ansible.builtin.file:
         path: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}"
         mode: '0600'
+
+    # SSH host key verification: scan and trust server fingerprints on first connection.
+    # After this, ansible.cfg enforces host_key_checking=True for all subsequent runs.
+    - name: Scan and store SSH host key for {{ inventory_hostname }}
+      delegate_to: localhost
+      ansible.builtin.shell: >
+        ssh-keyscan -H {{ ansible_host }} 2>/dev/null >> ~/.ssh/known_hosts.tmp &&
+        sort -u ~/.ssh/known_hosts.tmp > ~/.ssh/known_hosts &&
+        rm -f ~/.ssh/known_hosts.tmp
+      args:
+        creates: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}.host_key_scanned"
+      register: _host_key_scan
+
+    - name: Mark host key as scanned
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.generated_secrets/ssh/{{ inventory_hostname }}.host_key_scanned"
+        state: touch
+        mode: '0644'
+      when: _host_key_scan is changed

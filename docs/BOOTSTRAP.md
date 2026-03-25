@@ -119,8 +119,13 @@ After Phase 1:
 > ansible -i inventory/hosts.yml all -m command -a "ping -c 2 -W 2 10.100.0.2"
 > ```
 
-> **Note:** The bootstrapping SSH key is NOT removed from `authorized_keys` — it
-> remains as a recovery fallback (`exclusive: false`).
+> **Security:** After verifying per-server SSH keys work (`ansible all -m ping`),
+> remove the bootstrapping key from the servers to prevent a permanent backdoor:
+> ```bash
+> ansible-playbook -i inventory/hosts.yml remove-bootstrap-key.yml
+> ```
+> This is optional but strongly recommended. After removal, the bootstrap key
+> can no longer access the servers — only the per-server keys work.
 
 ## Phase 2: Services on Primary Node (ns1)
 

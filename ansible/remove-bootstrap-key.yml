@@ -1,0 +1,63 @@
+---
+# Remove Bootstrap SSH Key
+# ============================================================
+# Run MANUALLY after successful deployment to remove the bootstrapping
+# SSH key from all servers' authorized_keys. This eliminates the permanent
+# backdoor risk if the operator's workstation is compromised.
+#
+# Prerequisites:
+#   - Per-server SSH keys are working (Phase 1 complete)
+#   - You can reach both servers WITHOUT the bootstrap key
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml remove-bootstrap-key.yml
+#
+# To verify beforehand (dry run):
+#   ansible-playbook -i inventory/hosts.yml remove-bootstrap-key.yml --check
+#
+# WARNING: After running this, the bootstrap key will NO LONGER grant
+# access to the servers. Ensure per-server keys work before proceeding.
+# ============================================================
+
+- name: "Remove bootstrapping SSH key from servers"
+  hosts: dns_servers
+  gather_facts: false
+  vars:
+    bootstrap_key_path: "{{ bootstrap_ssh_key | default(playbook_dir + '/../hosting-platform.key') }}"
+  tasks:
+
+    - name: Verify per-server SSH key works (safety check)
+      ansible.builtin.ping:
+      register: _ping_check
+
+    - name: Read bootstrap public key
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command: "ssh-keygen -y -f {{ bootstrap_key_path }}"
+      register: _bootstrap_pubkey
+      changed_when: false
+      failed_when: _bootstrap_pubkey.rc != 0
+      run_once: true
+
+    - name: Remove bootstrap key from authorized_keys
+      ansible.builtin.lineinfile:
+        path: /root/.ssh/authorized_keys
+        state: absent
+        regexp: "{{ _bootstrap_pubkey.stdout | regex_escape }}"
+      register: _key_removed
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Bootstrap key REMOVED from ' + inventory_hostname if _key_removed is changed
+             else 'Bootstrap key was not found on ' + inventory_hostname + ' (already removed or never added)' }}
+
+    - name: Verify SSH still works after key removal
+      ansible.builtin.ping:
+      register: _post_check
+      failed_when: _post_check is failed
+
+    - name: Success
+      ansible.builtin.debug:
+        msg: "Bootstrap key removed from all servers. Per-server SSH keys confirmed working."
+      run_once: true
