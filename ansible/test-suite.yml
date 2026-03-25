@@ -77,7 +77,7 @@
 
     - name: "DNS | Record result — A record"
       set_fact:
-        _test_results: "{{ _test_results + [{'name': 'DNS A record (' + platform_domain + ')', 'host': inventory_hostname, 'passed': _t_dns_a.rc == 0 and ansible_host in _t_dns_a.stdout}] }}"
+        _test_results: "{{ _test_results + [{'name': 'DNS A record (' + platform_domain + ')', 'host': inventory_hostname, 'passed': _t_dns_a.rc == 0 and hostvars[_pg_primary]['ansible_host'] in _t_dns_a.stdout}] }}"
       tags: [dns]
 
     - name: "DNS | Resolution of all service domains"
