@@ -256,12 +256,9 @@ exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
 
-  # Allow postgres user (repmgrd) to access Docker socket for post-promote restarts.
-  # The entrypoint runs as root; repmgrd runs as postgres. chmod at startup ensures
-  # the socket is accessible when the promote script runs later.
-  if [ -S /var/run/docker.sock ]; then
-    chmod 666 /var/run/docker.sock 2>/dev/null || true
-  fi
+  # NOTE: Docker socket must be chmod 666 on the HOST for the postgres user (repmgrd)
+  # to access it during post-promote. This is done by the Ansible task, not here
+  # (chmod inside container fails due to Docker security restrictions).
 }
 
 # ==========================================================================

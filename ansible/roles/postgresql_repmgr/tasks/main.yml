@@ -76,6 +76,14 @@
     enabled: false
   ignore_errors: true
 
+# The post-promote script runs as the postgres user (via repmgrd) and needs
+# Docker socket access to restart pgproxy/consumers after failover.
+# Docker security prevents chmod inside the container, so we do it on the host.
+- name: Allow Docker socket access for post-promote script
+  file:
+    path: /var/run/docker.sock
+    mode: '0666'
+
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:
     project_src: "{{ postgresql_install_dir }}"
