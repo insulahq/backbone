@@ -188,17 +188,18 @@ echo "POST-PROMOTE: $(date) — Updating pgproxy, DNS, and restarting consumers.
 echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
 echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
 
-# 2. Restart consumers that use pgproxy
+# 2. Restart consumers that use pgproxy (NOT powerdns — restart it after DNS switch)
 if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-  for ctr in pgproxy gatus netbird-server powerdns-auth; do
+  for ctr in pgproxy gatus netbird-server; do
     curl -fsS --unix-socket /var/run/docker.sock -X POST \
       "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
       > /dev/null 2>&1 || true
   done
-  echo "POST-PROMOTE: Consumers restarted"
+  echo "POST-PROMOTE: Consumers restarted (pgproxy, gatus, netbird)"
 fi
 
 # 3. Switch DNS to this node (peer is down)
+# Must happen BEFORE restarting powerdns-nginx (we need it running for the API call)
 # nsenter doesn't work from repmgrd (no SYS_ADMIN capability).
 # Mount platform-dns-switch into the container and call it directly.
 # The script reads /etc/platform-dns-switch.env (also mounted) and calls
@@ -229,6 +230,14 @@ if command -v curl &>/dev/null; then
       -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"$MSG\", \"timestamp\": \"$TS\"}" \
       "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
   fi
+fi
+
+# 5. Restart powerdns-auth (connects to PG via pgproxy — needs updated target)
+if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
+  curl -fsS --unix-socket /var/run/docker.sock -X POST \
+    "http://localhost/v1.41/containers/powerdns-auth/restart?t=5" \
+    > /dev/null 2>&1 || true
+  echo "POST-PROMOTE: PowerDNS restarted"
 fi
 
 echo "POST-PROMOTE: $(date) — Complete"
