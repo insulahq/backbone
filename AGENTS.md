@@ -96,9 +96,9 @@ ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 **Fresh deployment** uses a three-phase approach: infrastructure backbone on both
 nodes, services on the primary node (ns1), then the secondary (ns2). See `docs/BOOTSTRAP.md`.
 
-**SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform.key`) is only needed for the first run:
+**SSH keys:** Per-server ED25519 keypairs are auto-generated in `.generated_secrets/ssh/`. The bootstrapping SSH key (`hosting-platform-backbone.key`) is only needed for the first run:
 ```bash
-ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
+ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 -e "ansible_ssh_private_key_file=$HOME/hosting-platform-backbone.key"
 ```
 All subsequent runs use the per-server keys automatically (configured in `group_vars/all.yml`).
 
@@ -114,7 +114,7 @@ Types: `feat`, `fix`, `infra`, `refactor`, `docs`, `chore`
 Scopes: `ansible`, `dns`, `backup`, `auth`
 
 Rules:
-- Run from `/config/hosting-platform/` (repo root)
+- Run from `/config/hosting-platform-backbone/` (repo root)
 - Never commit secrets or credentials
 - Never force-push to `main`
 
@@ -364,7 +364,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 ## 6. Repository Structure
 
 ```
-hosting-platform/
+hosting-platform-backbone/
 ├── AGENTS.md              # This file
 ├── README.md              # Project overview
 ├── .gitignore

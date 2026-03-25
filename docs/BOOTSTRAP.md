@@ -10,7 +10,7 @@ This ensures the primary is fully operational before the secondary is added.
 ## Prerequisites
 
 1. Two Hetzner VPS with Debian 13 (Trixie) installed
-2. Root SSH access to both servers (via a bootstrapping SSH key, e.g., `~/hosting-platform.key`)
+2. Root SSH access to both servers (via a bootstrapping SSH key, e.g., `~/hosting-platform-backbone.key`)
 3. **Ansible control machine** with:
    - Ansible 2.15+
    - `wireguard-tools` — needed to generate WireGuard keys on the controller
@@ -26,7 +26,7 @@ ansible-galaxy install -r ansible/requirements.yml
 5. Project directory must NOT be world-writable (gotcha #73):
 
 ```bash
-chmod 755 /path/to/hosting-platform/ansible
+chmod 755 /path/to/hosting-platform-backbone/ansible
 ```
 
 ### Installing controller prerequisites
@@ -53,7 +53,7 @@ Before starting, gather the following:
 | **ns2 public IPv4** | `89.167.125.29` | From Hetzner console |
 | **ns2 public IPv6** | `2a01:4f9:c014:523f::1` | From Hetzner console |
 | **Primary domain** | `example.com` | The domain this platform will serve |
-| **Bootstrapping SSH key** | `~/hosting-platform.key` | Key provisioned by Hetzner or uploaded during server creation |
+| **Bootstrapping SSH key** | `~/hosting-platform-backbone.key` | Key provisioned by Hetzner or uploaded during server creation |
 | **Server timezone** | `Europe/Berlin` | Applied to both servers |
 | **NetBird peer DNS domain** | `netbird` | Internal mesh domain — peers resolve as `<host>.<domain>` (e.g., `ns1.netbird`). Default: `netbird` |
 | **Backup SFTP credentials** | (optional) | Hetzner Storagebox user/host; set `backup_enabled: false` to skip |
@@ -103,7 +103,7 @@ PostgreSQL HA. All three components need both nodes to function.
 ```bash
 cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 \
-  -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
+  -e "ansible_ssh_private_key_file=$HOME/hosting-platform-backbone.key"
 ```
 
 > All subsequent commands assume you are in the `ansible/` directory.

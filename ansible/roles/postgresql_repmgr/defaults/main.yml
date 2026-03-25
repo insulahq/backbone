@@ -18,7 +18,7 @@ postgresql_install_dir: /opt/postgresql
 postgresql_port: 5432
 
 # Cluster identification
-postgresql_repmgr_cluster: "hosting-platform"
+postgresql_repmgr_cluster: "hosting-platform-backbone"
 
 # Primary server -- determines which node runs as primary vs standby
 # Detection uses inventory_hostname (avoids breakage when NetBird IPs change)

@@ -11,7 +11,7 @@ all:
     ansible_user: root
     ansible_python_interpreter: /usr/bin/python3
     # NOTE: ansible_ssh_private_key_file is set in group_vars/all.yml (per-server keys).
-    # Bootstrapping SSH key: ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+    # Bootstrapping SSH key: ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform-backbone.key'
 
   children:
     dns_servers:

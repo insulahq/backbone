@@ -116,7 +116,7 @@ cd ansible
 
 # 1. Deploy base OS hardening + Docker + WireGuard tunnel
 ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard --limit <DEAD_NODE> \
-  -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
+  -e "ansible_ssh_private_key_file=$HOME/hosting-platform-backbone.key"
 # The `-e` override is needed because the re-provisioned server does not
 # have the per-server SSH public key in its `authorized_keys` yet.
 
@@ -227,7 +227,7 @@ ssh root@<NODE> "systemctl start restic-backup.service"  # Re-initializes repo
 ssh root@<NODE> "journalctl -u restic-backup.service --since '24 hours ago'"
 
 # Check Storagebox connectivity
-ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/hosting-platform.key <USER>@<HOST>"
+ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/hosting-platform-backbone.key <USER>@<HOST>"
 
 # Run backup manually with verbose output
 ssh root@<NODE> "/etc/restic/backup.sh"

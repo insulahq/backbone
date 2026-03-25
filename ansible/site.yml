@@ -27,7 +27,7 @@
 #
 # SSH keys: Per-server ED25519 keypairs are auto-generated in .generated_secrets/ssh/.
 # First run (bootstrapping SSH key):
-#   ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform.key'
+#   ansible-playbook site.yml -e 'ansible_ssh_private_key_file=~/hosting-platform-backbone.key'
 # Subsequent runs use the per-server keys automatically (configured in group_vars/all.yml).
 
 # Pre-play: Generate per-server SSH keypairs (shared across all playbooks)
