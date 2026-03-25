@@ -11,7 +11,10 @@ iptables -A DOCKER-USER -i {{ wireguard_interface | default('wg0') }} -j RETURN
 iptables -A DOCKER-USER -i wt0 -j RETURN
 iptables -A DOCKER-USER -i lo -j RETURN
 
-# Block internal-only ports from all other interfaces.
+# Allow Docker bridge traffic (container-to-host for PowerDNS API, pgproxy etc.)
+iptables -A DOCKER-USER -s 172.16.0.0/12 -j RETURN
+
+# Block internal-only ports from all other (public) interfaces.
 # After Docker DNAT, destination port is the CONTAINER port (not host port).
 # Match both host and container ports to cover all mapping scenarios.
 # Port 8081: PowerDNS API (host 8081 → container 8081)
