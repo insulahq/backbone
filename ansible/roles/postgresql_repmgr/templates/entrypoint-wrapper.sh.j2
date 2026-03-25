@@ -185,7 +185,10 @@ create_post_promote() {
 echo "POST-PROMOTE: $(date) — Updating pgproxy, DNS, and restarting consumers..."
 
 # 1. Update pgproxy to point to local PG (we're now the primary)
-echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
+if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
+  echo "POST-PROMOTE: FATAL — failed to write pgproxy-target" >&2
+  exit 1
+fi
 echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
 
 # 2. Restart consumers that use pgproxy (NOT powerdns — restart it after DNS switch)
@@ -660,11 +663,16 @@ start_as_standby() {
     # Confirm WAL gap by checking PG log for the specific error
     PG_LOG=$(pg_ctl -D "$PGDATA" -l /dev/null status 2>&1 || true)
     WAL_GAP_DETECTED=false
-    # Check recent log entries for the WAL-removed error pattern
+    # Check WAL receiver status via SQL (docker CLI not available in this container)
     if psql -U postgres -tAc "SELECT 1" >/dev/null 2>&1; then
-      # PG is running — check if WAL receiver has the specific gap error
-      WAL_ERRORS=$(docker logs postgresql 2>&1 | tail -50 | grep -c "WAL segment.*already been removed" || echo "0")
-      if [ "$WAL_ERRORS" -gt 0 ]; then
+      # If WAL receiver exists but status is not streaming/startup/catchup after 60s polling,
+      # and we got here (broke out of the poll loop), it's a confirmed gap.
+      # Also check if the receiver has stopped entirely (no rows in pg_stat_wal_receiver)
+      WAL_RECV_COUNT=$(psql -U postgres -tAc "SELECT COUNT(*) FROM pg_stat_wal_receiver" 2>/dev/null || echo "0")
+      if [ "${WAL_RECV_COUNT:-0}" -eq 0 ] && [ -n "$WAL_STATUS" ]; then
+        # WAL receiver gave up — confirmed gap
+        WAL_GAP_DETECTED=true
+      elif [ "$WAL_STATUS" != "streaming" ] && [ "$WAL_STATUS" != "startup" ] && [ "$WAL_STATUS" != "catchup" ] && [ -n "$WAL_STATUS" ]; then
         WAL_GAP_DETECTED=true
       fi
     fi
