@@ -68,10 +68,8 @@ Zone Replication:
 2. PowerDNS uses `gpgsql-host=postgresql` — Docker DNS resolves this to the local container
 3. The local PostgreSQL container is either the HA primary or standby (managed by repmgr)
 4. **Reads** work on both primary and standby (DNS queries are read-only)
-5. **Writes** (zone creation, record changes via API) are routed to the PostgreSQL primary by the application — PowerDNS writes to whichever PG it's connected to, and if that's the standby, PG returns a read-only error
-6. To handle this correctly, API writes should go through the node that hosts the PostgreSQL primary, or use a connection pooler with `target_session_attrs=read-write`
-
-**Important:** With the current setup, DNS API writes only succeed on the node running the PostgreSQL primary. The other node's PowerDNS can serve DNS queries (reads) but API write operations will fail because its local PostgreSQL is the standby. This is acceptable for Phase 1 — Traefik DNS-01 challenges and zone management can be directed to the primary node.
+5. **Writes** (zone creation, record changes via API) succeed on both nodes — each PowerDNS connects to PostgreSQL via **pgproxy**, a socat TCP forwarder that always routes to the current HA primary
+6. After failover, the PG entrypoint-wrapper updates pgproxy's target and restarts PowerDNS, so writes automatically follow the new primary
 
 ### Zone Management
 

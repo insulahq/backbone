@@ -40,7 +40,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
             └─────────────────────┘
 ```
 
-Both PowerDNS nodes run in **Native mode** (read-write). Zone data replicates via PostgreSQL streaming replication, not AXFR. DNS API writes only succeed on the node running the PostgreSQL HA primary.
+Both PowerDNS nodes run in **Native mode** (read-write). Zone data replicates via PostgreSQL streaming replication, not AXFR. DNS API writes succeed on both nodes — each PowerDNS connects via pgproxy which always routes to the current PostgreSQL primary.
 
 ## Prerequisites
 
