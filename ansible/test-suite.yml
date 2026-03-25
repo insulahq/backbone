@@ -614,6 +614,12 @@
     # ------------------------------------------------------------------
     # Cross-node DNS consistency
     # ------------------------------------------------------------------
+    - name: "Cross-node | Wait for PG replication to propagate SOA (10s)"
+      pause:
+        seconds: 10
+      run_once: true
+      tags: [cross_node, dns]
+
     - name: "Cross-node | DNS SOA serial matches between nodes"
       shell: "dig @{{ hostvars[item]['ansible_host'] }} {{ platform_domain }} SOA +short +time=5 | awk '{print $3}'"
       loop: "{{ groups['dns_servers'] }}"
@@ -621,6 +627,9 @@
       changed_when: false
       ignore_errors: true
       run_once: true
+      retries: 3
+      delay: 5
+      until: _t_cross_soa.results | map(attribute='stdout') | unique | list | length == 1
       tags: [cross_node, dns]
 
     - name: "Cross-node | Record result — SOA serial match"
