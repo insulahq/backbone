@@ -192,7 +192,7 @@
   template:
     src: platform-dns-switch.env.j2
     dest: /etc/platform-dns-switch.env
-    mode: '0600'
+    mode: '0644'
   tags: [common, maintenance, dns]
 
 # Docker cleanup — weekly prune of unused images, containers, networks, build cache
