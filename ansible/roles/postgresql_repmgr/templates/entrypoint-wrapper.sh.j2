@@ -199,7 +199,11 @@ if command -v curl &>/dev/null; then
         > /dev/null 2>&1 || true
     done
     # Switch DNS to this node (we just promoted — peer is down)
-    switch_dns "primary-only"
+    # NOTE: Cannot call switch_dns() here — this is a separate script, not the wrapper.
+    # Use nsenter to call the host script directly.
+    if command -v nsenter &>/dev/null; then
+      nsenter -t 1 -m -u -i -n -p -- /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
+    fi
     echo "PROMOTE CHECK: Updated pgproxy + DNS to local PG and restarted consumers"
   fi
 fi

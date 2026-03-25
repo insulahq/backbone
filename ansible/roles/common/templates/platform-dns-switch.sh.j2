@@ -106,7 +106,7 @@ RRSETS="${RRSETS}]"
 
 # Call PowerDNS API
 PAYLOAD="{\"rrsets\":${RRSETS}}"
-HTTP_CODE=$(curl -fsS --max-time 10 -o /dev/null -w '%{http_code}' -X PATCH "$API_URL" \
+HTTP_CODE=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X PATCH "$API_URL" \
   -H "X-API-Key: ${PDNS_API_KEY}" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
