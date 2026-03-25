@@ -132,7 +132,7 @@ echo ""
 
 echo -e "${BOLD}--- SSH ---${NC}"
 echo ""
-prompt SSH_KEY_PATH "Path to bootstrapping SSH key" "$HOME/hosting-platform-backbone.key"
+prompt SSH_KEY_PATH "Path to bootstrapping SSH key" "$HOME/hosting-platform.key"
 if [ ! -f "$SSH_KEY_PATH" ]; then
     warn "SSH key not found at $SSH_KEY_PATH — you'll need it for Phase 1"
 fi
