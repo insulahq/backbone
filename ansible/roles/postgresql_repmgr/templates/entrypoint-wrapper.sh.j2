@@ -244,13 +244,19 @@ SCRIPT
   chmod +x /tmp/post-promote.sh
 
   # Combined promote + update script (single file avoids quoting issues in repmgr.conf)
-  # Runs as postgres user (via repmgrd), so we add it to the docker group for socket access
   cat > /tmp/promote-and-update.sh <<PROMOTE_SCRIPT
 #!/bin/bash
+exec >> /tmp/promote-and-update.log 2>&1
+echo "\$(date): Starting promote-and-update"
 $(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file
 RESULT=\$?
+echo "\$(date): repmgr promote exit code: \$RESULT"
 if [ \$RESULT -eq 0 ]; then
+  echo "\$(date): Running post-promote..."
   /tmp/post-promote.sh
+  echo "\$(date): Post-promote exit code: \$?"
+else
+  echo "\$(date): Promote failed, skipping post-promote"
 fi
 exit \$RESULT
 PROMOTE_SCRIPT
