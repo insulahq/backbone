@@ -262,7 +262,7 @@ data_directory='${PGDATA}'
 
 # Automatic failover with promotion validation
 failover=automatic
-promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file && /tmp/post-promote.sh'
+promote_command='/bin/bash -c "$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file && /tmp/post-promote.sh"'
 follow_command='$(which repmgr) standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
 
 # Detection window: 6 × 10s = 60s before declaring primary dead
