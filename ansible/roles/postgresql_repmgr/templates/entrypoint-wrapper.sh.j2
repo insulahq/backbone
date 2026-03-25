@@ -827,12 +827,6 @@ echo "  PostgreSQL HA Entrypoint — ${NODE_NAME} (node ${NODE_ID})"
 echo "  Initial role: ${REPMGR_INITIAL_ROLE} | Peer: ${PEER_NAME}"
 echo "============================================================"
 
-# Ensure curl is available (needed by post-promote to restart containers via Docker socket)
-if ! command -v curl &>/dev/null; then
-  echo "==> Installing curl..."
-  apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1 || true
-fi
-
 cleanup_stale_files
 create_promote_check
 create_post_promote
