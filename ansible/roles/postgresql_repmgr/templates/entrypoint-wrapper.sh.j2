@@ -244,6 +244,7 @@ SCRIPT
   chmod +x /tmp/post-promote.sh
 
   # Combined promote + update script (single file avoids quoting issues in repmgr.conf)
+  # Runs as postgres user (via repmgrd), so we add it to the docker group for socket access
   cat > /tmp/promote-and-update.sh <<PROMOTE_SCRIPT
 #!/bin/bash
 $(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file
@@ -254,6 +255,13 @@ fi
 exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
+
+  # Ensure postgres user can access Docker socket for container restarts
+  DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
+  if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
+    groupadd -g "$DOCKER_GID" -o docker 2>/dev/null || true
+    usermod -aG docker postgres 2>/dev/null || true
+  fi
 }
 
 # ==========================================================================
