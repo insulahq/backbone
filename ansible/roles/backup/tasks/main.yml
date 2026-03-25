@@ -1,10 +1,10 @@
 ---
 # Backup Role — Main Tasks
-# Deploys Restic backup to Hetzner Storagebox
+# Deploys Restic backup to SFTP backup server
 
 - name: Skip backup deployment (backup_enabled is false)
   debug:
-    msg: "Backup deployment skipped — set backup_enabled: true in group_vars/all.yml when Storagebox credentials are available."
+    msg: "Backup deployment skipped — set backup_enabled: true in group_vars/all.yml when backup server credentials are available."
   when: not (backup_enabled | bool)
   tags: [backup]
 
@@ -100,37 +100,37 @@
     state: directory
     mode: '0700'
 
-- name: Deploy Storagebox SSH private key from control machine
+- name: Deploy backup server SSH private key from control machine
   copy:
     src: "{{ restic_ssh_key_src }}"
     dest: "{{ restic_ssh_key_path }}"
     mode: '0600'
   no_log: true
 
-- name: Create SSH config for Storagebox
+- name: Create SSH config for backup server
   copy:
     content: |
-      Host {{ backup_storagebox_host }}
+      Host {{ backup_sftp_host }}
         IdentityFile {{ restic_ssh_key_path }}
         StrictHostKeyChecking yes
         UserKnownHostsFile /root/.ssh/known_hosts
     dest: /root/.ssh/config
     mode: '0600'
 
-- name: Scan and trust Storagebox host keys (restic-specific known_hosts)
+- name: Scan and trust backup server host keys (restic-specific known_hosts)
   # Restic bypasses system SSH config (due to NetBird ProxyCommand interception).
   # Seed a dedicated known_hosts file in restic config dir used by the backup script.
   shell: |
-    ssh-keyscan -H {{ backup_storagebox_host }} 2>/dev/null | grep -v "^#" > {{ restic_config_dir }}/known_hosts.tmp
+    ssh-keyscan -H {{ backup_sftp_host }} 2>/dev/null | grep -v "^#" > {{ restic_config_dir }}/known_hosts.tmp
     mv {{ restic_config_dir }}/known_hosts.tmp {{ restic_config_dir }}/known_hosts
     chmod 600 {{ restic_config_dir }}/known_hosts
   changed_when: true
 
-- name: Test Storagebox SFTP connection
-  # Hetzner Storagebox only supports SFTP, not shell commands.
+- name: Test backup server SFTP connection
+  # SFTP backup server only supports SFTP, not shell commands.
   # Use -F /dev/null to bypass NetBird SSH config interception (gotcha 9).
   # Use the restic-specific known_hosts file seeded by the keyscan task above.
-  shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }}"
+  shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }}"
   register: sftp_test
   changed_when: false
   failed_when: sftp_test.rc != 0

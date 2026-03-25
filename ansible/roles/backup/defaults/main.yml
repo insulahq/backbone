@@ -1,8 +1,8 @@
 ---
 # Backup Role — Default Variables
-# Deploys Restic backup to Hetzner Storagebox
+# Deploys Restic backup to SFTP backup server
 
-# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
+# Set to false to skip backup deployment (e.g., no backup server credentials yet)
 backup_enabled: true
 
 # Restic configuration
@@ -11,13 +11,13 @@ restic_install_dir: /usr/local/bin
 restic_config_dir: /etc/restic
 restic_cache_dir: /var/cache/restic
 
-# Backup repository (Hetzner Storagebox)
-restic_repository: "sftp:{{ backup_storagebox_user }}@{{ backup_storagebox_host }}:{{ backup_storagebox_path }}/{{ inventory_hostname }}"
-# backup_storagebox_user: u335448-sub9
-# backup_storagebox_host: u335448.your-storagebox.de
-# backup_storagebox_path: /backups
+# Backup repository (SFTP backup server)
+restic_repository: "sftp:{{ backup_sftp_user }}@{{ backup_sftp_host }}:{{ backup_sftp_path }}/{{ inventory_hostname }}"
+# backup_sftp_user: user@example
+# backup_sftp_host: sftp.example.com
+# backup_sftp_path: /backups
 
-# SSH key for Storagebox access
+# SSH key for backup server access
 # The private key is copied from the control machine to each server.
 # Stored in restic config dir (not /root/.ssh) so the hardened systemd service can read it.
 restic_ssh_key_src: "~/hosting-platform.key"      # path on control machine

@@ -23,11 +23,11 @@
 
 Before any recovery, ensure you have:
 
-1. SSH root access to surviving server(s) or Hetzner console access
+1. SSH root access to surviving server(s) or provider console access
 2. Ansible control machine with the repo checked out
 3. Access to `ansible/group_vars/all.yml` and `ansible/inventory/hosts.yml`
 4. Restic password (stored in `ansible/.generated_secrets/restic_password`)
-5. Hetzner Storagebox credentials
+5. SFTP backup server credentials
 
 ---
 
@@ -93,14 +93,14 @@ ssh root@<OLD_PRIMARY_IP> "docker restart postgresql"
 
 ## Scenario 3: Disk Failure — Rebuild Node
 
-**Symptoms:** Server disk is dead. Hetzner has re-provisioned with fresh Debian 13.
+**Symptoms:** Server disk is dead. the provider has re-provisioned with fresh Debian 13.
 
 **Procedure:**
 
 ### Step 1: Verify backup availability
 ```bash
 # On the control machine (or surviving node)
-export RESTIC_REPOSITORY="sftp:<STORAGEBOX_USER>@<STORAGEBOX_HOST>:/backups/<DEAD_NODE>"
+export RESTIC_REPOSITORY="sftp:<SFTP_USER>@<SFTP_HOST>:/backups/<DEAD_NODE>"
 export RESTIC_PASSWORD_FILE="ansible/.generated_secrets/restic_password"
 
 # List available snapshots
@@ -175,7 +175,7 @@ docker restart netbird-server
 
 **Procedure:**
 
-1. Provision two new Debian 13 servers on Hetzner
+1. Provision two new Debian 13 servers on two geographically separated servers
 2. Update `inventory/hosts.yml` with new IPs
 3. Follow `docs/BOOTSTRAP.md` for a fresh deployment
 
@@ -226,7 +226,7 @@ ssh root@<NODE> "systemctl start restic-backup.service"  # Re-initializes repo
 # Check recent backup logs
 ssh root@<NODE> "journalctl -u restic-backup.service --since '24 hours ago'"
 
-# Check Storagebox connectivity
+# Check backup server connectivity
 ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/hosting-platform.key <USER>@<HOST>"
 
 # Run backup manually with verbose output
@@ -325,7 +325,7 @@ curl -s -H "X-API-Key: <KEY>" http://<WIREGUARD_IP>:8081/api/v1/servers/localhos
 
 | Resource | Access |
 |----------|--------|
-| Hetzner Cloud Console | https://console.hetzner.cloud |
-| Hetzner Robot (Storagebox) | https://robot.hetzner.com |
+| cloud provider Console | <PROVIDER_CONSOLE_URL> |
+| provider panel (backup server) | <PROVIDER_PANEL_URL> |
 | Restic password file | `ansible/.generated_secrets/restic_password` |
 | All generated secrets | `ansible/.generated_secrets/` |

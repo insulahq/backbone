@@ -1,6 +1,6 @@
 # Hosting Platform Infrastructure
 
-Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner Cloud.
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on cloud provider.
 
 ## What It Deploys
 
@@ -16,7 +16,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
 | **Zitadel** | Central IAM (OIDC/OAuth2) for all service authentication |
 | **Gatus** | HA monitoring dashboard and alert receiver |
 | **Portainer** | Docker management UI (WireGuard-only access) |
-| **Restic** | Incremental encrypted backups to Hetzner Storagebox |
+| **Restic** | Incremental encrypted backups to SFTP backup server |
 | **OS hardening** | nftables firewall, fail2ban, Docker CE, SSH hardening |
 
 ## Architecture
@@ -28,7 +28,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
             │                     │
    ┌────────┴────────┐  ┌────────┴────────┐
    │      ns1        │  │      ns2        │
-   │  Falkenstein    │  │   Helsinki      │
+   │  Location A    │  │   Location B      │
    ├─────────────────┤  ├─────────────────┤
    │ PowerDNS (r/w)  │  │ PowerDNS (r/w)  │
    │ Traefik         │  │ Traefik         │
@@ -45,9 +45,9 @@ Both PowerDNS nodes run in **Native mode** (read-write). Zone data replicates vi
 ## Prerequisites
 
 - Ansible 2.15+
-- Two Hetzner VPS running Debian 13
+- Two VPS running Debian 13
 - SSH root access to both servers
-- Hetzner Storagebox for backups
+- SFTP backup server for backups
 
 ## Quick Start
 
@@ -102,7 +102,7 @@ ansible/
     ├── netbird_peer/        # NetBird peer enrollment
     ├── gatus/               # Gatus monitoring (HA dashboard + alert receiver)
     ├── portainer/           # Portainer CE Docker management (WireGuard-only)
-    └── backup/              # Restic to Hetzner Storagebox
+    └── backup/              # Restic to SFTP backup server
 docs/                        # Architecture and operations documentation
 ```
 

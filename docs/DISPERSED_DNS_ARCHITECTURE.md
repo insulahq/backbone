@@ -33,7 +33,7 @@ Both nodes can read and write zones — there is no primary/secondary DNS distin
 ### Architecture
 
 ```
-ns1 (Hetzner Falkenstein)
+ns1 (Location A)
 ├── Docker Compose at /opt/powerdns/
 │   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
 │   ├── nginx (reverse proxy for API)
@@ -45,7 +45,7 @@ ns1 (Hetzner Falkenstein)
 │
 └── PostgreSQL HA standby (repmgr)
 
-ns2 (Hetzner Helsinki)
+ns2 (Location B)
 ├── Docker Compose at /opt/powerdns/
 │   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
 │   └── nginx (reverse proxy for API)

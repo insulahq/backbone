@@ -12,7 +12,7 @@ Ansible playbooks and roles for deploying Hosting Platform infrastructure on two
 | `postgresql_repmgr` | PostgreSQL 18 + repmgr 5.5 HA | ns1, ns2 |
 | `netbird_management` | NetBird combined server (PostgreSQL backend) | ns1, ns2 |
 | `netbird_peer` | NetBird peer client enrollment | ns1, ns2 |
-| `backup` | Restic backup to Hetzner Storagebox | ns1, ns2 |
+| `backup` | Restic backup to SFTP backup server | ns1, ns2 |
 
 ## Usage
 

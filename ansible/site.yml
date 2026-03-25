@@ -101,13 +101,13 @@
       when: backup_enabled | default(false) | bool
       assert:
         that:
-          - backup_storagebox_user is defined
-          - "'<' not in (backup_storagebox_user | string)"
-          - backup_storagebox_host is defined
-          - "'<' not in (backup_storagebox_host | string)"
+          - backup_sftp_user is defined
+          - "'<' not in (backup_sftp_user | string)"
+          - backup_sftp_host is defined
+          - "'<' not in (backup_sftp_host | string)"
         fail_msg: >-
-          backup_enabled is true but Storagebox credentials are still placeholders.
-          Set backup_storagebox_user and backup_storagebox_host in group_vars/all.yml,
+          backup_enabled is true but backup server credentials are still placeholders.
+          Set backup_sftp_user and backup_sftp_host in group_vars/all.yml,
           or set backup_enabled: false to skip backup deployment.
 
 # ============================================================================

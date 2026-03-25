@@ -137,15 +137,15 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_email_to: "admin@example.com"
 
 # ============================================================================
-# Backup (Restic to Hetzner Storagebox)
+# Backup (Restic to SFTP backup server)
 # ============================================================================
-# Set to false to skip backup deployment (e.g., no Storagebox credentials yet)
+# Set to false to skip backup deployment (e.g., no backup server credentials yet)
 backup_enabled: false
-backup_storagebox_user: <YOUR_STORAGEBOX_SUBACCOUNT>
-backup_storagebox_host: <YOUR_STORAGEBOX_HOST>
-backup_storagebox_path: /backups
-# SSH key for Storagebox SFTP access (separate from per-server Ansible keys).
-# Default: ~/hosting-platform.key — override if your Storagebox uses a different key.
+backup_sftp_user: <YOUR_SFTP_USER>
+backup_sftp_host: <YOUR_SFTP_HOST>
+backup_sftp_path: /backups
+# SSH key for backup server SFTP access (separate from per-server Ansible keys).
+# Default: ~/hosting-platform.key — override if your backup server uses a different key.
 # restic_ssh_key_src: "~/hosting-platform.key"
 # If left undefined, auto-generated and persisted in .generated_secrets/
 # WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)

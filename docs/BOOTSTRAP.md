@@ -9,7 +9,7 @@ This ensures the primary is fully operational before the secondary is added.
 
 ## Prerequisites
 
-1. Two Hetzner VPS with Debian 13 (Trixie) installed
+1. Two VPS with Debian 13 (Trixie) installed
 2. Root SSH access to both servers (via a bootstrapping SSH key, e.g., `~/hosting-platform.key`)
 3. **Ansible control machine** with:
    - Ansible 2.15+
@@ -48,15 +48,15 @@ Before starting, gather the following:
 
 | Item | Example | Notes |
 |------|---------|-------|
-| **ns1 public IPv4** | `23.88.111.142` | From Hetzner console |
-| **ns1 public IPv6** | `2a01:4f8:1c1a:c11a::1` | From Hetzner console |
-| **ns2 public IPv4** | `89.167.125.29` | From Hetzner console |
-| **ns2 public IPv6** | `2a01:4f9:c014:523f::1` | From Hetzner console |
+| **ns1 public IPv4** | `23.88.111.142` | From provider console |
+| **ns1 public IPv6** | `2a01:4f8:1c1a:c11a::1` | From provider console |
+| **ns2 public IPv4** | `89.167.125.29` | From provider console |
+| **ns2 public IPv6** | `2a01:4f9:c014:523f::1` | From provider console |
 | **Primary domain** | `example.com` | The domain this platform will serve |
-| **Bootstrapping SSH key** | `~/hosting-platform.key` | Key provisioned by Hetzner or uploaded during server creation |
+| **Bootstrapping SSH key** | `~/hosting-platform.key` | Key provisioned by the provider or uploaded during server creation |
 | **Server timezone** | `Europe/Berlin` | Applied to both servers |
 | **NetBird peer DNS domain** | `netbird` | Internal mesh domain — peers resolve as `<host>.<domain>` (e.g., `ns1.netbird`). Default: `netbird` |
-| **Backup SFTP credentials** | (optional) | Hetzner Storagebox user/host; set `backup_enabled: false` to skip |
+| **Backup SFTP credentials** | (optional) | SFTP backup server user/host; set `backup_enabled: false` to skip |
 
 > **Note:** After Phase 2, you will need to back up the **Zitadel masterkey** from
 > `.generated_secrets/zitadel_masterkey`. This key cannot be changed or recovered

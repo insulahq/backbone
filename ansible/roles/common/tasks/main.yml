@@ -343,7 +343,7 @@
 # use the per-server key instead of the bootstrapping SSH key.
 # The keypair is generated locally by the pre-play in _ssh-keys.yml.
 # IMPORTANT: exclusive=false -- do NOT remove existing keys from authorized_keys.
-# The bootstrapping SSH key and Hetzner-provisioned keys must remain as recovery fallbacks.
+# The bootstrapping SSH key and provider-provisioned keys must remain as recovery fallbacks.
 - name: Ensure .ssh directory exists for root
   ansible.builtin.file:
     path: /root/.ssh

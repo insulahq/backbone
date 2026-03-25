@@ -6,7 +6,7 @@
 
 ## 1. What This Is
 
-Ansible automation for deploying two fully redundant DNS + VPN mesh servers on Hetzner. This is the infrastructure foundation for a web hosting platform (Hosting Platform). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
+Ansible automation for deploying two fully redundant DNS + VPN mesh servers on two geographically separated servers. This is the infrastructure foundation for a web hosting platform (Hosting Platform). The hosting platform itself (API, panels, workloads) is built separately on top of this infrastructure.
 
 **Scope:** Two Debian 13 servers running WireGuard, PowerDNS, Traefik, PostgreSQL HA, NetBird VPN mesh, Zitadel IAM, and Restic backups.
 
@@ -14,8 +14,8 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 
 | Server | Location | WireGuard IP | Role |
 |--------|----------|-------------|------|
-| ns1 | Hetzner Falkenstein | 10.100.0.1 | **Primary** — PostgreSQL primary, DNS preferred, all services |
-| ns2 | Hetzner Helsinki | 10.100.0.2 | **Secondary** — PostgreSQL standby, DNS failover, all services |
+| ns1 | Location A | 10.100.0.1 | **Primary** — PostgreSQL primary, DNS preferred, all services |
+| ns2 | Location B | 10.100.0.2 | **Secondary** — PostgreSQL standby, DNS failover, all services |
 
 **Network Architecture:**
 - **WireGuard (`wg0`)** — Infrastructure backbone. All internal services (PostgreSQL, PowerDNS API, Portainer) bind to WireGuard IPs. Zero external dependencies, established in Step 2.
@@ -36,7 +36,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on H
 | Zitadel | 4.12.3 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
 | Portainer | 2.39.0 | Docker management UI, WireGuard + NetBird access |
-| Restic | 0.16.4 | Incremental backup to Hetzner Storagebox |
+| Restic | 0.16.4 | Incremental backup to SFTP backup server |
 
 ### Maintenance Automation
 
@@ -242,7 +242,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 83 | fail2ban `logpath = /var/log/auth.log` — doesn't exist on Debian 13 | `backend = systemd` with `journalmatch` |
 | 87 | `community.docker.docker_network` needs `python3-docker` | Added to common role base packages |
 | 88 | `wg genkey` on controller — missing `wireguard-tools` | Pre-check task with clear error message and install instructions |
-| 90 | `apt update` with `cache_valid_time: 3600` trusts stale Hetzner image cache — packages not found | Removed `cache_valid_time`; always refresh on first run |
+| 90 | `apt update` with `cache_valid_time: 3600` trusts stale the provider image cache — packages not found | Removed `cache_valid_time`; always refresh on first run |
 
 ### PowerDNS Deployment
 
@@ -494,4 +494,4 @@ pre-commit run --all-files
 - Do not force-push to `main` without explicit user approval
 - Do not use `pull: always` in docker_compose_v2 tasks — use `pull: missing` (wasteful re-downloads)
 - Do not change the Zitadel masterkey after initialization — it cannot be rotated (encrypted data becomes inaccessible)
-- Do not remove stale keys from `authorized_keys` during bootstrap — the bootstrapping SSH key and any Hetzner-provisioned keys must remain as recovery fallbacks; per-server keys are added alongside existing keys (`exclusive: false`)
+- Do not remove stale keys from `authorized_keys` during bootstrap — the bootstrapping SSH key and any provider-provisioned keys must remain as recovery fallbacks; per-server keys are added alongside existing keys (`exclusive: false`)

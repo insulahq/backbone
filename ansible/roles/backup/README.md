@@ -2,15 +2,15 @@
 
 > **Status:** COMPLETE — Ready for deployment  
 > **Tool:** Restic 0.16.4  
-> **Target:** Hetzner Storagebox
+> **Target:** SFTP backup server
 
 ## Overview
 
-This role deploys Restic backup to Hetzner Storagebox with:
+This role deploys Restic backup to SFTP backup server with:
 - Automated daily backups via systemd timer
 - Configurable retention policy
 - Encrypted repository (AES-256)
-- SFTP transport to Storagebox
+- SFTP transport to backup server
 - Per-server backup paths configuration
 
 **Key features:**
@@ -19,7 +19,7 @@ This role deploys Restic backup to Hetzner Storagebox with:
 - ✅ Retention policy (7 daily, 4 weekly, 12 monthly)
 - ✅ Weekly repository integrity checks
 - ✅ Encrypted backups (repository password)
-- ✅ SSH key authentication to Storagebox
+- ✅ SSH key authentication to backup server
 
 ## Architecture
 
@@ -28,10 +28,10 @@ Each server (ns1, ns2):
 ├── Restic binary (/usr/local/bin/restic)
 ├── Backup script (/etc/restic/backup.sh)
 ├── Systemd timer (daily at 02:00 + random 5min delay)
-├── Encrypted repository (Storagebox)
+├── Encrypted repository (backup server)
 └── Logs (/var/log/restic/)
 
-Hetzner Storagebox:
+SFTP backup server:
 └── /backups/
     ├── ns1/ (Restic repository for ns1)
     └── ns2/ (Restic repository for ns2)
@@ -59,8 +59,8 @@ ns2_backup_paths:
 
 ## Requirements
 
-- SSH key configured for Storagebox access
-- Storagebox credentials in group_vars
+- SSH key configured for backup server access
+- backup server credentials in group_vars
 
 ## Role Variables
 
@@ -69,10 +69,10 @@ ns2_backup_paths:
 Set in `group_vars/all.yml`:
 
 ```yaml
-# Storagebox credentials
-backup_storagebox_user: "u335448-sub9"
-backup_storagebox_host: "u335448.your-storagebox.de"
-backup_storagebox_path: "/backups"
+# backup server credentials
+backup_sftp_user: "user@example"
+backup_sftp_host: "sftp.example.com"
+backup_sftp_path: "/backups"
 
 # Restic repository password (store in vault)
 restic_password: "<64-char-random-string>"
@@ -137,7 +137,7 @@ journalctl -u restic-backup.service -f
 
 ```bash
 # Set environment
-export RESTIC_REPOSITORY="sftp:u335448-sub9@u335448.your-storagebox.de:/backups/ns1"
+export RESTIC_REPOSITORY="sftp:user@example@sftp.example.com:/backups/ns1"
 export RESTIC_PASSWORD_FILE="/etc/restic/password"
 
 # List all snapshots
@@ -177,10 +177,10 @@ Monitor backup success via:
 journalctl -u restic-backup.service -n 100
 
 # Test SSH connection
-ssh u335448-sub9@u335448.your-storagebox.de echo OK
+ssh user@example@sftp.example.com echo OK
 
 # Test Restic repository
-export RESTIC_REPOSITORY="sftp:u335448-sub9@u335448.your-storagebox.de:/backups/ns1"
+export RESTIC_REPOSITORY="sftp:user@example@sftp.example.com:/backups/ns1"
 export RESTIC_PASSWORD_FILE="/etc/restic/password"
 restic snapshots
 ```

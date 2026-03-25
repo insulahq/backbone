@@ -1,6 +1,6 @@
 ---
 # Molecule test configuration for backup role
-# Tests Restic installation and systemd timer setup (no Storagebox connection)
+# Tests Restic installation and systemd timer setup (no backup server connection)
 # Runs: molecule test -s default (from roles/backup/)
 # Requires: pip install molecule molecule-plugins[docker]
 
@@ -29,9 +29,9 @@ provisioner:
   inventory:
     host_vars:
       test-backup:
-        backup_storagebox_user: "testuser"
-        backup_storagebox_host: "localhost"
-        backup_storagebox_path: "/backups"
+        backup_sftp_user: "testuser"
+        backup_sftp_host: "localhost"
+        backup_sftp_path: "/backups"
         restic_password: "test_password_for_molecule"
         restic_ssh_key_src: "/dev/null"
 

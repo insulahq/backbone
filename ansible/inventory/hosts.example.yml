@@ -20,13 +20,13 @@ all:
           ansible_host: <NS1_PUBLIC_IPV4>
           public_ipv6: <NS1_PUBLIC_IPV6>
           hostname: ns1.example.com
-          location: hetzner_falkenstein
+          location: location_a
           wireguard_ip: 10.100.0.1        # WireGuard tunnel IP (static, pre-assigned)
         ns2:
           ansible_host: <NS2_PUBLIC_IPV4>
           public_ipv6: <NS2_PUBLIC_IPV6>
           hostname: ns2.example.com
-          location: hetzner_helsinki
+          location: location_b
           wireguard_ip: 10.100.0.2        # WireGuard tunnel IP (static, pre-assigned)
 
     netbird_peers:

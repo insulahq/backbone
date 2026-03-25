@@ -379,18 +379,18 @@
         _test_results: "{{ _test_results + [{'name': 'Restic backup timer active', 'host': inventory_hostname, 'passed': _t_backup_timer.rc | default(1) == 0}] }}"
       tags: [backup]
 
-    - name: "Backup | Storagebox SFTP connectivity"
-      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/hosting-platform.key') }} {{ backup_storagebox_user }}@{{ backup_storagebox_host }} 2>&1"
+    - name: "Backup | backup server SFTP connectivity"
+      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/hosting-platform.key') }} {{ backup_sftp_user }}@{{ backup_sftp_host }} 2>&1"
       register: _t_backup_sftp
       changed_when: false
       ignore_errors: true
-      when: backup_storagebox_user is defined and backup_storagebox_host is defined
+      when: backup_sftp_user is defined and backup_sftp_host is defined
       tags: [backup]
 
     - name: "Backup | Record result — SFTP connectivity"
       set_fact:
-        _test_results: "{{ _test_results + [{'name': 'Storagebox SFTP connection', 'host': inventory_hostname, 'passed': _t_backup_sftp.rc | default(1) == 0}] }}"
-      when: backup_storagebox_user is defined
+        _test_results: "{{ _test_results + [{'name': 'backup server SFTP connection', 'host': inventory_hostname, 'passed': _t_backup_sftp.rc | default(1) == 0}] }}"
+      when: backup_sftp_user is defined
       tags: [backup]
 
     # ------------------------------------------------------------------

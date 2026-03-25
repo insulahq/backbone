@@ -120,14 +120,14 @@ echo -e "${BOLD}--- Server ns1 (Primary) ---${NC}"
 echo ""
 prompt NS1_IPV4 "ns1 public IPv4 address"
 prompt_optional NS1_IPV6 "ns1 public IPv6 address"
-prompt NS1_LOCATION "ns1 location" "hetzner_falkenstein"
+prompt NS1_LOCATION "ns1 location" "location_a"
 echo ""
 
 echo -e "${BOLD}--- Server ns2 (Secondary) ---${NC}"
 echo ""
 prompt NS2_IPV4 "ns2 public IPv4 address"
 prompt_optional NS2_IPV6 "ns2 public IPv6 address"
-prompt NS2_LOCATION "ns2 location" "hetzner_helsinki"
+prompt NS2_LOCATION "ns2 location" "location_b"
 echo ""
 
 echo -e "${BOLD}--- SSH ---${NC}"
@@ -139,18 +139,18 @@ fi
 prompt SSH_PORT "SSH port" "22"
 echo ""
 
-echo -e "${BOLD}--- Backup (Hetzner Storagebox) ---${NC}"
+echo -e "${BOLD}--- Backup (SFTP backup server) ---${NC}"
 echo ""
 echo "  Leave empty to disable backups for now. You can enable later."
-prompt_optional STORAGEBOX_USER "Storagebox subaccount user"
-prompt_optional STORAGEBOX_HOST "Storagebox hostname"
-if [ -n "$STORAGEBOX_USER" ] && [ -n "$STORAGEBOX_HOST" ]; then
+prompt_optional SFTP_USER "backup server subaccount user"
+prompt_optional SFTP_HOST "backup server hostname"
+if [ -n "$SFTP_USER" ] && [ -n "$SFTP_HOST" ]; then
     BACKUP_ENABLED="true"
-    prompt_optional STORAGEBOX_PATH "Storagebox base path" "/backups"
-    prompt_optional BACKUP_SSH_KEY "SSH key for Storagebox SFTP" "$SSH_KEY_PATH"
+    prompt_optional SFTP_PATH "backup server base path" "/backups"
+    prompt_optional BACKUP_SSH_KEY "SSH key for backup server SFTP" "$SSH_KEY_PATH"
 else
     BACKUP_ENABLED="false"
-    STORAGEBOX_PATH="/backups"
+    SFTP_PATH="/backups"
     BACKUP_SSH_KEY="$SSH_KEY_PATH"
 fi
 echo ""
@@ -282,9 +282,9 @@ ALLVARS_EOF
 
 if [ "$BACKUP_ENABLED" = "true" ]; then
     cat >> group_vars/all.yml << BACKUP_EOF
-backup_storagebox_user: ${STORAGEBOX_USER}
-backup_storagebox_host: ${STORAGEBOX_HOST}
-backup_storagebox_path: ${STORAGEBOX_PATH}
+backup_sftp_user: ${SFTP_USER}
+backup_sftp_host: ${SFTP_HOST}
+backup_sftp_path: ${SFTP_PATH}
 restic_ssh_key_src: "${BACKUP_SSH_KEY}"
 BACKUP_EOF
 fi
