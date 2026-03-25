@@ -213,6 +213,38 @@ SCRIPT
 }
 
 # ==========================================================================
+# Phase 2b: Generate post-promote script (runs AFTER successful promotion)
+# ==========================================================================
+create_post_promote() {
+  cat > /tmp/post-promote.sh <<'SCRIPT'
+#!/bin/bash
+# Post-promote hook — updates pgproxy target and DNS after successful promotion.
+# Called by repmgr promote_command AFTER the standby has been promoted to primary.
+echo "POST-PROMOTE: Updating pgproxy target and DNS..."
+
+# Update pgproxy to point to local PG (we're now the primary)
+echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
+
+# Restart consumers that use pgproxy
+if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
+  for ctr in pgproxy gatus netbird-server powerdns-auth; do
+    curl -fsS --unix-socket /var/run/docker.sock -X POST \
+      "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
+      > /dev/null 2>&1 || true
+  done
+fi
+
+# Switch DNS to this node (peer is down)
+if command -v nsenter &>/dev/null; then
+  nsenter -t 1 -m -u -i -n -p -- /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
+fi
+
+echo "POST-PROMOTE: pgproxy + DNS updated, consumers restarted"
+SCRIPT
+  chmod +x /tmp/post-promote.sh
+}
+
+# ==========================================================================
 # Phase 3: Generate repmgr.conf
 # ==========================================================================
 generate_repmgr_config() {
@@ -230,7 +262,7 @@ data_directory='${PGDATA}'
 
 # Automatic failover with promotion validation
 failover=automatic
-promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file'
+promote_command='$(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file && /tmp/post-promote.sh'
 follow_command='$(which repmgr) standby follow -f ${REPMGR_CONFIG_FILE} --log-to-file --upstream-node-id %n'
 
 # Detection window: 6 × 10s = 60s before declaring primary dead
@@ -780,6 +812,7 @@ echo "============================================================"
 
 cleanup_stale_files
 create_promote_check
+create_post_promote
 generate_repmgr_config
 
 ACTUAL_ROLE=$(determine_role)
