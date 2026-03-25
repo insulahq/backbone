@@ -576,6 +576,65 @@ start_as_standby() {
   PG_PID=$!
   until pg_isready -q; do sleep 1; done
 
+  # Verify WAL streaming is working. If WAL segments were removed on the primary
+  # (max_slot_wal_keep_size exceeded), the standby will fail to stream indefinitely.
+  # Poll with timeout — transient states (startup, catchup) are healthy and expected.
+  echo "==> Verifying WAL streaming health (polling up to 60s)..."
+  WAL_STATUS=""
+  WAL_OK=false
+  for _i in $(seq 1 12); do
+    WAL_STATUS=$(psql -U postgres -tAc "SELECT status FROM pg_stat_wal_receiver" 2>/dev/null || echo "")
+    if [ "$WAL_STATUS" = "streaming" ]; then
+      WAL_OK=true
+      break
+    fi
+    # startup/catchup are healthy transient states — keep waiting
+    if [ "$WAL_STATUS" = "startup" ] || [ "$WAL_STATUS" = "catchup" ] || [ -z "$WAL_STATUS" ]; then
+      echo "==> WAL receiver in transient state ('${WAL_STATUS}'), waiting... ($_i/12)"
+      sleep 5
+      continue
+    fi
+    # Any other status (stopped, unexpected) — check for WAL gap
+    break
+  done
+
+  if [ "$WAL_OK" = true ]; then
+    echo "==> WAL streaming confirmed"
+  else
+    # Confirm WAL gap by checking PG log for the specific error
+    PG_LOG=$(pg_ctl -D "$PGDATA" -l /dev/null status 2>&1 || true)
+    WAL_GAP_DETECTED=false
+    # Check recent log entries for the WAL-removed error pattern
+    if psql -U postgres -tAc "SELECT 1" >/dev/null 2>&1; then
+      # PG is running — check if WAL receiver has the specific gap error
+      WAL_ERRORS=$(docker logs postgresql 2>&1 | tail -50 | grep -c "WAL segment.*already been removed" || echo "0")
+      if [ "$WAL_ERRORS" -gt 0 ]; then
+        WAL_GAP_DETECTED=true
+      fi
+    fi
+
+    if [ "$WAL_GAP_DETECTED" = true ]; then
+      echo "==> WAL gap confirmed — stopping PG and performing full re-clone..."
+      send_alert "warning" "WAL gap on ${NODE_NAME}: segments removed on primary, performing full re-clone"
+      pg_ctl -D "$PGDATA" -m fast -w stop 2>/dev/null || true
+      kill "$PG_PID" 2>/dev/null || true
+      wait "$PG_PID" 2>/dev/null || true
+      rm -rf "${PGDATA:?}"/*
+      repmgr -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+             -f "$REPMGR_CONFIG_FILE" standby clone
+      # Restore primary_conninfo (may be stale after re-clone)
+      sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
+      echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+        >> "$PGDATA/postgresql.auto.conf"
+      echo "==> Re-clone complete, restarting..."
+      postgres -D "$PGDATA" &
+      PG_PID=$!
+      until pg_isready -q; do sleep 1; done
+    else
+      echo "==> WAL receiver not streaming (status: '${WAL_STATUS}') but no gap detected — continuing"
+    fi
+  fi
+
   send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
   # Update pgproxy to route writes to the primary (peer) and restart consumers

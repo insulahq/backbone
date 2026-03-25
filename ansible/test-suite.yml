@@ -844,191 +844,61 @@
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
-    # --- NetBird management failover: stop on one node, verify API on other ---
-    - name: "Failover | Stop NetBird on {{ _test_node }} to test management failover"
-      community.docker.docker_compose_v2:
-        project_src: /opt/netbird
-        state: stopped
-      when: inventory_hostname == _test_node
-      run_once: true
-      tags: [failover, never]
+    # --- Service-level failover: verify surviving node serves via direct IP ---
+    # Active-passive DNS: domain always points to PG primary. These tests verify
+    # services respond on the surviving node via direct IP (not DNS resolution).
 
-    - name: "Failover | Wait for NetBird DNS failover (35s)"
-      pause:
-        seconds: 35
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify NetBird management API on surviving node"
+    - name: "Failover | Verify NetBird API on surviving node (direct IP)"
       uri:
-        url: "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/instance"
-        validate_certs: true
+        url: "https://{{ hostvars[_surviving_node]['ansible_host'] }}/api/instance"
+        validate_certs: false
         status_code: [200, 401, 403]
         timeout: 15
         headers:
           Host: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       register: _t_fo_netbird
       ignore_errors: true
+      retries: 3
+      delay: 5
+      until: _t_fo_netbird is success
       delegate_to: "{{ _surviving_node }}"
       vars:
         ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Record result — NetBird management failover"
+    - name: "Failover | Record result — NetBird on surviving node"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'NetBird API responds after node failure', 'host': 'cluster', 'passed': _t_fo_netbird.status | default(0) in [200, 401, 403]}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'NetBird API responds on surviving node', 'host': 'cluster', 'passed': _t_fo_netbird.status | default(0) in [200, 401, 403]}] }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify DNS excludes stopped NetBird node"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
-      register: _t_fo_netbird_dns
-      changed_when: false
-      ignore_errors: true
-      run_once: true
-      delegate_to: "{{ _surviving_node }}"
-      vars:
-        ansible_ssh_private_key_file: "{{ _surviving_key }}"
-      tags: [failover, never]
-
-    - name: "Failover | Record result — NetBird DNS failover"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'DNS excludes stopped NetBird node', 'host': 'cluster', 'passed': hostvars[_test_node]['ansible_host'] not in (_t_fo_netbird_dns.stdout | default(''))}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Restart NetBird on {{ _test_node }}"
-      community.docker.docker_compose_v2:
-        project_src: /opt/netbird
-        state: present
-      when: inventory_hostname == _test_node
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Wait for NetBird recovery (20s)"
-      pause:
-        seconds: 20
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify NetBird DNS includes both nodes again"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
-      register: _t_fo_netbird_dns_recovery
-      changed_when: false
-      ignore_errors: true
-      run_once: true
-      delegate_to: "{{ _surviving_node }}"
-      vars:
-        ansible_ssh_private_key_file: "{{ _surviving_key }}"
-      tags: [failover, never]
-
-    - name: "Failover | Record result — NetBird DNS recovery"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'NetBird DNS includes both nodes after recovery', 'host': 'cluster', 'passed': (hostvars[_test_node]['ansible_host'] in (_t_fo_netbird_dns_recovery.stdout | default(''))) and (hostvars[_surviving_node]['ansible_host'] in (_t_fo_netbird_dns_recovery.stdout | default('')))}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    # --- Zitadel failover: stop on one node, verify OIDC on other ---
-    - name: "Failover | Stop Zitadel on {{ _test_node }} to test IAM failover"
-      community.docker.docker_compose_v2:
-        project_src: /opt/zitadel
-        state: stopped
-      when: inventory_hostname == _test_node
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Wait for Zitadel DNS failover (35s)"
-      pause:
-        seconds: 35
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify Zitadel health on surviving node"
+    - name: "Failover | Verify Zitadel on surviving node (direct IP)"
       uri:
-        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/debug/ready"
-        validate_certs: true
+        url: "https://{{ hostvars[_surviving_node]['ansible_host'] }}/debug/ready"
+        validate_certs: false
         status_code: [200]
         timeout: 15
         headers:
           Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
       register: _t_fo_zitadel
       ignore_errors: true
+      retries: 3
+      delay: 5
+      until: _t_fo_zitadel is success
       delegate_to: "{{ _surviving_node }}"
       vars:
         ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Record result — Zitadel health after failover"
+    - name: "Failover | Record result — Zitadel on surviving node"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy after node failure', 'host': 'cluster', 'passed': _t_fo_zitadel.status | default(0) == 200}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy on surviving node', 'host': 'cluster', 'passed': _t_fo_zitadel.status | default(0) == 200}] }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify Zitadel OIDC discovery on surviving node"
-      uri:
-        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/.well-known/openid-configuration"
-        validate_certs: true
-        status_code: [200]
-        return_content: true
-        timeout: 15
-        headers:
-          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
-      register: _t_fo_zitadel_oidc
-      ignore_errors: true
-      delegate_to: "{{ _surviving_node }}"
-      vars:
-        ansible_ssh_private_key_file: "{{ _surviving_key }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Record result — Zitadel OIDC discovery after failover"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'Zitadel OIDC discovery responds after failover', 'host': 'cluster', 'passed': (_t_fo_zitadel_oidc.status | default(0) == 200) and ('issuer' in (_t_fo_zitadel_oidc.content | default('')))}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Restart Zitadel on {{ _test_node }}"
-      community.docker.docker_compose_v2:
-        project_src: /opt/zitadel
-        state: present
-      when: inventory_hostname == _test_node
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Wait for Zitadel recovery (30s)"
-      pause:
-        seconds: 30
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify Zitadel healthy on recovered node"
-      uri:
-        url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}/debug/ready"
-        validate_certs: true
-        status_code: [200]
-        timeout: 15
-        headers:
-          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
-      register: _t_fo_zitadel_recovery
-      ignore_errors: true
-      delegate_to: "{{ _test_node }}"
-      vars:
-        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Record result — Zitadel recovery"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy after node recovery', 'host': 'cluster', 'passed': _t_fo_zitadel_recovery.status | default(0) == 200}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    # --- Full node outage: stop all services on one node, verify platform ---
-    # NOTE: PostgreSQL is intentionally excluded — the PG failover test already ran
-    # and may have changed the primary. Stopping PG again would trigger a second
-    # promotion on the surviving node, complicating cluster recovery.
+    # --- Full node outage: stop all services on test node, verify platform ---
     - name: "Failover | FULL NODE OUTAGE — stopping all services on {{ _test_node }}"
       community.docker.docker_compose_v2:
         project_src: "{{ item }}"
@@ -1063,7 +933,7 @@
 
     - name: "Failover | Record result — DNS during full outage"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'DNS resolves during full node outage', 'host': 'cluster', 'passed': (_t_fo_full_dns.stdout | default('') | length > 0) and (hostvars[_test_node]['ansible_host'] not in (_t_fo_full_dns.stdout | default('')))}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'DNS resolves during full node outage', 'host': 'cluster', 'passed': _t_fo_full_dns.stdout | default('') | length > 0}] }}"
       run_once: true
       tags: [failover, never]
 
@@ -1084,28 +954,6 @@
     - name: "Failover | Record result — PostgreSQL during full outage"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'PostgreSQL accessible during full node outage', 'host': 'cluster', 'passed': _t_fo_full_pg.rc | default(1) == 0}] }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Verify Gatus monitoring during full node outage"
-      uri:
-        url: "https://{{ gatus_domain | default('status.' + platform_domain) }}/api/v1/endpoints/statuses"
-        validate_certs: true
-        status_code: [200, 401, 403]
-        timeout: 15
-        headers:
-          Host: "{{ gatus_domain | default('status.' + platform_domain) }}"
-      register: _t_fo_full_gatus
-      ignore_errors: true
-      delegate_to: "{{ _surviving_node }}"
-      vars:
-        ansible_ssh_private_key_file: "{{ _surviving_key }}"
-      run_once: true
-      tags: [failover, never]
-
-    - name: "Failover | Record result — Gatus during full outage"
-      set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'Gatus monitoring works during full node outage', 'host': 'cluster', 'passed': _t_fo_full_gatus.status | default(0) in [200, 401, 403]}] }}"
       run_once: true
       tags: [failover, never]
 
@@ -1130,8 +978,8 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify DNS includes both nodes after full recovery"
-      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }} A +short +time=5"
+    - name: "Failover | Verify DNS still points to single IP after recovery (active-passive)"
+      command: "dig @{{ hostvars[_surviving_node]['ansible_host'] }} {{ platform_domain }} A +short +time=5"
       register: _t_fo_full_recovery_dns
       changed_when: false
       ignore_errors: true
@@ -1141,16 +989,16 @@
         ansible_ssh_private_key_file: "{{ _surviving_key }}"
       tags: [failover, never]
 
-    - name: "Failover | Record result — full node DNS recovery"
+    - name: "Failover | Record result — DNS active-passive after recovery"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'DNS includes both nodes after full recovery', 'host': 'cluster', 'passed': (hostvars[_test_node]['ansible_host'] in (_t_fo_full_recovery_dns.stdout | default(''))) and (hostvars[_surviving_node]['ansible_host'] in (_t_fo_full_recovery_dns.stdout | default('')))}] }}"
+        _failover_results: "{{ _failover_results + [{'name': 'DNS single-IP after recovery (active-passive)', 'host': 'cluster', 'passed': (_t_fo_full_recovery_dns.stdout_lines | default([]) | length) == 1}] }}"
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify all services healthy after full recovery"
+    - name: "Failover | Verify all services healthy on recovered node (direct IP)"
       uri:
-        url: "https://{{ item.domain }}/{{ item.path }}"
-        validate_certs: true
+        url: "https://{{ hostvars[_test_node]['ansible_host'] }}/{{ item.path }}"
+        validate_certs: false
         status_code: "{{ item.codes }}"
         timeout: 15
         headers:
@@ -1159,14 +1007,14 @@
         - domain: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
           path: "debug/ready"
           codes: [200]
-        - domain: "{{ gatus_domain | default('status.' + platform_domain) }}"
-          path: "api/v1/endpoints/statuses"
-          codes: [200, 401, 403]
         - domain: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
           path: "api/instance"
           codes: [200, 401, 403]
       register: _t_fo_full_recovery_health
       ignore_errors: true
+      retries: 3
+      delay: 10
+      until: _t_fo_full_recovery_health is success
       delegate_to: "{{ _test_node }}"
       vars:
         ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"

@@ -165,7 +165,7 @@
   ignore_errors: true
   tags: [gatus, dns]
 
-- name: Create DNS A records for Gatus dashboard (static round-robin)
+- name: Create DNS A record for Gatus dashboard (active-passive — primary only)
   when:
     - gatus_create_dns_records | default(true)
     - powerdns_api_key is defined
@@ -185,26 +185,21 @@
           changetype: DELETE
         - name: "{{ gatus_domain }}."
           type: A
-          ttl: 300
+          ttl: 30
           changetype: REPLACE
-          records: >-
-            {{
-              groups['dns_servers']
-              | map('extract', hostvars, 'ansible_host')
-              | map('community.general.dict_kv', 'content')
-              | map('combine', {'disabled': false})
-              | list
-            }}
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['ansible_host'] }}"
+              disabled: false
     status_code: [200, 204]
   ignore_errors: true
   tags: [gatus, dns]
 
-- name: Create DNS AAAA records for Gatus dashboard (static round-robin)
+- name: Create DNS AAAA record for Gatus dashboard (active-passive — primary only)
   when:
     - gatus_create_dns_records | default(true)
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
-    - groups['dns_servers'] | map('extract', hostvars, 'public_ipv6') | select('defined') | list | length > 0
+    - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
   run_once: true
   uri:
     url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
@@ -217,17 +212,11 @@
       rrsets:
         - name: "{{ gatus_domain }}."
           type: AAAA
-          ttl: 300
+          ttl: 30
           changetype: REPLACE
-          records: >-
-            {{
-              groups['dns_servers']
-              | map('extract', hostvars, 'public_ipv6')
-              | select('defined')
-              | map('community.general.dict_kv', 'content')
-              | map('combine', {'disabled': false})
-              | list
-            }}
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] }}"
+              disabled: false
     status_code: [200, 204]
   ignore_errors: true
   tags: [gatus, dns]
