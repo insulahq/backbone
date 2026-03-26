@@ -7,7 +7,7 @@ After=docker.service
 [Service]
 Type=oneshot
 ExecStart=/bin/bash -c '\
-  SIGNAL_FILE=/opt/postgresql/restart-consumers; \
+  SIGNAL_FILE=/opt/postgresql/signals/restart-consumers; \
   if [ -f "$SIGNAL_FILE" ]; then \
     CONTAINERS=$(cat "$SIGNAL_FILE"); \
     echo "pg-restart-consumers: restarting [$CONTAINERS]"; \

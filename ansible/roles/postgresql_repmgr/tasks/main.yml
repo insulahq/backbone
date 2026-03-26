@@ -58,14 +58,13 @@
     mode: '0644'
   notify: restart postgresql
 
-- name: Create restart-consumers signal file (empty, writable by postgres user)
-  copy:
-    content: ""
-    dest: "{{ postgresql_install_dir }}/restart-consumers"
+- name: Create signal directory for PG consumer restarts (writable by postgres user)
+  file:
+    path: "{{ postgresql_install_dir }}/signals"
+    state: directory
     owner: '999'
     group: '999'
-    mode: '0644'
-    force: false
+    mode: '0755'
 
 - name: Write initial pgproxy target (points to current primary via WireGuard IP)
   copy:

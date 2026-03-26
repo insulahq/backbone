@@ -6,7 +6,7 @@ Description=Watch for PostgreSQL consumer restart signal
 After=docker.service
 
 [Path]
-PathModified=/opt/postgresql/restart-consumers
+PathModified=/opt/postgresql/signals/restart-consumers
 MakeDirectory=yes
 
 [Install]

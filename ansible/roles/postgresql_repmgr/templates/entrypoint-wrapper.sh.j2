@@ -115,7 +115,7 @@ switch_dns() {
 # Replaces direct Docker socket API calls — no socket mount needed.
 restart_consumers() {
   local containers="${1:-pgproxy gatus netbird-server powerdns-auth}"
-  echo "$containers" > /opt/postgresql/restart-consumers
+  echo "$containers" > /opt/postgresql/signals/restart-consumers
   echo "==> Signaled host to restart: $containers"
   sleep 2  # Wait for systemd path unit to detect and act
 }
@@ -203,7 +203,7 @@ echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
 
 # 2. Signal host to restart consumers (via systemd path unit)
 # Write container names to signal file; systemd detects and restarts them.
-echo "pgproxy gatus netbird-server" > /opt/postgresql/restart-consumers
+echo "pgproxy gatus netbird-server" > /opt/postgresql/signals/restart-consumers
 echo "POST-PROMOTE: Signaled consumer restart"
 sleep 3  # Wait for systemd to restart consumers
 
@@ -217,7 +217,7 @@ else
 fi
 
 # 4. Signal host to restart powerdns-auth (after DNS switch)
-echo "powerdns-auth" > /opt/postgresql/restart-consumers
+echo "powerdns-auth" > /opt/postgresql/signals/restart-consumers
 echo "POST-PROMOTE: Signaled powerdns-auth restart"
 
 echo "POST-PROMOTE: $(date) — Complete"
@@ -243,7 +243,7 @@ exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
 
-  # Consumer restarts use a signal file (/opt/postgresql/restart-consumers)
+  # Consumer restarts use a signal file (/opt/postgresql/signals/restart-consumers)
   # monitored by a host-side systemd path unit. No Docker socket needed.
 }
 
