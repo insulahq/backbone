@@ -625,7 +625,7 @@ start_as_standby() {
   send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
   # Update pgproxy target — watchdog handles DNS + consumer restarts
-  echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
+  echo "${PEER_NAME}" > /opt/postgresql/pgproxy-target
 
   echo "==> Registering as standby (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
@@ -732,7 +732,7 @@ self_demote() {
 
   # DNS switch first, then pgproxy + restart
   switch_dns "drain-self"
-  echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
+  echo "${PEER_NAME}" > /opt/postgresql/pgproxy-target
   # Watchdog handles DNS + consumer restarts
 
   echo "==> Container will restart and rejoin as standby" >&2

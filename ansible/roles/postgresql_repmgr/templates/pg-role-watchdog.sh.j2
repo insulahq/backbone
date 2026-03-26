@@ -12,9 +12,9 @@
 set -euo pipefail
 
 PGPROXY_TARGET_FILE="/opt/postgresql/pgproxy-target"
-PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 LOCAL_TARGET="postgresql"   # Docker DNS name for local PG (primary)
-REMOTE_TARGET="$PEER_WG_IP" # WireGuard IP for remote PG (standby → peer primary)
+REMOTE_TARGET="$PEER_NAME"  # Hostname mapped via extra_hosts to peer WireGuard IP
 
 # Check if PG container is running and healthy
 PG_HEALTH=$(docker inspect postgresql --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "missing")

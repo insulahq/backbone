@@ -76,6 +76,11 @@ services:
     image: alpine/socat:1.8.0.1
     container_name: pgproxy
     restart: unless-stopped
+    extra_hosts:
+      # Map WireGuard IPs so pgproxy can reach the peer PG when this node is standby.
+      # Docker bridge containers can't reach host WireGuard IPs directly.
+      - "ns1:{{ '127.0.0.1' if inventory_hostname == 'ns1' else hostvars['ns1']['wireguard_ip'] }}"
+      - "ns2:{{ '127.0.0.1' if inventory_hostname == 'ns2' else hostvars['ns2']['wireguard_ip'] }}"
     volumes:
       - /opt/postgresql/pgproxy-target:/pgproxy-target:ro
     entrypoint: ["/bin/sh", "-c"]
