@@ -62,27 +62,23 @@ echo "$(date): PG role change detected (recovery=$PG_ROLE). Fixing pgproxy: $CUR
 # 1. Update pgproxy target
 echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
 
-# 2. Restart pgproxy FIRST (it needs the new target before DNS switch works)
-docker restart pgproxy --time 5 2>&1 || true
-sleep 3  # Wait for pgproxy to be healthy
+# 2. Wait for pgproxy to pick up new target (self-updating every 5s)
+sleep 7
 
-# 3. Switch DNS (needs working pgproxy → PowerDNS → PG path)
+# 3. Switch DNS
 for _i in 1 2 3; do
   /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
   sleep 5
 done
 
-# 4. Restart remaining consumers
-docker restart gatus netbird-server --time 5 2>&1 || true
-
-echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE, consumers restarted."
-
-# 5. Also restart any crash-looping containers (clear Docker exponential backoff)
-sleep 5
-for ctr in netbird-server gatus powerdns-auth; do
+# 4. Restart crash-looping consumers (clear Docker backoff)
+for ctr in netbird-server gatus; do
   STATUS=$(docker inspect "$ctr" --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "")
+  UPTIME=$(docker inspect "$ctr" --format "{% raw %}{{.State.StartedAt}}{% endraw %}" 2>/dev/null || echo "")
   if [ "$STATUS" = "restarting" ]; then
     docker restart "$ctr" --time 3 2>&1 || true
-    echo "$(date): Cleared crash-loop backoff for $ctr"
+    echo "$(date): Cleared crash-loop for $ctr"
   fi
 done
+
+echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE"
