@@ -818,6 +818,12 @@
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
+    - name: "Failover | Wait for promotion to fully complete (15s)"
+      pause:
+        seconds: 15
+      run_once: true
+      tags: [failover, never]
+
     - name: "Failover | Verify PostgreSQL accepts writes on new primary"
       community.docker.docker_container_exec:
         container: postgresql
@@ -826,7 +832,7 @@
       register: _t_fo_pg_write
       ignore_errors: true
       changed_when: false
-      retries: 3
+      retries: 6
       delay: 5
       until: _t_fo_pg_write.rc | default(1) == 0
       when: inventory_hostname != _pg_primary
