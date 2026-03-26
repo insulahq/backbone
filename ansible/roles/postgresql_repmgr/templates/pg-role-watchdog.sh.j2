@@ -1,0 +1,60 @@
+#!/bin/bash
+# ==========================================================================
+# PostgreSQL Role Watchdog — Self-Healing pgproxy + DNS + Consumer Manager
+# ==========================================================================
+# Runs every 10s via systemd timer on the HOST (not inside a container).
+# Detects PG role changes and fixes pgproxy target, DNS, and consumer
+# containers immediately. Replaces the unreliable signal-file mechanism.
+#
+# This script is IDEMPOTENT — if everything is already correct, it does nothing.
+# ==========================================================================
+
+set -euo pipefail
+
+PGPROXY_TARGET_FILE="/opt/postgresql/pgproxy-target"
+PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+LOCAL_TARGET="postgresql"   # Docker DNS name for local PG (primary)
+REMOTE_TARGET="$PEER_WG_IP" # WireGuard IP for remote PG (standby → peer primary)
+
+# Check if PG container is running and healthy
+PG_HEALTH=$(docker inspect postgresql --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+if [ "$PG_HEALTH" != "healthy" ]; then
+  exit 0  # PG not ready, skip this cycle
+fi
+
+# Get current PG role
+PG_ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+if [ "$PG_ROLE" = "error" ]; then
+  exit 0  # Can't query PG, skip this cycle
+fi
+
+# Determine correct target
+if [ "$PG_ROLE" = "f" ]; then
+  CORRECT_TARGET="$LOCAL_TARGET"
+  DNS_MODE="primary-only"
+else
+  CORRECT_TARGET="$REMOTE_TARGET"
+  DNS_MODE="drain-self"
+fi
+
+# Read current target
+CURRENT_TARGET=$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || echo "")
+
+# If target is already correct, nothing to do
+if [ "$CORRECT_TARGET" = "$CURRENT_TARGET" ]; then
+  exit 0
+fi
+
+# === ROLE CHANGE DETECTED ===
+echo "$(date): PG role change detected (recovery=$PG_ROLE). Fixing pgproxy: $CURRENT_TARGET → $CORRECT_TARGET"
+
+# 1. Update pgproxy target
+echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
+
+# 2. Switch DNS (before restarting containers — nginx is still running)
+/usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 || true
+
+# 3. Restart all consumers in one command
+docker restart pgproxy gatus netbird-server powerdns-auth --time 5 2>&1 || true
+
+echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE, consumers restarted."

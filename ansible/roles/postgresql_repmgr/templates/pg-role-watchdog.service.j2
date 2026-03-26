@@ -1,0 +1,7 @@
+[Unit]
+Description=PostgreSQL Role Watchdog
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pg-role-watchdog.sh

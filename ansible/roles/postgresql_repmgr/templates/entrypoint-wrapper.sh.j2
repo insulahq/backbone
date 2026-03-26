@@ -102,30 +102,13 @@ send_alert() {
 # Delegates to /usr/local/bin/platform-dns-switch on the host (via nsenter).
 # The script is deployed by the common Ansible role and reads its config from
 # /etc/platform-dns-switch.env. Modes: primary-only (traffic to self), drain-self (traffic to peer).
-switch_dns() {
-  local mode="$1"  # "primary-only" or "drain-self"
-  if [ -x /usr/local/bin/platform-dns-switch ]; then
-    for _retry in 1 2 3; do
-      if /usr/local/bin/platform-dns-switch "$mode" 2>&1; then
-        return 0
-      fi
-      echo "DNS switch attempt $_retry failed, retrying in 2s..." >&2
-      sleep 2
-    done
-    echo "WARNING: DNS switch failed after 3 attempts" >&2
-  else
-    echo "WARNING: platform-dns-switch not available — DNS records NOT updated" >&2
-  fi
-}
+  # DNS switching is handled by the pg-role-watchdog on the host.
+  # No switch_dns() function needed in the entrypoint-wrapper.
 
-# Signal the host to restart consumer containers (via systemd path unit).
-# Replaces direct Docker socket API calls — no socket mount needed.
-restart_consumers() {
-  local containers="${1:-pgproxy gatus netbird-server powerdns-auth}"
-  echo "$containers" > /opt/postgresql/signals/restart-consumers
-  echo "==> Signaled host to restart: $containers"
-  sleep 2  # Wait for systemd path unit to detect and act
-}
+  # NOTE: Consumer restarts (pgproxy, gatus, netbird, powerdns) are handled by
+  # the pg-role-watchdog.timer on the host (runs every 10s, detects role changes,
+  # fixes pgproxy + DNS + restarts consumers automatically). The entrypoint-wrapper
+  # only manages PG startup/failover — it does NOT orchestrate other containers.
 
 # ==========================================================================
 # Signal handler — clean shutdown on SIGTERM/SIGINT (Docker stop)
@@ -194,70 +177,30 @@ SCRIPT
 # Phase 2b: Generate post-promote script (runs AFTER successful promotion)
 # ==========================================================================
 create_post_promote() {
+  # Post-promote: update pgproxy target immediately after promotion.
+  # The pg-role-watchdog on the host handles DNS switch + consumer restarts
+  # within 10s of detecting the role change.
   cat > /tmp/post-promote.sh <<'SCRIPT'
 #!/bin/bash
-# Post-promote hook — runs AFTER successful promotion by repmgrd.
-# Updates pgproxy target, signals host to restart consumers, switches DNS.
-# No Docker socket needed — uses signal file for restarts.
-echo "POST-PROMOTE: $(date) — Updating DNS, pgproxy, and signaling consumer restarts..."
-
-# 1. Switch DNS to this node FIRST (before any restarts disrupt the network)
-# powerdns-nginx is still running at this point and can serve the API call.
-if [ -x /usr/local/bin/platform-dns-switch ]; then
-  # Retry DNS switch up to 3 times (nginx may need a moment after PG promotion)
-  DNS_OK=false
-  for _i in 1 2 3; do
-    if /usr/local/bin/platform-dns-switch primary-only 2>&1; then
-      DNS_OK=true
-      break
-    fi
-    echo "POST-PROMOTE: DNS switch attempt $_i failed, retrying in 2s..."
-    sleep 2
-  done
-  if [ "$DNS_OK" = true ]; then
-    echo "POST-PROMOTE: DNS switched to primary-only"
-  else
-    echo "POST-PROMOTE: WARNING — DNS switch failed after 3 attempts"
-  fi
-fi
-
-# 2. Update pgproxy to point to local PG (we're now the primary)
-if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
-  echo "POST-PROMOTE: FATAL — failed to write pgproxy-target" >&2
-  exit 1
-fi
-echo "POST-PROMOTE: pgproxy-target set to postgresql (local Docker DNS)"
-
-# 3. Signal host to restart ALL consumers including powerdns-auth
-# Single restart signal — systemd handles them all at once.
-echo "pgproxy gatus netbird-server powerdns-auth" > /opt/postgresql/signals/restart-consumers
-echo "POST-PROMOTE: Signaled consumer restart (pgproxy, gatus, netbird, powerdns)"
-
-echo "POST-PROMOTE: $(date) — Complete"
+echo "POST-PROMOTE: $(date) — Updating pgproxy target to local"
+echo "postgresql" > /opt/postgresql/pgproxy-target
+echo "POST-PROMOTE: Done. Watchdog will handle DNS + consumer restarts."
 SCRIPT
   chmod +x /tmp/post-promote.sh
 
-  # Combined promote + update script (single file avoids quoting issues in repmgr.conf)
+  # promote_command wrapper: promote then update pgproxy target
   cat > /tmp/promote-and-update.sh <<PROMOTE_SCRIPT
 #!/bin/bash
 exec >> /tmp/promote-and-update.log 2>&1
-echo "\$(date): Starting promote-and-update"
+echo "\$(date): Promoting..."
 $(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file
 RESULT=\$?
-echo "\$(date): repmgr promote exit code: \$RESULT"
 if [ \$RESULT -eq 0 ]; then
-  echo "\$(date): Running post-promote..."
   /tmp/post-promote.sh
-  echo "\$(date): Post-promote exit code: \$?"
-else
-  echo "\$(date): Promote failed, skipping post-promote"
 fi
 exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
-
-  # Consumer restarts use a signal file (/opt/postgresql/signals/restart-consumers)
-  # monitored by a host-side systemd path unit. No Docker socket needed.
 }
 
 # ==========================================================================
@@ -526,11 +469,9 @@ start_as_primary() {
 
   send_alert "info" "PostgreSQL started as PRIMARY on ${NODE_NAME}"
 
-  # DNS switch first (while powerdns-nginx is still running), then update pgproxy + restart
-  switch_dns "primary-only"
+  # Update pgproxy target — the pg-role-watchdog on the host will detect the
+  # role change within 10s and handle DNS switch + consumer restarts.
   echo "postgresql" > /opt/postgresql/pgproxy-target
-  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
-  echo "==> DNS switched, pgproxy updated, consumers restarting"
 
   echo "==> Registering as primary (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" primary register --force 2>&1 || {
@@ -683,11 +624,8 @@ start_as_standby() {
 
   send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
-  # DNS switch first (while powerdns-nginx is still running), then update pgproxy + restart
-  switch_dns "drain-self"
+  # Update pgproxy target — watchdog handles DNS + consumer restarts
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
-  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
-  echo "==> DNS drained, pgproxy updated, consumers restarting"
 
   echo "==> Registering as standby (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
@@ -795,7 +733,7 @@ self_demote() {
   # DNS switch first, then pgproxy + restart
   switch_dns "drain-self"
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
-  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
+  # Watchdog handles DNS + consumer restarts
 
   echo "==> Container will restart and rejoin as standby" >&2
   exit 1

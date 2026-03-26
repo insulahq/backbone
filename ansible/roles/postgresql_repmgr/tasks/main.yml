@@ -58,14 +58,6 @@
     mode: '0644'
   notify: restart postgresql
 
-- name: Create signal directory for PG consumer restarts (writable by postgres user)
-  file:
-    path: "{{ postgresql_install_dir }}/signals"
-    state: directory
-    owner: '999'
-    group: '999'
-    mode: '0755'
-
 - name: Write initial pgproxy target (points to current primary via WireGuard IP)
   copy:
     # Both Docker containers (pgproxy) and host-level services (PowerDNS socat)
@@ -86,25 +78,39 @@
     enabled: false
   ignore_errors: true
 
-# Systemd units for consumer restarts after PG failover.
-# The PG container writes container names to /opt/postgresql/restart-consumers;
-# the systemd path unit detects the write and the service restarts them.
-# This replaces direct Docker socket access from inside the PG container.
-- name: Deploy pg-restart-consumers systemd path unit
-  template:
-    src: pg-restart-consumers.path.j2
-    dest: /etc/systemd/system/pg-restart-consumers.path
-    mode: '0644'
-
-- name: Deploy pg-restart-consumers systemd service
-  template:
-    src: pg-restart-consumers.service.j2
-    dest: /etc/systemd/system/pg-restart-consumers.service
-    mode: '0644'
-
-- name: Enable and start pg-restart-consumers path watcher
+# PG Role Watchdog — polls PG role every 10s and self-heals pgproxy/DNS/consumers.
+# Replaces the unreliable signal-file mechanism that had race conditions.
+- name: Stop and disable old signal-file mechanism (replaced by watchdog)
   systemd:
-    name: pg-restart-consumers.path
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - pg-restart-consumers.path
+    - pg-restart-consumers.service
+  ignore_errors: true
+
+- name: Deploy PG role watchdog script
+  template:
+    src: pg-role-watchdog.sh.j2
+    dest: /usr/local/bin/pg-role-watchdog.sh
+    mode: '0755'
+
+- name: Deploy PG role watchdog timer
+  template:
+    src: pg-role-watchdog.timer.j2
+    dest: /etc/systemd/system/pg-role-watchdog.timer
+    mode: '0644'
+
+- name: Deploy PG role watchdog service
+  template:
+    src: pg-role-watchdog.service.j2
+    dest: /etc/systemd/system/pg-role-watchdog.service
+    mode: '0644'
+
+- name: Enable and start PG role watchdog
+  systemd:
+    name: pg-role-watchdog.timer
     daemon_reload: true
     enabled: true
     state: started

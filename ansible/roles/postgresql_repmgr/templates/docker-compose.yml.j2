@@ -9,12 +9,6 @@ services:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
       - /opt/postgresql/pgproxy-target:/opt/postgresql/pgproxy-target  # PG write proxy target
-      - /opt/postgresql/signals:/opt/postgresql/signals  # Signal file for systemd consumer restarts
-      - /usr/local/bin/platform-dns-switch:/usr/local/bin/platform-dns-switch:ro
-      - /etc/platform-dns-switch.env:/etc/platform-dns-switch.env:ro
-    networks:
-      - default
-      - powerdns_internal  # For post-promote DNS switch (curl → powerdns-nginx:8081)
     # Own hostname → 127.0.0.1: repmgr self-registration connects via localhost
     # (Docker hairpin NAT workaround — containers can't reach the host's WireGuard IP).
     # Peer hostname → real WireGuard IP: WAL streaming replication + cross-wire repmgrd
