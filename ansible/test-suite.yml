@@ -818,10 +818,30 @@
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
-    - name: "Failover | Wait for promotion to fully complete (15s)"
+    - name: "Failover | Wait for post-promote hook to complete (20s)"
       pause:
-        seconds: 15
+        seconds: 20
       run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for pgproxy healthy on surviving node"
+      community.docker.docker_container_info:
+        name: pgproxy
+      register: _fo_pgproxy_health
+      retries: 10
+      delay: 5
+      until: (_fo_pgproxy_health.container.State.Health.Status | default('')) == 'healthy'
+      when: inventory_hostname != _pg_primary
+      tags: [failover, never]
+
+    - name: "Failover | Wait for PowerDNS healthy on surviving node"
+      community.docker.docker_container_info:
+        name: powerdns-auth
+      register: _fo_pdns_health
+      retries: 12
+      delay: 5
+      until: (_fo_pdns_health.container.State.Health.Status | default('')) == 'healthy'
+      when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
     - name: "Failover | Verify PostgreSQL accepts writes on new primary"
@@ -1061,6 +1081,19 @@
     - name: "Failover | Wait for full node recovery (90s)"
       pause:
         seconds: 90
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Wait for PowerDNS healthy on surviving node after recovery"
+      community.docker.docker_container_info:
+        name: powerdns-auth
+      register: _fo_recovery_pdns
+      retries: 12
+      delay: 5
+      until: (_fo_recovery_pdns.container.State.Health.Status | default('')) == 'healthy'
+      delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
