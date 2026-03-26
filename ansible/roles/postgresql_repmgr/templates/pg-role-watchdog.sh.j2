@@ -44,7 +44,7 @@ CURRENT_TARGET=$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || echo "")
 if [ "$PG_ROLE" = "f" ]; then
   # Primary node — DNS should contain our public IP
   EXPECTED_IP="{{ ansible_host }}"
-  CURRENT_DNS=$(dig +short {{ platform_domain }} A @127.0.0.1 2>/dev/null | head -1)
+  CURRENT_DNS=$(dig +short {{ platform_domain }} A @{{ ansible_host }} 2>/dev/null | head -1)
   if [ -z "$CURRENT_DNS" ]; then
     DNS_OK=true  # DNS unreachable (PowerDNS restarting) — don't trigger false failover
   elif [ "$CURRENT_DNS" = "$EXPECTED_IP" ]; then

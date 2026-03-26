@@ -57,7 +57,7 @@
     # DNS Tests
     # ------------------------------------------------------------------
     - name: "DNS | SOA resolution via local PowerDNS"
-      command: "dig @127.0.0.1 {{ platform_domain }} SOA +short +time=5"
+      command: "dig @{{ ansible_host }} {{ platform_domain }} SOA +short +time=5"
       register: _t_dns_soa
       changed_when: false
       ignore_errors: true
@@ -69,7 +69,7 @@
       tags: [dns]
 
     - name: "DNS | A record for platform domain"
-      command: "dig @127.0.0.1 {{ platform_domain }} A +short +time=5"
+      command: "dig @{{ ansible_host }} {{ platform_domain }} A +short +time=5"
       register: _t_dns_a
       changed_when: false
       ignore_errors: true
@@ -81,7 +81,7 @@
       tags: [dns]
 
     - name: "DNS | Resolution of all service domains"
-      command: "dig @127.0.0.1 {{ item }} A +short +time=5"
+      command: "dig @{{ ansible_host }} {{ item }} A +short +time=5"
       loop:
         - "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
         - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
