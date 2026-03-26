@@ -8,8 +8,7 @@ services:
     volumes:
       - postgresql_data:{{ postgresql_data_dir }}
       - /opt/postgresql/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
-      - /opt/postgresql/pgproxy-target:/opt/postgresql/pgproxy-target  # PG write proxy target
-      - /opt/postgresql/restart-consumers:/opt/postgresql/restart-consumers  # Signal file for systemd consumer restarts
+      - /opt/postgresql:/opt/postgresql  # pgproxy-target + restart-consumers signal file
       - /usr/local/bin/platform-dns-switch:/usr/local/bin/platform-dns-switch:ro
       - /etc/platform-dns-switch.env:/etc/platform-dns-switch.env:ro
     networks:
