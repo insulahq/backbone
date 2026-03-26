@@ -226,7 +226,7 @@ if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
   echo "POST-PROMOTE: FATAL — failed to write pgproxy-target" >&2
   exit 1
 fi
-echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
+echo "POST-PROMOTE: pgproxy-target set to postgresql (local Docker DNS)"
 
 # 3. Signal host to restart ALL consumers including powerdns-auth
 # Single restart signal — systemd handles them all at once.
@@ -528,7 +528,7 @@ start_as_primary() {
 
   # DNS switch first (while powerdns-nginx is still running), then update pgproxy + restart
   switch_dns "primary-only"
-  echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
+  echo "postgresql" > /opt/postgresql/pgproxy-target
   restart_consumers "pgproxy gatus netbird-server powerdns-auth"
   echo "==> DNS switched, pgproxy updated, consumers restarting"
 

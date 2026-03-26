@@ -71,7 +71,9 @@
     # Both Docker containers (pgproxy) and host-level services (PowerDNS socat)
     # can reach the WireGuard IP, so we use it for both.
     # On the primary: own WireGuard IP (local PG). On the standby: peer's WireGuard IP.
-    content: "{{ wireguard_ip if postgresql_is_primary else hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+    # Local primary: use Docker DNS 'postgresql' (WireGuard IP unreachable from Docker bridge).
+    # Remote primary (standby node): use peer's WireGuard IP (cross-node via tunnel).
+    content: "{{ 'postgresql' if postgresql_is_primary else hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
     dest: "{{ postgresql_install_dir }}/pgproxy-target"
     owner: '999'
     group: '999'
