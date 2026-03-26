@@ -668,6 +668,46 @@
         _pg_primary: "{{ inventory_hostname if (_fo_pg_is_primary.stdout | default('') | trim) == 't' else groups['dns_servers'] | difference([inventory_hostname]) | first }}"
       tags: [failover, never]
 
+    - name: "Failover | Stabilize — ensure pgproxy targets and DNS are correct"
+      shell: |
+        ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();")
+        LOCAL_WG=$(docker exec postgresql printenv LOCAL_WG_IP)
+        PEER_WG=$(docker exec postgresql printenv PEER_WG_IP)
+        if [ "$ROLE" = "f" ]; then
+          echo "$LOCAL_WG" > /opt/postgresql/pgproxy-target
+        else
+          echo "$PEER_WG" > /opt/postgresql/pgproxy-target
+        fi
+        docker restart pgproxy 2>/dev/null || true
+      changed_when: false
+      tags: [failover, never]
+
+    - name: "Failover | Stabilize — wait for PowerDNS to be healthy"
+      community.docker.docker_container_info:
+        name: powerdns-auth
+      register: _pdns_health
+      retries: 12
+      delay: 5
+      until: _pdns_health.container.State.Health.Status | default('') == 'healthy'
+      tags: [failover, never]
+
+    - name: "Failover | Stabilize — switch DNS to current primary"
+      command: /usr/local/bin/platform-dns-switch primary-only
+      when: (_fo_pg_is_primary.stdout | default('') | trim) == 't'
+      changed_when: true
+      ignore_errors: true
+      retries: 3
+      delay: 3
+      register: _dns_stab
+      until: _dns_stab.rc == 0
+      tags: [failover, never]
+
+    - name: "Failover | Stabilize — wait for DNS propagation (15s)"
+      pause:
+        seconds: 15
+      run_once: true
+      tags: [failover, never]
+
     - name: "Failover | Resolve test nodes (primary = test node, standby = surviving)"
       set_fact:
         _test_node: "{{ _pg_primary }}"
