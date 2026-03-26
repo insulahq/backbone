@@ -826,6 +826,9 @@
       register: _t_fo_pg_write
       ignore_errors: true
       changed_when: false
+      retries: 3
+      delay: 5
+      until: _t_fo_pg_write.rc | default(1) == 0
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
@@ -1101,7 +1104,7 @@
           Host: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       register: _t_fo_recovery_netbird
       ignore_errors: true
-      retries: 6
+      retries: 12
       delay: 10
       until: _t_fo_recovery_netbird is success
       delegate_to: "{{ _test_node }}"
