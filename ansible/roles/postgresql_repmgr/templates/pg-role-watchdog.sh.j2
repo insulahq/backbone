@@ -71,7 +71,7 @@ echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
 sleep 7
 
 # 3. Restart PG-dependent services FIRST (they need fresh connections via new pgproxy target)
-docker restart powerdns-auth gatus netbird-server --time 5 2>&1 || true
+docker restart powerdns-auth powerdns-nginx gatus netbird-server --time 5 2>&1 || true
 
 # 4. Wait for PowerDNS to be healthy (needed for DNS switch API call)
 for _i in $(seq 1 12); do
