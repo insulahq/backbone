@@ -72,7 +72,17 @@ for _i in 1 2 3; do
   sleep 5
 done
 
-# 4. Restart remaining consumers (NOT powerdns-auth — it stays running for DNS)
+# 4. Restart remaining consumers
 docker restart gatus netbird-server --time 5 2>&1 || true
 
 echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE, consumers restarted."
+
+# 5. Also restart any crash-looping containers (clear Docker exponential backoff)
+sleep 5
+for ctr in netbird-server gatus powerdns-auth; do
+  STATUS=$(docker inspect "$ctr" --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "")
+  if [ "$STATUS" = "restarting" ]; then
+    docker restart "$ctr" --time 3 2>&1 || true
+    echo "$(date): Cleared crash-loop backoff for $ctr"
+  fi
+done
