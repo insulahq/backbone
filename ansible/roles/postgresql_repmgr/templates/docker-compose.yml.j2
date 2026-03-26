@@ -88,17 +88,23 @@ services:
       - |
         echo "pgproxy: starting with target-file watch"
         LAST_TARGET=""
+        SOCAT_PID=""
         while true; do
           TARGET=$$(cat /pgproxy-target 2>/dev/null || echo postgresql)
-          if ! echo "$$TARGET" | grep -qE '^[a-zA-Z0-9._-]+$$'; then
-            TARGET=postgresql
-          fi
+          # Strict allowlist — only known targets accepted
+          case "$$TARGET" in
+            postgresql|ns1|ns2) ;;
+            *) echo "pgproxy: INVALID target '$$TARGET', using postgresql"; TARGET=postgresql ;;
+          esac
           if [ "$$TARGET" != "$$LAST_TARGET" ]; then
             echo "pgproxy: target changed to $$TARGET:5432"
-            # Kill any existing socat to pick up new target
-            killall socat 2>/dev/null || true
+            # Kill existing socat and start new one
+            if [ -n "$$SOCAT_PID" ]; then kill $$SOCAT_PID 2>/dev/null || true; fi
             sleep 1
             socat TCP-LISTEN:5432,fork,reuseaddr TCP:$$TARGET:5432 &
+            SOCAT_PID=$$!
+            # Verify port binding
+            for _v in 1 2 3; do socat -T1 /dev/null TCP:localhost:5432,connect-timeout=1 2>/dev/null && break || sleep 1; done
             LAST_TARGET="$$TARGET"
           fi
           sleep 5

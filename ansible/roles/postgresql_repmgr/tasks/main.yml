@@ -90,6 +90,15 @@
     - pg-restart-consumers.service
   ignore_errors: true
 
+- name: Clean up stale signal-file artifacts
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/pg-restart-consumers.path
+    - /etc/systemd/system/pg-restart-consumers.service
+    - "{{ postgresql_install_dir }}/signals"
+
 - name: Deploy PG role watchdog script
   template:
     src: pg-role-watchdog.sh.j2

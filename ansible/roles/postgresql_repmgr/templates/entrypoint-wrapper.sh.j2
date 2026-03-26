@@ -191,7 +191,7 @@ SCRIPT
   # promote_command wrapper: promote then update pgproxy target
   cat > /tmp/promote-and-update.sh <<PROMOTE_SCRIPT
 #!/bin/bash
-exec >> /tmp/promote-and-update.log 2>&1
+exec >> /proc/1/fd/1 2>&1
 echo "\$(date): Promoting..."
 $(which repmgr) standby promote -f ${REPMGR_CONFIG_FILE} --log-to-file
 RESULT=\$?
