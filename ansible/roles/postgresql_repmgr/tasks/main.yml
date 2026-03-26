@@ -58,6 +58,15 @@
     mode: '0644'
   notify: restart postgresql
 
+- name: Create restart-consumers signal file (empty, writable by postgres user)
+  copy:
+    content: ""
+    dest: "{{ postgresql_install_dir }}/restart-consumers"
+    owner: '999'
+    group: '999'
+    mode: '0644'
+    force: false
+
 - name: Write initial pgproxy target (points to current primary via WireGuard IP)
   copy:
     # Both Docker containers (pgproxy) and host-level services (PowerDNS socat)
@@ -76,13 +85,28 @@
     enabled: false
   ignore_errors: true
 
-# The post-promote script runs as the postgres user (via repmgrd) and needs
-# Docker socket access to restart pgproxy/consumers after failover.
-# Docker security prevents chmod inside the container, so we do it on the host.
-- name: Allow Docker socket access for post-promote script
-  file:
-    path: /var/run/docker.sock
-    mode: '0666'
+# Systemd units for consumer restarts after PG failover.
+# The PG container writes container names to /opt/postgresql/restart-consumers;
+# the systemd path unit detects the write and the service restarts them.
+# This replaces direct Docker socket access from inside the PG container.
+- name: Deploy pg-restart-consumers systemd path unit
+  template:
+    src: pg-restart-consumers.path.j2
+    dest: /etc/systemd/system/pg-restart-consumers.path
+    mode: '0644'
+
+- name: Deploy pg-restart-consumers systemd service
+  template:
+    src: pg-restart-consumers.service.j2
+    dest: /etc/systemd/system/pg-restart-consumers.service
+    mode: '0644'
+
+- name: Enable and start pg-restart-consumers path watcher
+  systemd:
+    name: pg-restart-consumers.path
+    daemon_reload: true
+    enabled: true
+    state: started
 
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:

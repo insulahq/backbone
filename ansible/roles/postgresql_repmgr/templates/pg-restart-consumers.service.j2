@@ -1,0 +1,19 @@
+# Restarts Docker containers listed in the signal file.
+# Triggered by pg-restart-consumers.path when PG writes the file after failover.
+[Unit]
+Description=Restart PostgreSQL consumer containers after failover
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\
+  SIGNAL_FILE=/opt/postgresql/restart-consumers; \
+  if [ -f "$SIGNAL_FILE" ]; then \
+    CONTAINERS=$(cat "$SIGNAL_FILE"); \
+    echo "pg-restart-consumers: restarting [$CONTAINERS]"; \
+    for ctr in $CONTAINERS; do \
+      docker restart "$ctr" --time 5 2>/dev/null || true; \
+    done; \
+    rm -f "$SIGNAL_FILE"; \
+    echo "pg-restart-consumers: done"; \
+  fi'

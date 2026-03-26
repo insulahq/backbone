@@ -103,12 +103,21 @@ send_alert() {
 # The script is deployed by the common Ansible role and reads its config from
 # /etc/platform-dns-switch.env. Modes: primary-only (traffic to self), drain-self (traffic to peer).
 switch_dns() {
-  local mode="$1"  # "primary-only", "round-robin", or "drain-self"
-  if command -v nsenter &>/dev/null; then
-    nsenter -t 1 -m -u -i -n -p -- /usr/local/bin/platform-dns-switch "$mode" 2>&1 || true
+  local mode="$1"  # "primary-only" or "drain-self"
+  if [ -x /usr/local/bin/platform-dns-switch ]; then
+    /usr/local/bin/platform-dns-switch "$mode" 2>&1 || true
   else
-    echo "WARNING: nsenter not available — DNS records NOT updated" >&2
+    echo "WARNING: platform-dns-switch not available — DNS records NOT updated" >&2
   fi
+}
+
+# Signal the host to restart consumer containers (via systemd path unit).
+# Replaces direct Docker socket API calls — no socket mount needed.
+restart_consumers() {
+  local containers="${1:-pgproxy gatus netbird-server powerdns-auth}"
+  echo "$containers" > /opt/postgresql/restart-consumers
+  echo "==> Signaled host to restart: $containers"
+  sleep 2  # Wait for systemd path unit to detect and act
 }
 
 # ==========================================================================
@@ -181,8 +190,9 @@ create_post_promote() {
   cat > /tmp/post-promote.sh <<'SCRIPT'
 #!/bin/bash
 # Post-promote hook — runs AFTER successful promotion by repmgrd.
-# Updates pgproxy target, restarts consumers, switches DNS, sends alerts.
-echo "POST-PROMOTE: $(date) — Updating pgproxy, DNS, and restarting consumers..."
+# Updates pgproxy target, signals host to restart consumers, switches DNS.
+# No Docker socket needed — uses signal file for restarts.
+echo "POST-PROMOTE: $(date) — Updating pgproxy, DNS, and signaling consumer restarts..."
 
 # 1. Update pgproxy to point to local PG (we're now the primary)
 if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
@@ -191,57 +201,24 @@ if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
 fi
 echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
 
-# 2. Restart consumers that use pgproxy (NOT powerdns — restart it after DNS switch)
-if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-  for ctr in pgproxy gatus netbird-server; do
-    curl -fsS --unix-socket /var/run/docker.sock -X POST \
-      "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
-      > /dev/null 2>&1 || true
-  done
-  echo "POST-PROMOTE: Consumers restarted (pgproxy, gatus, netbird)"
-fi
+# 2. Signal host to restart consumers (via systemd path unit)
+# Write container names to signal file; systemd detects and restarts them.
+echo "pgproxy gatus netbird-server" > /opt/postgresql/restart-consumers
+echo "POST-PROMOTE: Signaled consumer restart"
+sleep 3  # Wait for systemd to restart consumers
 
 # 3. Switch DNS to this node (peer is down)
-# Must happen BEFORE restarting powerdns-nginx (we need it running for the API call)
-# nsenter doesn't work from repmgrd (no SYS_ADMIN capability).
-# Mount platform-dns-switch into the container and call it directly.
-# The script reads /etc/platform-dns-switch.env (also mounted) and calls
-# the PowerDNS API at 127.0.0.1:8081 — reachable from the container because
-# the nginx proxy binds to 0.0.0.0:8081.
+# DNS switch must happen while powerdns-nginx is still running (before it restarts)
 if [ -x /usr/local/bin/platform-dns-switch ]; then
   /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
   echo "POST-PROMOTE: DNS switched to primary-only"
 else
-  echo "POST-PROMOTE: WARNING — platform-dns-switch not mounted, DNS not updated"
+  echo "POST-PROMOTE: WARNING — platform-dns-switch not available"
 fi
 
-# 4. Send promotion alert
-if command -v curl &>/dev/null; then
-  MSG="PROMOTION: ${NODE_NAME} promoted from standby to primary (peer unreachable)"
-  TS="$(date -Iseconds 2>/dev/null || date)"
-  if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
-    curl -fsS --retry 2 --max-time 5 -X POST \
-      "${GATUS_URL}/api/v1/endpoints/${NODE_NAME}_repmgr/external" \
-      -H "Authorization: Bearer ${GATUS_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -d "{\"success\": false, \"errors\": [\"$MSG\"]}" \
-      > /dev/null 2>&1 || true
-  fi
-  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-    curl -fsS --retry 2 --max-time 10 -X POST \
-      -H "Content-Type: application/json" \
-      -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"critical\", \"message\": \"$MSG\", \"timestamp\": \"$TS\"}" \
-      "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
-  fi
-fi
-
-# 5. Restart powerdns-auth (connects to PG via pgproxy — needs updated target)
-if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-  curl -fsS --unix-socket /var/run/docker.sock -X POST \
-    "http://localhost/v1.41/containers/powerdns-auth/restart?t=5" \
-    > /dev/null 2>&1 || true
-  echo "POST-PROMOTE: PowerDNS restarted"
-fi
+# 4. Signal host to restart powerdns-auth (after DNS switch)
+echo "powerdns-auth" > /opt/postgresql/restart-consumers
+echo "POST-PROMOTE: Signaled powerdns-auth restart"
 
 echo "POST-PROMOTE: $(date) — Complete"
 SCRIPT
@@ -266,9 +243,8 @@ exit \$RESULT
 PROMOTE_SCRIPT
   chmod +x /tmp/promote-and-update.sh
 
-  # NOTE: Docker socket must be chmod 666 on the HOST for the postgres user (repmgrd)
-  # to access it during post-promote. This is done by the Ansible task, not here
-  # (chmod inside container fails due to Docker security restrictions).
+  # Consumer restarts use a signal file (/opt/postgresql/restart-consumers)
+  # monitored by a host-side systemd path unit. No Docker socket needed.
 }
 
 # ==========================================================================
@@ -537,18 +513,11 @@ start_as_primary() {
 
   send_alert "info" "PostgreSQL started as PRIMARY on ${NODE_NAME}"
 
-  # Update pgproxy to route writes to local PG (our hostname → 127.0.0.1 via extra_hosts)
+  # Update pgproxy + restart consumers + switch DNS
   echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
-  if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-    for ctr in pgproxy gatus netbird-server powerdns-auth; do
-      curl -fsS --unix-socket /var/run/docker.sock -X POST \
-        "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
-        > /dev/null 2>&1 || true
-    done
-    # Point DNS to this node (we're the primary — all traffic comes here)
-    switch_dns "primary-only"
-    echo "==> Updated pgproxy target to local, DNS to self, restarted consumers"
-  fi
+  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
+  switch_dns "primary-only"
+  echo "==> Updated pgproxy target to local, DNS to self, signaled consumer restart"
 
   echo "==> Registering as primary (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" primary register --force 2>&1 || {
@@ -703,16 +672,9 @@ start_as_standby() {
 
   # Update pgproxy to route writes to the primary (peer) and restart consumers
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
-  if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-    for ctr in pgproxy gatus netbird-server powerdns-auth; do
-      curl -fsS --unix-socket /var/run/docker.sock -X POST \
-        "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
-        > /dev/null 2>&1 || true
-    done
-    # Point DNS to peer (the PG primary) — this node is standby, shouldn't receive traffic
-    switch_dns "drain-self"
-    echo "==> Updated pgproxy target to ${PEER_NAME}, DNS to peer, restarted consumers"
-  fi
+  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
+  switch_dns "drain-self"
+  echo "==> Updated pgproxy target to ${PEER_NAME}, DNS to peer, signaled consumer restart"
 
   echo "==> Registering as standby (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
@@ -817,17 +779,9 @@ self_demote() {
   # Kill repmgrd
   [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
 
-  # Update pgproxy to point to peer (the real primary) and restart consumers.
-  if [ -S /var/run/docker.sock ] && command -v curl &>/dev/null; then
-    echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
-    for ctr in pgproxy gatus netbird-server powerdns-auth; do
-      curl -fsS --unix-socket /var/run/docker.sock -X POST \
-        "http://localhost/v1.41/containers/${ctr}/restart?t=5" \
-        > /dev/null 2>&1 || true
-    done
-  fi
-
-  # Switch DNS to peer only (we're demoted, peer is the real primary)
+  # Update pgproxy to point to peer (the real primary) and restart consumers
+  echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
+  restart_consumers "pgproxy gatus netbird-server powerdns-auth"
   switch_dns "drain-self"
 
   echo "==> Container will restart and rejoin as standby" >&2
