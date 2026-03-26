@@ -70,13 +70,20 @@ echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
 # 2. Wait for pgproxy to pick up new target (self-updating every 5s)
 sleep 7
 
-# 3. Switch DNS
+# 3. Restart PG-dependent services FIRST (they need fresh connections via new pgproxy target)
+docker restart powerdns-auth gatus netbird-server --time 5 2>&1 || true
+
+# 4. Wait for PowerDNS to be healthy (needed for DNS switch API call)
+for _i in $(seq 1 12); do
+  PDNS_HEALTH=$(docker inspect powerdns-auth --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "")
+  [ "$PDNS_HEALTH" = "healthy" ] && break
+  sleep 5
+done
+
+# 5. Switch DNS (PowerDNS is now healthy and connected to correct PG)
 for _i in 1 2 3; do
   /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
   sleep 5
 done
-
-# 4. Restart all PG-dependent services (their connection pools don't survive pgproxy target changes)
-docker restart powerdns-auth gatus netbird-server --time 5 2>&1 || true
 
 echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE"

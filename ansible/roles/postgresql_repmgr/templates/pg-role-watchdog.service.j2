@@ -4,5 +4,5 @@ After=docker.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=30
+TimeoutStartSec=120
 ExecStart=/usr/local/bin/pg-role-watchdog.sh
