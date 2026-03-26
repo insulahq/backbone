@@ -76,17 +76,7 @@ for _i in 1 2 3; do
   sleep 5
 done
 
-# 4. Restart PowerDNS (gpgsql backend doesn't auto-reconnect after pgproxy target change)
-docker restart powerdns-auth --time 5 2>&1 || true
-
-# 5. Restart crash-looping consumers (clear Docker backoff)
-for ctr in netbird-server gatus; do
-  STATUS=$(docker inspect "$ctr" --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "")
-  UPTIME=$(docker inspect "$ctr" --format "{% raw %}{{.State.StartedAt}}{% endraw %}" 2>/dev/null || echo "")
-  if [ "$STATUS" = "restarting" ]; then
-    docker restart "$ctr" --time 3 2>&1 || true
-    echo "$(date): Cleared crash-loop for $ctr"
-  fi
-done
+# 4. Restart all PG-dependent services (their connection pools don't survive pgproxy target changes)
+docker restart powerdns-auth gatus netbird-server --time 5 2>&1 || true
 
 echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE"
