@@ -62,10 +62,17 @@ echo "$(date): PG role change detected (recovery=$PG_ROLE). Fixing pgproxy: $CUR
 # 1. Update pgproxy target
 echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
 
-# 2. Switch DNS (before restarting containers — nginx is still running)
-/usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 || true
+# 2. Restart pgproxy FIRST (it needs the new target before DNS switch works)
+docker restart pgproxy --time 5 2>&1 || true
+sleep 3  # Wait for pgproxy to be healthy
 
-# 3. Restart all consumers in one command
-docker restart pgproxy gatus netbird-server powerdns-auth --time 5 2>&1 || true
+# 3. Switch DNS (needs working pgproxy → PowerDNS → PG path)
+for _i in 1 2 3; do
+  /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
+  sleep 5
+done
+
+# 4. Restart remaining consumers (NOT powerdns-auth — it stays running for DNS)
+docker restart gatus netbird-server --time 5 2>&1 || true
 
 echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE, consumers restarted."
