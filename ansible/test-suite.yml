@@ -1143,7 +1143,7 @@
           Host: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       register: _t_fo_recovery_netbird
       ignore_errors: true
-      retries: 12
+      retries: 18
       delay: 10
       until: _t_fo_recovery_netbird is success
       delegate_to: "{{ _test_node }}"
