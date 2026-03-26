@@ -105,7 +105,14 @@ send_alert() {
 switch_dns() {
   local mode="$1"  # "primary-only" or "drain-self"
   if [ -x /usr/local/bin/platform-dns-switch ]; then
-    /usr/local/bin/platform-dns-switch "$mode" 2>&1 || true
+    for _retry in 1 2 3; do
+      if /usr/local/bin/platform-dns-switch "$mode" 2>&1; then
+        return 0
+      fi
+      echo "DNS switch attempt $_retry failed, retrying in 2s..." >&2
+      sleep 2
+    done
+    echo "WARNING: DNS switch failed after 3 attempts" >&2
   else
     echo "WARNING: platform-dns-switch not available — DNS records NOT updated" >&2
   fi
@@ -192,33 +199,39 @@ create_post_promote() {
 # Post-promote hook — runs AFTER successful promotion by repmgrd.
 # Updates pgproxy target, signals host to restart consumers, switches DNS.
 # No Docker socket needed — uses signal file for restarts.
-echo "POST-PROMOTE: $(date) — Updating pgproxy, DNS, and signaling consumer restarts..."
+echo "POST-PROMOTE: $(date) — Updating DNS, pgproxy, and signaling consumer restarts..."
 
-# 1. Update pgproxy to point to local PG (we're now the primary)
+# 1. Switch DNS to this node FIRST (before any restarts disrupt the network)
+# powerdns-nginx is still running at this point and can serve the API call.
+if [ -x /usr/local/bin/platform-dns-switch ]; then
+  # Retry DNS switch up to 3 times (nginx may need a moment after PG promotion)
+  DNS_OK=false
+  for _i in 1 2 3; do
+    if /usr/local/bin/platform-dns-switch primary-only 2>&1; then
+      DNS_OK=true
+      break
+    fi
+    echo "POST-PROMOTE: DNS switch attempt $_i failed, retrying in 2s..."
+    sleep 2
+  done
+  if [ "$DNS_OK" = true ]; then
+    echo "POST-PROMOTE: DNS switched to primary-only"
+  else
+    echo "POST-PROMOTE: WARNING — DNS switch failed after 3 attempts"
+  fi
+fi
+
+# 2. Update pgproxy to point to local PG (we're now the primary)
 if ! echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target; then
   echo "POST-PROMOTE: FATAL — failed to write pgproxy-target" >&2
   exit 1
 fi
 echo "POST-PROMOTE: pgproxy-target set to ${LOCAL_WG_IP}"
 
-# 2. Signal host to restart consumers (via systemd path unit)
-# Write container names to signal file; systemd detects and restarts them.
-echo "pgproxy gatus netbird-server" > /opt/postgresql/signals/restart-consumers
-echo "POST-PROMOTE: Signaled consumer restart"
-sleep 3  # Wait for systemd to restart consumers
-
-# 3. Switch DNS to this node (peer is down)
-# DNS switch must happen while powerdns-nginx is still running (before it restarts)
-if [ -x /usr/local/bin/platform-dns-switch ]; then
-  /usr/local/bin/platform-dns-switch primary-only 2>&1 || true
-  echo "POST-PROMOTE: DNS switched to primary-only"
-else
-  echo "POST-PROMOTE: WARNING — platform-dns-switch not available"
-fi
-
-# 4. Signal host to restart powerdns-auth (after DNS switch)
-echo "powerdns-auth" > /opt/postgresql/signals/restart-consumers
-echo "POST-PROMOTE: Signaled powerdns-auth restart"
+# 3. Signal host to restart ALL consumers including powerdns-auth
+# Single restart signal — systemd handles them all at once.
+echo "pgproxy gatus netbird-server powerdns-auth" > /opt/postgresql/signals/restart-consumers
+echo "POST-PROMOTE: Signaled consumer restart (pgproxy, gatus, netbird, powerdns)"
 
 echo "POST-PROMOTE: $(date) — Complete"
 SCRIPT
@@ -513,11 +526,11 @@ start_as_primary() {
 
   send_alert "info" "PostgreSQL started as PRIMARY on ${NODE_NAME}"
 
-  # Update pgproxy + restart consumers + switch DNS
+  # DNS switch first (while powerdns-nginx is still running), then update pgproxy + restart
+  switch_dns "primary-only"
   echo "${LOCAL_WG_IP}" > /opt/postgresql/pgproxy-target
   restart_consumers "pgproxy gatus netbird-server powerdns-auth"
-  switch_dns "primary-only"
-  echo "==> Updated pgproxy target to local, DNS to self, signaled consumer restart"
+  echo "==> DNS switched, pgproxy updated, consumers restarting"
 
   echo "==> Registering as primary (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" primary register --force 2>&1 || {
@@ -670,11 +683,11 @@ start_as_standby() {
 
   send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
-  # Update pgproxy to route writes to the primary (peer) and restart consumers
+  # DNS switch first (while powerdns-nginx is still running), then update pgproxy + restart
+  switch_dns "drain-self"
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
   restart_consumers "pgproxy gatus netbird-server powerdns-auth"
-  switch_dns "drain-self"
-  echo "==> Updated pgproxy target to ${PEER_NAME}, DNS to peer, signaled consumer restart"
+  echo "==> DNS drained, pgproxy updated, consumers restarting"
 
   echo "==> Registering as standby (--force for idempotency)..."
   repmgr -f "$REPMGR_CONFIG_FILE" standby register --force 2>&1 || {
@@ -779,10 +792,10 @@ self_demote() {
   # Kill repmgrd
   [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
 
-  # Update pgproxy to point to peer (the real primary) and restart consumers
+  # DNS switch first, then pgproxy + restart
+  switch_dns "drain-self"
   echo "${PEER_WG_IP}" > /opt/postgresql/pgproxy-target
   restart_consumers "pgproxy gatus netbird-server powerdns-auth"
-  switch_dns "drain-self"
 
   echo "==> Container will restart and rejoin as standby" >&2
   exit 1
