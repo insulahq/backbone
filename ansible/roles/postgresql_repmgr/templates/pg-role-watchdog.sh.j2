@@ -40,8 +40,19 @@ fi
 # Read current target
 CURRENT_TARGET=$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || echo "")
 
-# If target is already correct, nothing to do
-if [ "$CORRECT_TARGET" = "$CURRENT_TARGET" ]; then
+# Check if DNS also points to the right node
+if [ "$PG_ROLE" = "f" ]; then
+  # Primary node — DNS should contain our public IP
+  EXPECTED_IP="{{ ansible_host }}"
+  CURRENT_DNS=$(dig +short {{ platform_domain }} A @127.0.0.1 2>/dev/null | head -1)
+  DNS_OK=false
+  [ "$CURRENT_DNS" = "$EXPECTED_IP" ] && DNS_OK=true
+else
+  DNS_OK=true  # Standby doesn't own DNS
+fi
+
+# If pgproxy target AND DNS are both correct, nothing to do
+if [ "$CORRECT_TARGET" = "$CURRENT_TARGET" ] && [ "$DNS_OK" = true ]; then
   exit 0
 fi
 
