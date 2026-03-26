@@ -17,10 +17,15 @@ services:
     # Docker bridge networking — LUA health checks are disabled (gotcha 130),
     # so host network is no longer needed. PG connection via pgproxy container.
     ports:
-      - "0.0.0.0:53:53/tcp"
-      - "0.0.0.0:53:53/udp"
-      - "[::]:53:53/tcp"
-      - "[::]:53:53/udp"
+      # Bind to public + WireGuard IPs only (NOT 0.0.0.0 — conflicts with NetBird DNS on 100.x)
+      - "{{ ansible_host }}:53:53/tcp"
+      - "{{ ansible_host }}:53:53/udp"
+      - "{{ wireguard_ip }}:53:53/tcp"
+      - "{{ wireguard_ip }}:53:53/udp"
+{% if public_ipv6 is defined %}
+      - "[{{ public_ipv6 }}]:53:53/tcp"
+      - "[{{ public_ipv6 }}]:53:53/udp"
+{% endif %}
     networks:
       - powerdns_internal
       - postgresql_default  # For pgproxy access
