@@ -1,6 +1,6 @@
 # Disaster Recovery Runbook
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-27
 **Audience:** Operators responding to infrastructure failures
 
 ---
@@ -317,6 +317,122 @@ ssh root@<NS2> "systemctl status restic-backup.timer"
 
 # PowerDNS API (via WireGuard IP)
 curl -s -H "X-API-Key: <KEY>" http://<WIREGUARD_IP>:8081/api/v1/servers/localhost/zones | python3 -m json.tool
+```
+
+---
+
+## Scenario 8: Database-Only Restore
+
+**Symptoms:** Data corruption, accidental deletion, or need to rollback to a previous database state.
+
+PostgreSQL is backed up via `pg_dumpall` piped to restic stdin (not as a file on disk).
+The dump is stored as a stdin snapshot tagged `pgdump`.
+
+```bash
+# 1. List available database snapshots
+ssh root@<NODE> "restic snapshots --tag pgdump"
+
+# 2. Extract the dump to stdout
+ssh root@<NODE> "restic dump latest pg_dumpall.sql --tag pgdump > /tmp/pg_dumpall.sql"
+
+# 3. Review the dump (optional — check what's inside)
+head -100 /tmp/pg_dumpall.sql
+
+# 4. Restore into PostgreSQL (WARNING: this overwrites ALL databases)
+ssh root@<PRIMARY_NODE> "docker exec -i postgresql psql -U postgres < /tmp/pg_dumpall.sql"
+
+# 5. Clean up
+rm -f /tmp/pg_dumpall.sql
+```
+
+**For selective restore** (single database):
+```bash
+# Extract and filter for a specific database
+ssh root@<NODE> "restic dump latest pg_dumpall.sql --tag pgdump" | \
+  sed -n '/^\\connect \"netbird\"/,/^\\connect /p' > /tmp/netbird_only.sql
+```
+
+---
+
+## Scenario 9: Using the Restore Script
+
+A restore helper script is deployed to `/etc/restic/restore.sh` on each server.
+
+```bash
+# List available snapshots
+/etc/restic/restore.sh list
+
+# Restore all files to /tmp/restore
+/etc/restic/restore.sh files
+
+# Restore only a specific path
+/etc/restic/restore.sh files --include /opt/traefik
+
+# Restore the database dump
+/etc/restic/restore.sh database
+
+# Restore database and load into running PostgreSQL
+/etc/restic/restore.sh database --load
+```
+
+**From the Ansible control machine** (uses the restore playbook):
+```bash
+cd ansible
+
+# Interactive restore — lists snapshots, restores files + database
+ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE>
+
+# Restore only the database
+ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE> --tags database
+
+# Restore only files
+ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE> --tags files
+```
+
+---
+
+## Offline Secrets Procedure
+
+**CRITICAL:** The `ansible/.generated_secrets/` directory lives ONLY on the Ansible
+control machine. It contains secrets required for recovery that CANNOT be regenerated:
+
+| Secret | Why it's critical |
+|--------|------------------|
+| `restic_password` | Without it, all backups are permanently inaccessible |
+| `zitadel_masterkey` | Immutable after first Zitadel init — cannot be changed |
+| `ssh/{ns1,ns2}` | Per-server SSH keypairs for Ansible access |
+| All other passwords | Database credentials, API keys, etc. |
+
+### Backup procedure (do this after every `setup.sh` run):
+
+```bash
+# Option 1: Encrypted archive to a USB drive or safe location
+cd ansible
+tar czf - .generated_secrets/ | gpg --symmetric --cipher-algo AES256 \
+  -o hosting-platform-secrets-$(date +%Y%m%d).gpg
+# Store the GPG passphrase separately from the archive (e.g., password manager)
+
+# Option 2: Encrypt with Ansible Vault and store in a git-ignored location
+ansible-vault encrypt_string --vault-password-file /path/to/vault-pass \
+  "$(cat .generated_secrets/restic_password)" --name restic_password
+
+# Option 3: Print the restic password for physical storage
+echo "RESTIC PASSWORD: $(cat .generated_secrets/restic_password)"
+# Write it down and store in a fireproof safe
+```
+
+### Recovery without control machine:
+
+If the control machine is lost but you have the restic password:
+```bash
+# 1. On a surviving server, the restic password is at /etc/restic/password
+cat /etc/restic/password
+
+# 2. All other secrets can be recovered from a restic snapshot:
+restic dump latest /etc/restic/password --tag <HOSTNAME>
+
+# 3. Service configs (with embedded passwords) are under /opt:
+restic restore latest --target /tmp/restore --include /opt
 ```
 
 ---

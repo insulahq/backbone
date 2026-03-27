@@ -1,0 +1,120 @@
+#!/bin/bash
+# Restic Restore Helper for {{ inventory_hostname }}
+# Usage:
+#   restore.sh list                    — List available snapshots
+#   restore.sh files [--include PATH]  — Restore file backup to /tmp/restore
+#   restore.sh database                — Extract pg_dumpall to /tmp/pg_dumpall.sql
+#   restore.sh database --load         — Extract and load into running PostgreSQL
+
+set -euo pipefail
+
+# Configuration (matches backup script)
+export RESTIC_REPOSITORY="{{ restic_repository }}"
+export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
+export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
+
+SFTP_ARGS="sftp -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }}"
+RESTIC_OPTS=("-o" "sftp.args=${SFTP_ARGS}")
+
+RESTORE_DIR="/tmp/restore"
+HOSTNAME="{{ inventory_hostname }}"
+
+log() { echo "[$(date -Iseconds)] $*"; }
+error() { echo "[$(date -Iseconds)] ERROR: $*" >&2; }
+
+cmd_list() {
+    log "Listing snapshots for ${HOSTNAME}"
+    echo ""
+    echo "=== File snapshots ==="
+    restic "${RESTIC_OPTS[@]}" snapshots --host "$HOSTNAME" --compact 2>/dev/null || \
+        restic "${RESTIC_OPTS[@]}" snapshots --compact
+    echo ""
+    echo "=== Database snapshots (pg_dumpall) ==="
+    restic "${RESTIC_OPTS[@]}" snapshots --tag pgdump --compact 2>/dev/null || \
+        echo "No database snapshots found"
+}
+
+cmd_files() {
+    local include_args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --include) include_args+=("--include" "$2"); shift 2 ;;
+            --target) RESTORE_DIR="$2"; shift 2 ;;
+            *) error "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    mkdir -p "$RESTORE_DIR"
+    log "Restoring files to ${RESTORE_DIR}"
+
+    if [ ${#include_args[@]} -gt 0 ]; then
+        log "Filtering: ${include_args[*]}"
+        restic "${RESTIC_OPTS[@]}" restore latest --target "$RESTORE_DIR" \
+            --host "$HOSTNAME" "${include_args[@]}"
+    else
+        restic "${RESTIC_OPTS[@]}" restore latest --target "$RESTORE_DIR" \
+            --host "$HOSTNAME"
+    fi
+
+    log "Restore complete. Files at: ${RESTORE_DIR}"
+    echo ""
+    du -sh "$RESTORE_DIR"/* 2>/dev/null || true
+}
+
+cmd_database() {
+    local load=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --load) load=true; shift ;;
+            *) error "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    local dump_file="/tmp/pg_dumpall.sql"
+
+    log "Extracting database dump from latest pgdump snapshot"
+    restic "${RESTIC_OPTS[@]}" dump latest pg_dumpall.sql --tag pgdump > "$dump_file"
+
+    local size
+    size=$(du -sh "$dump_file" | cut -f1)
+    log "Database dump extracted: ${dump_file} (${size})"
+
+    if $load; then
+        if ! docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q '^postgresql$'; then
+            error "PostgreSQL container is not running — cannot load dump"
+            exit 1
+        fi
+
+        local role
+        role=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+        if [ "$role" != "f" ]; then
+            error "This node is not the PostgreSQL primary (role: ${role}). Load on the primary node."
+            exit 1
+        fi
+
+        log "Loading dump into PostgreSQL (this may take a while)..."
+        docker exec -i postgresql psql -U postgres < "$dump_file"
+        log "Database restore complete"
+        rm -f "$dump_file"
+    else
+        log "Dump saved to ${dump_file}"
+        log "To load into PostgreSQL: docker exec -i postgresql psql -U postgres < ${dump_file}"
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    list)     cmd_list ;;
+    files)    shift; cmd_files "$@" ;;
+    database) shift; cmd_database "$@" ;;
+    help|*)
+        echo "Usage: $0 {list|files|database} [options]"
+        echo ""
+        echo "Commands:"
+        echo "  list                     List available snapshots"
+        echo "  files [--include PATH]   Restore files to /tmp/restore"
+        echo "  database                 Extract pg_dumpall to /tmp/pg_dumpall.sql"
+        echo "  database --load          Extract and load into running PostgreSQL"
+        exit 0
+        ;;
+esac

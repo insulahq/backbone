@@ -1,0 +1,117 @@
+---
+# Hosting Platform — Restore Playbook
+#
+# Restores data from restic backup on one or both nodes.
+#
+# Usage:
+#   # Restore files + database on a specific node
+#   ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1
+#
+#   # Restore only the database
+#   ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1 --tags database
+#
+#   # Restore only files
+#   ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1 --tags files
+#
+#   # List snapshots without restoring
+#   ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1 --tags list
+
+- import_playbook: _ssh-keys.yml
+
+- name: "Restore from backup"
+  hosts: dns_servers
+  gather_facts: false
+  vars:
+    restore_dir: /tmp/restore
+  tasks:
+
+    # ------------------------------------------------------------------
+    # List available snapshots
+    # ------------------------------------------------------------------
+    - name: "List available snapshots"
+      command: /etc/restic/restore.sh list
+      register: _snapshot_list
+      changed_when: false
+      tags: [list, never]
+
+    - name: "Show snapshots"
+      debug:
+        msg: "{{ _snapshot_list.stdout }}"
+      when: _snapshot_list is defined
+      tags: [list, never]
+
+    # ------------------------------------------------------------------
+    # Restore files from backup
+    # ------------------------------------------------------------------
+    - name: "Restore files from latest snapshot"
+      command: /etc/restic/restore.sh files --target {{ restore_dir }}
+      register: _file_restore
+      tags: [files]
+
+    - name: "Show file restore result"
+      debug:
+        msg: "{{ _file_restore.stdout_lines | default([]) }}"
+      tags: [files]
+
+    - name: "Copy restored /opt files to live locations"
+      shell: |
+        if [ -d "{{ restore_dir }}/opt" ]; then
+          for svc in traefik powerdns netbird zitadel gatus portainer; do
+            if [ -d "{{ restore_dir }}/opt/$svc" ]; then
+              echo "Restoring /opt/$svc"
+              cp -a "{{ restore_dir }}/opt/$svc/." "/opt/$svc/"
+            fi
+          done
+          echo "File restore complete"
+        else
+          echo "No /opt directory in restore — skipping"
+        fi
+      register: _copy_result
+      tags: [files]
+
+    - name: "Show copy result"
+      debug:
+        msg: "{{ _copy_result.stdout_lines | default([]) }}"
+      tags: [files]
+
+    # ------------------------------------------------------------------
+    # Restore database from backup
+    # ------------------------------------------------------------------
+    - name: "Check if this node is PostgreSQL primary"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT NOT pg_is_in_recovery();"
+      register: _is_primary
+      changed_when: false
+      ignore_errors: true
+      tags: [database]
+
+    - name: "Extract database dump from backup"
+      command: /etc/restic/restore.sh database
+      register: _db_extract
+      tags: [database]
+
+    - name: "Show database extract result"
+      debug:
+        msg: "{{ _db_extract.stdout_lines | default([]) }}"
+      tags: [database]
+
+    - name: "Load database dump into PostgreSQL (primary only)"
+      shell: docker exec -i postgresql psql -U postgres < /tmp/pg_dumpall.sql
+      when: (_is_primary.stdout | default('') | trim) == 't'
+      register: _db_load
+      tags: [database]
+
+    - name: "Show database load result"
+      debug:
+        msg: "Database restore {{ 'completed on primary' if _db_load is changed else 'skipped (not primary — run on the primary node)' }}"
+      tags: [database]
+
+    - name: "Clean up temporary files"
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/pg_dumpall.sql
+        - "{{ restore_dir }}"
+      tags: [files, database]

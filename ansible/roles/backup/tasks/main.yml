@@ -143,6 +143,12 @@
     dest: "{{ restic_config_dir }}/backup.sh"
     mode: '0700'
 
+- name: Deploy restore helper script
+  template:
+    src: restic-restore.sh.j2
+    dest: "{{ restic_config_dir }}/restore.sh"
+    mode: '0700'
+
 - name: Deploy systemd service
   template:
     src: restic-backup.service.j2
