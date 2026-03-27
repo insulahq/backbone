@@ -131,6 +131,11 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
+  - name: pg-writable
+    group: {{ host }}
+    token: "{{ gatus_external_token }}"
+    conditions:
+      - "[CONNECTED] == true"
 {% endfor %}
 
 # ============================================================================

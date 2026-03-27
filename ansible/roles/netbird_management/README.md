@@ -4,11 +4,11 @@ Deploys NetBird Management + Signal + Relay on both ns1 and ns2 with PostgreSQL 
 
 ## Architecture
 
-Both ns1 and ns2 run the full NetBird stack behind Traefik (HTTPS). DNS round-robin on `vpn.<domain>` distributes clients between both nodes.
+Both ns1 and ns2 run the full NetBird stack behind Traefik (HTTPS). Active-passive DNS on `vpn.<domain>` routes clients to the current primary node.
 
 - **Database:** PostgreSQL HA (deployed by `postgresql_repmgr` role), multi-host DSN with `target_session_attrs=read-write`
 - **IdP:** Embedded Dex IdP for local authentication. External IdPs (Zitadel, Google, etc.) can be added manually via the dashboard
-- **Failover:** DNS round-robin (TTL 60s). If one node goes down, clients reconnect to the other within ~60s
+- **Failover:** Active-passive DNS (TTL 30s). pg-role-watchdog switches DNS to surviving node after PostgreSQL failover
 
 ## Dependencies
 

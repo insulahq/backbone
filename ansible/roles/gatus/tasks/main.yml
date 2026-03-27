@@ -37,6 +37,16 @@
   no_log: true
   tags: [gatus]
 
+- name: Deploy Gatus token for host-side scripts (watchdog)
+  copy:
+    content: "{{ gatus_external_token }}"
+    dest: /etc/gatus-token
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  tags: [gatus]
+
 # --- Database creation (on primary only, replicated to standby) ---
 
 - name: Check if Gatus database user exists

@@ -71,13 +71,6 @@
     group: '999'
     mode: '0644'
 
-- name: Stop and disable host-level pgproxy (no longer needed — PowerDNS on Docker bridge)
-  systemd:
-    name: pgproxy-host.service
-    state: stopped
-    enabled: false
-  ignore_errors: true
-
 # PG Role Watchdog — polls PG role every 10s and self-heals pgproxy/DNS/consumers.
 # Replaces the unreliable signal-file mechanism that had race conditions.
 - name: Stop and disable old signal-file mechanism (replaced by watchdog)

@@ -110,7 +110,7 @@
 # --- DNS record creation (optional, via PowerDNS API) ---
 # When dns_health_check_enabled is true, creates LUA records with ifportup()
 # that automatically exclude dead servers from DNS responses.
-# When false, creates static A/AAAA records (traditional round-robin).
+# When false, creates static A/AAAA records (active-passive, primary IP only).
 
 - name: Compute DNS failover address order
   set_fact:

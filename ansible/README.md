@@ -7,7 +7,7 @@ Ansible playbooks and roles for deploying Hosting Platform infrastructure on two
 | Role | Purpose | Servers |
 |------|---------|---------|
 | `common` | OS hardening, nftables, Docker CE, fail2ban | ns1, ns2 |
-| `powerdns` | PowerDNS 4.9 (Native mode, shared PostgreSQL HA backend) | ns1, ns2 |
+| `powerdns` | PowerDNS 5.0 (Native mode, shared PostgreSQL HA backend) | ns1, ns2 |
 | `traefik` | Traefik v3.6 reverse proxy, DNS-01 ACME via local PowerDNS | ns1, ns2 |
 | `postgresql_repmgr` | PostgreSQL 18 + repmgr 5.5 HA | ns1, ns2 |
 | `netbird_management` | NetBird combined server (PostgreSQL backend) | ns1, ns2 |

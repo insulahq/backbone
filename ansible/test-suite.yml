@@ -671,14 +671,12 @@
     - name: "Failover | Stabilize — ensure pgproxy targets and DNS are correct"
       shell: |
         ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();")
-        LOCAL_WG=$(docker exec postgresql printenv LOCAL_WG_IP)
-        PEER_WG=$(docker exec postgresql printenv PEER_WG_IP)
+        PEER_NAME=$(docker exec postgresql printenv PEER_NAME)
         if [ "$ROLE" = "f" ]; then
-          echo "$LOCAL_WG" > /opt/postgresql/pgproxy-target
+          echo "postgresql" > /opt/postgresql/pgproxy-target
         else
-          echo "$PEER_WG" > /opt/postgresql/pgproxy-target
+          echo "$PEER_NAME" > /opt/postgresql/pgproxy-target
         fi
-        docker restart pgproxy 2>/dev/null || true
       changed_when: false
       tags: [failover, never]
 
@@ -715,6 +713,67 @@
         _surviving_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | difference([_pg_primary]) | first }}"
       run_once: true
       tags: [failover, never]
+
+    # ------------------------------------------------------------------
+    # PRE-FLIGHT: Verify cluster health before destructive tests
+    # ------------------------------------------------------------------
+    - name: "Failover | Pre-flight — PostgreSQL container healthy"
+      community.docker.docker_container_info:
+        name: postgresql
+      register: _pf_pg
+      failed_when: _pf_pg.container.State.Health.Status | default('') != 'healthy'
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — pgproxy container healthy"
+      community.docker.docker_container_info:
+        name: pgproxy
+      register: _pf_pgproxy
+      failed_when: _pf_pgproxy.container.State.Health.Status | default('') != 'healthy'
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — PowerDNS container healthy"
+      community.docker.docker_container_info:
+        name: powerdns-auth
+      register: _pf_pdns
+      failed_when: _pf_pdns.container.State.Health.Status | default('') != 'healthy'
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — PG accepts connections"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT 1;"
+      register: _pf_pg_conn
+      changed_when: false
+      failed_when: _pf_pg_conn.rc != 0
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — WAL streaming active on standby"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT status FROM pg_stat_wal_receiver;"
+      register: _pf_wal
+      changed_when: false
+      failed_when: (_pf_wal.stdout | default('') | trim) != 'streaming'
+      when: inventory_hostname != _pg_primary
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — Cluster has 1 primary + 1 standby"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -d repmgr -tAc "SELECT count(*) FROM repmgr.nodes WHERE active = true;"
+      register: _pf_nodes
+      changed_when: false
+      failed_when: (_pf_nodes.stdout | default('') | trim) != '2'
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — pg-role-watchdog timer active"
+      command: systemctl is-active pg-role-watchdog.timer
+      register: _pf_watchdog
+      changed_when: false
+      failed_when: _pf_watchdog.rc != 0
+      tags: [failover, never]
+
   tasks:
 
     # --- DNS failover: stop Traefik, verify other node still serves ---
@@ -1164,9 +1223,83 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Store failover results"
+    # ------------------------------------------------------------------
+    # POST-FLIGHT: Verify cluster recovered fully after destructive tests
+    # ------------------------------------------------------------------
+    - name: "Failover | Post-flight — PostgreSQL container healthy"
+      community.docker.docker_container_info:
+        name: postgresql
+      register: _postf_pg
+      retries: 6
+      delay: 10
+      until: _postf_pg.container.State.Health.Status | default('') == 'healthy'
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Post-flight — PG accepts connections"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT 1;"
+      register: _postf_pg_conn
+      changed_when: false
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Post-flight — pgproxy container healthy"
+      community.docker.docker_container_info:
+        name: pgproxy
+      register: _postf_pgproxy
+      retries: 3
+      delay: 5
+      until: _postf_pgproxy.container.State.Health.Status | default('') == 'healthy'
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Post-flight — PowerDNS container healthy"
+      community.docker.docker_container_info:
+        name: powerdns-auth
+      register: _postf_pdns
+      retries: 3
+      delay: 5
+      until: _postf_pdns.container.State.Health.Status | default('') == 'healthy'
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Post-flight — WAL streaming on standby"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT status FROM pg_stat_wal_receiver;"
+      register: _postf_wal
+      changed_when: false
+      ignore_errors: true
+      when: (_postf_pg_conn.rc | default(1)) == 0
+      tags: [failover, never]
+
+    - name: "Failover | Post-flight — pg-role-watchdog timer active"
+      command: systemctl is-active pg-role-watchdog.timer
+      register: _postf_watchdog
+      changed_when: false
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — post-flight PG healthy"
       set_fact:
-        _failover_test_results: "{{ _failover_results }}"
+        _failover_results: "{{ _failover_results + [{'name': 'Post-flight: PG healthy on ' + inventory_hostname, 'host': 'cluster', 'passed': (_postf_pg.container.State.Health.Status | default('')) == 'healthy' and (_postf_pg_conn.rc | default(1)) == 0}] }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — post-flight pgproxy healthy"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'Post-flight: pgproxy healthy on ' + inventory_hostname, 'host': 'cluster', 'passed': (_postf_pgproxy.container.State.Health.Status | default('')) == 'healthy'}] }}"
+      tags: [failover, never]
+
+    - name: "Failover | Record result — post-flight cluster services"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'Post-flight: PowerDNS + watchdog on ' + inventory_hostname, 'host': 'cluster', 'passed': (_postf_pdns.container.State.Health.Status | default('')) == 'healthy' and (_postf_watchdog.rc | default(1)) == 0}] }}"
+      tags: [failover, never]
+
+    - name: "Store failover results (aggregate from all hosts, deduplicate)"
+      set_fact:
+        _failover_test_results: "{{ groups['dns_servers'] | map('extract', hostvars, '_failover_results') | map('default', []) | list | flatten | unique }}"
       run_once: true
       tags: [failover, never]
 
@@ -1178,6 +1311,15 @@
   gather_facts: false
   any_errors_fatal: false
   tasks:
+
+    - name: "Detect final cluster state"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT CASE WHEN pg_is_in_recovery() THEN 'standby' ELSE 'primary' END;"
+      register: _final_pg_role
+      changed_when: false
+      ignore_errors: true
+      tags: [always]
 
     - name: "Aggregate all test results"
       set_fact:
@@ -1208,6 +1350,10 @@
           {% endfor %}
           ╠══════════════════════════════════════════════════════════════╣
           ║  Total: {{ '%-4s' | format(_total) }} Passed: {{ '%-4s' | format(_passed) }} Failed: {{ '%-4s' | format((_total | int) - (_passed | int)) }}                        ║
+          ╠══════════════════════════════════════════════════════════════╣
+          {% for host in groups['dns_servers'] %}
+          ║  {{ '%-4s' | format(host) }}: {{ '%-53s' | format(hostvars[host]['_final_pg_role']['stdout'] | default('unknown') | trim) }}║
+          {% endfor %}
           ╚══════════════════════════════════════════════════════════════╝
       run_once: true
       tags: [always]

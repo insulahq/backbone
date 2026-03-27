@@ -34,7 +34,7 @@
 #
 # ==========================================================================
 
-set -e
+set -euo pipefail
 
 export REPMGR_CONFIG_FILE="${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}"
 export PGPASSWORD="${REPMGR_PASSWORD}"
@@ -61,9 +61,9 @@ send_alert() {
 
   echo "[${timestamp}] ALERT ${level}: [repmgr] ${message}"
 
-  # Escape message for JSON
+  # Safely encode message for JSON using python3 (available in postgres image)
   local safe_msg
-  safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+  safe_msg=$(printf '%s' "$message" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null || printf '"%s"' "$message")
 
   # Map level to Gatus success/failure
   local gatus_success="true"
@@ -77,21 +77,23 @@ send_alert() {
     local gatus_key="${NODE_NAME}_repmgr"
     if command -v curl &>/dev/null; then
       curl -fsS --retry 2 --max-time 5 -X POST \
-        "${GATUS_URL}/api/v1/endpoints/${gatus_key}/external" \
+        "${GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \
         -H "Authorization: Bearer ${GATUS_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{\"success\": ${gatus_success}, \"errors\": [\"${safe_msg}\"]}" \
         > /dev/null 2>&1 || true
     fi
   fi
 
-  # Fallback: raw webhook
+  # Fallback: raw webhook (JSON body with properly escaped message)
   if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
     if command -v curl &>/dev/null; then
-      curl -fsS --retry 2 --max-time 10 -X POST \
-        -H "Content-Type: application/json" \
-        -d "{\"host\": \"${NODE_NAME}\", \"service\": \"repmgr\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
-        "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+      local json_body
+      json_body=$(python3 -c "import json; print(json.dumps({'host':'${NODE_NAME}','service':'repmgr','level':'${level}','message':$(echo "$safe_msg"),'timestamp':'${timestamp}'}))" 2>/dev/null || true)
+      if [ -n "${json_body:-}" ]; then
+        curl -fsS --retry 2 --max-time 10 -X POST \
+          -H "Content-Type: application/json" \
+          -d "$json_body" \
+          "$ALERT_WEBHOOK_URL" > /dev/null 2>&1 || true
+      fi
     fi
   fi
 }
@@ -140,6 +142,21 @@ cleanup_stale_files() {
       rm -f "$f"
     fi
   done
+}
+
+# ==========================================================================
+# Phase 1b: Create .pgpass for password-free PG connections
+# ==========================================================================
+# Keeps passwords out of process arguments and postgresql.auto.conf.
+create_pgpass() {
+  local pgpass="/var/lib/postgresql/.pgpass"
+  cat > "$pgpass" <<PGPASS
+# hostname:port:database:username:password
+*:5432:*:${REPMGR_USER}:${REPMGR_PASSWORD}
+*:5432:*:${POSTGRES_USER}:${POSTGRES_PASSWORD}
+PGPASS
+  chmod 600 "$pgpass"
+  export PGPASSFILE="$pgpass"
 }
 
 # ==========================================================================
@@ -216,7 +233,7 @@ node_name=${NODE_NAME}
 # conninfo uses NODE_NAME (hostname). Docker extra_hosts maps:
 #   self → 127.0.0.1 (local connect for self-registration)
 #   peer → WireGuard IP (cross-node failover detection)
-conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} password=${REPMGR_PASSWORD} connect_timeout=5'
+conninfo='host=${NODE_NAME} dbname=${REPMGR_DB} user=${REPMGR_USER} connect_timeout=5'
 data_directory='${PGDATA}'
 
 # Automatic failover with promotion validation
@@ -501,9 +518,13 @@ start_as_standby() {
   until pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; do
     waited=$((waited + 5))
     if [ "$waited" -ge "$max_wait" ]; then
-      echo "==> FATAL: Primary ($PEER_NAME) did not become ready after ${max_wait}s" >&2
-      send_alert "critical" "Standby ${NODE_NAME} timed out waiting for primary ${PEER_NAME} after ${max_wait}s"
-      exit 1
+      echo "==> Primary ($PEER_NAME) did not become ready after ${max_wait}s" >&2
+      echo "==> SELF-PROMOTING: standby taking over as primary (peer permanently gone)" >&2
+      send_alert "warning" "Standby ${NODE_NAME} self-promoting after ${max_wait}s — primary ${PEER_NAME} unreachable"
+      # Remove standby.signal so PG starts as primary
+      rm -f "$PGDATA/standby.signal"
+      start_as_primary
+      return
     fi
     echo "==> Primary ($PEER_NAME) unavailable — retrying in 5s... (${waited}/${max_wait}s)"
     sleep 5
@@ -528,7 +549,7 @@ start_as_standby() {
     pg_ctl -D "$PGDATA" -m fast stop 2>/dev/null || true
 
     if pg_rewind --target-pgdata="$PGDATA" \
-         --source-server="host=$PEER_NAME user=$REPMGR_USER dbname=$REPMGR_DB password=$REPMGR_PASSWORD" \
+         --source-server="host=$PEER_NAME user=$REPMGR_USER dbname=$REPMGR_DB" \
          2>&1; then
       echo "==> pg_rewind succeeded"
     else
@@ -541,7 +562,7 @@ start_as_standby() {
     # Configure as standby
     touch "$PGDATA/standby.signal"
     sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
       >> "$PGDATA/postgresql.auto.conf"
     echo "==> Failback preparation complete"
 
@@ -549,18 +570,61 @@ start_as_standby() {
     # --- Already a standby: update primary_conninfo ---
     # The primary hostname might have changed after a double-failover
     sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
       >> "$PGDATA/postgresql.auto.conf"
   fi
+
+  RECLONED=false
 
   echo "==> Starting PostgreSQL as STANDBY..."
   postgres -D "$PGDATA" &
   PG_PID=$!
-  until pg_isready -q; do sleep 1; done
 
-  # Verify WAL streaming is working. If WAL segments were removed on the primary
-  # (max_slot_wal_keep_size exceeded), the standby will fail to stream indefinitely.
+  # Wait for PG to accept connections with startup timeout.
+  # If PG gets stuck in startup replay (WAL gap — segments removed on primary),
+  # it never reaches "accepting connections". Detect and re-clone.
+  STARTUP_WAIT=0
+  STARTUP_MAX=90
+  while ! pg_isready -q 2>/dev/null; do
+    sleep 1
+    STARTUP_WAIT=$((STARTUP_WAIT + 1))
+    if [ "$STARTUP_WAIT" -ge "$STARTUP_MAX" ]; then
+      # Check if PG log shows WAL removal error
+      WAL_REMOVED=$(pg_ctl -D "$PGDATA" -l /dev/null status 2>&1 || true)
+      PG_STDERR=$(cat "$PGDATA/log/postgresql*.log" 2>/dev/null | tail -50 || true)
+      if echo "$PG_STDERR" | grep -q "has already been removed" 2>/dev/null || \
+         docker logs postgresql 2>&1 | tail -20 | grep -q "has already been removed" 2>/dev/null; then
+        echo "==> STARTUP TIMEOUT: WAL segment removed on primary — performing full re-clone..."
+        send_alert "warning" "WAL gap on ${NODE_NAME}: standby stuck in startup, performing full re-clone"
+        kill "$PG_PID" 2>/dev/null || true
+        wait "$PG_PID" 2>/dev/null || true
+        pg_ctl -D "$PGDATA" -m immediate stop 2>/dev/null || true
+        rm -rf "${PGDATA:?}"/*
+        repmgr -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
+               -f "$REPMGR_CONFIG_FILE" standby clone
+        sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
+        echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
+          >> "$PGDATA/postgresql.auto.conf"
+        echo "==> Re-clone complete, restarting..."
+        RECLONED=true
+        postgres -D "$PGDATA" &
+        PG_PID=$!
+        until pg_isready -q; do sleep 1; done
+        break
+      else
+        echo "==> STARTUP TIMEOUT: PG not ready after ${STARTUP_MAX}s (no WAL gap detected — continuing to wait)"
+        # Don't re-clone if it's just slow startup, keep waiting
+      fi
+    fi
+  done
+
+  # Verify WAL streaming is working (skip if we just re-cloned — fresh clone is clean).
+  # If WAL segments were removed on the primary (max_slot_wal_keep_size exceeded),
+  # the standby will fail to stream indefinitely.
   # Poll with timeout — transient states (startup, catchup) are healthy and expected.
+  if [ "$RECLONED" = true ]; then
+    echo "==> Skipping WAL verification (fresh re-clone)"
+  else
   echo "==> Verifying WAL streaming health (polling up to 60s)..."
   WAL_STATUS=""
   WAL_OK=false
@@ -611,7 +675,7 @@ start_as_standby() {
              -f "$REPMGR_CONFIG_FILE" standby clone
       # Restore primary_conninfo (may be stale after re-clone)
       sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-      echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER password=$REPMGR_PASSWORD'" \
+      echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
         >> "$PGDATA/postgresql.auto.conf"
       echo "==> Re-clone complete, restarting..."
       postgres -D "$PGDATA" &
@@ -621,6 +685,7 @@ start_as_standby() {
       echo "==> WAL receiver not streaming (status: '${WAL_STATUS}') but no gap detected — continuing"
     fi
   fi
+  fi  # end RECLONED guard
 
   send_alert "info" "PostgreSQL started as STANDBY on ${NODE_NAME} (primary: ${PEER_NAME})"
 
@@ -730,10 +795,8 @@ self_demote() {
   # Kill repmgrd
   [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
 
-  # DNS switch first, then pgproxy + restart
-  switch_dns "drain-self"
+  # Update pgproxy target — watchdog handles DNS + consumer restarts
   echo "${PEER_NAME}" > /opt/postgresql/pgproxy-target
-  # Watchdog handles DNS + consumer restarts
 
   echo "==> Container will restart and rejoin as standby" >&2
   exit 1
@@ -748,6 +811,7 @@ echo "  Initial role: ${REPMGR_INITIAL_ROLE} | Peer: ${PEER_NAME}"
 echo "============================================================"
 
 cleanup_stale_files
+create_pgpass
 create_promote_check
 create_post_promote
 generate_repmgr_config

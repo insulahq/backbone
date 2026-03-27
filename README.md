@@ -9,7 +9,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with:
 | Component | Description |
 |-----------|-------------|
 | **WireGuard** | Infrastructure backbone tunnel (zero-dependency private network) |
-| **PowerDNS 4.9** | Both nodes Native (read-write), shared PostgreSQL HA backend |
+| **PowerDNS 5.0** | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | **Traefik 3.6** | Reverse proxy with automatic TLS via DNS-01 ACME |
 | **PostgreSQL 18** | Streaming replication with repmgr 5.5 and auto-failover |
 | **NetBird** | WireGuard VPN mesh with management, signal, and relay on both nodes |
@@ -96,7 +96,7 @@ ansible/
     ├── wireguard/           # WireGuard infrastructure tunnel (zero-dep backbone)
     ├── traefik/             # Traefik v3.6, DNS-01 ACME via local PowerDNS
     ├── postgresql_repmgr/   # PostgreSQL 18 + repmgr 5.5 HA
-    ├── powerdns/            # PowerDNS 4.9 (both nodes, shared PostgreSQL HA backend)
+    ├── powerdns/            # PowerDNS 5.0 (both nodes, shared PostgreSQL HA backend)
     ├── zitadel/             # Zitadel IAM (OIDC/OAuth2, multi-tenant)
     ├── netbird_management/  # NetBird combined server (Zitadel auth)
     ├── netbird_peer/        # NetBird peer enrollment

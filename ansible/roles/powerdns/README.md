@@ -27,7 +27,7 @@ ns1                                ns2
 
 | Container | Image | Purpose |
 |-----------|-------|---------|
-| `powerdns-auth` | `powerdns/pdns-auth-49` | Authoritative DNS server |
+| `powerdns-auth` | `powerdns/pdns-auth-50` | Authoritative DNS server |
 | `powerdns-nginx` | `nginx:alpine` | API proxy, binds to WireGuard IP only |
 | `powerdns-admin` | `powerdnsadmin/pda-legacy:v0.4.1` | Web UI (ns1 only) |
 

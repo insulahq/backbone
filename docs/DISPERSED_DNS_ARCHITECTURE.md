@@ -35,7 +35,7 @@ Both nodes can read and write zones — there is no primary/secondary DNS distin
 ```
 ns1 (Location A)
 ├── Docker Compose at /opt/powerdns/
-│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
+│   ├── powerdns/pdns-auth-50  (Port 53 public, API :8081 → WireGuard IP only)
 │   ├── nginx (reverse proxy for API)
 │   └── powerdns-admin (Web UI, ns1 only)
 │
@@ -47,7 +47,7 @@ ns1 (Location A)
 
 ns2 (Location B)
 ├── Docker Compose at /opt/powerdns/
-│   ├── powerdns/pdns-auth-49  (Port 53 public, API :8081 → WireGuard IP only)
+│   ├── powerdns/pdns-auth-50  (Port 53 public, API :8081 → WireGuard IP only)
 │   └── nginx (reverse proxy for API)
 │
 ├── PowerDNS NATIVE (read-write)

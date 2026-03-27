@@ -55,6 +55,11 @@ services:
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []
+    deploy:
+      resources:
+        limits:
+          memory: {{ postgresql_memory_limit | default('2g') }}
+          cpus: "{{ postgresql_cpu_limit | default('2.0') }}"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -109,6 +114,11 @@ services:
           fi
           sleep 5
         done
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
     healthcheck:
       test: ["CMD-SHELL", "socat -T1 /dev/null TCP:localhost:5432,connect-timeout=3 2>/dev/null"]
       interval: 10s

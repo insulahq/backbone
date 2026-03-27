@@ -225,7 +225,7 @@
 # --- Platform base domain DNS records ---
 # Active-passive failover: dns_failover_primary (default ns1) is preferred.
 # Uses ifportup(443) with priority groups — checks if Traefik port is open.
-# When dns_health_check_enabled is false, falls back to static round-robin.
+# When dns_health_check_enabled is false, falls back to static active-passive (primary IP only).
 
 - name: Compute DNS failover address order for base domain
   set_fact:

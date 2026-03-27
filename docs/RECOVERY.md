@@ -38,7 +38,7 @@ Before any recovery, ensure you have:
 **Impact:**
 - DNS: Reduced redundancy but still serving (other node answers)
 - PostgreSQL: repmgrd will promote standby to primary within ~60s
-- NetBird: Dashboard available via round-robin (may need retry)
+- NetBird: Dashboard available via active-passive DNS (watchdog switches to surviving node)
 - Backups: Unaffected on surviving node
 
 **Action:**
