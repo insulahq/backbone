@@ -28,6 +28,10 @@ Database:
       Password: "{{ zitadel_db_password }}"
       SSL:
         Mode: disable
+    # ACCEPTED RISK: Zitadel migrations require SUPERUSER for CREATE EXTENSION.
+    # A least-privilege admin user is not feasible without patching Zitadel's
+    # migration engine. Mitigations: config file on host (not shared volume),
+    # no Docker socket access, network limited to postgresql_default bridge.
     Admin:
       Username: postgres
       Password: "{{ postgresql_superuser_password }}"
