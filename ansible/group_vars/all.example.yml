@@ -152,24 +152,17 @@ backup_sftp_path: /backups
 # restic_password: "<GENERATE: openssl rand -base64 22>"
 
 # Backup paths per server
+# /opt covers all service configs + data (Traefik TLS certs, PowerDNS, NetBird,
+# Zitadel, Gatus, Portainer). PG data is in a Docker volume — backed up via
+# pg_dumpall piped to restic stdin, not file paths.
 ns1_backup_paths:
-  - /opt/postgresql/backups  # pg_dumpall output (all database content)
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /opt/gatus
-  - /opt/portainer
-  - /etc/restic
-  - /root/.ssh
-  - /etc/wireguard
+  - /opt                    # All service configs + bind-mount data
+  - /etc/restic             # Backup config (repo password)
+  - /root/.ssh              # SSH keys
+  - /etc/wireguard          # WireGuard private keys + config
 
 ns2_backup_paths:
-  - /opt/postgresql/backups  # pg_dumpall output (all database content)
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /opt/gatus
-  - /opt/portainer
+  - /opt
   - /etc/restic
   - /root/.ssh
   - /etc/wireguard

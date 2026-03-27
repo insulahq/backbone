@@ -59,11 +59,10 @@ restic_notify_email: ""
 restic_notify_webhook_url: "{{ alert_webhook_url | default('') }}"
 
 # PostgreSQL dump before backup (captures all database content)
-# Runs pg_dumpall inside the PostgreSQL container, writing to a host-mounted path
-# that Restic then backs up. Provides point-in-time recovery independent of
-# streaming replication (protects against corruption that replicates to standby).
+# Pipes pg_dumpall directly to restic stdin (no plaintext staging on disk).
+# Provides point-in-time recovery independent of streaming replication
+# (protects against corruption that replicates to standby).
 restic_pgdump_enabled: true
-restic_pgdump_dir: /opt/postgresql/backups
 
 # Backup pre/post hooks (optional commands to run before/after backup)
 restic_pre_backup_hook: ""

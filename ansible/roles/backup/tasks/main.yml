@@ -137,14 +137,6 @@
   retries: 3
   delay: 5
 
-- name: Create PostgreSQL dump directory
-  file:
-    path: "{{ restic_pgdump_dir }}"
-    state: directory
-    mode: '0700'
-  when: restic_pgdump_enabled
-  tags: [backup]
-
 - name: Deploy backup script
   template:
     src: restic-backup.sh.j2
