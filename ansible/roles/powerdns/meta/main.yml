@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   role_name: powerdns
-  description: PowerDNS 4.9 Native mode with shared PostgreSQL HA backend
+  description: PowerDNS 5.0 Native mode with shared PostgreSQL HA backend
   min_ansible_version: "2.15"
   platforms:
     - name: Debian

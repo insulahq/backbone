@@ -41,9 +41,7 @@ services:
       # Used for failover detection, pg_rewind, split-brain watchdog.
       PEER_NAME: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 
-      # Alerting — Gatus external endpoint + fallback webhook
-      GATUS_URL: "http://gatus:{{ gatus_local_port | default('8080') }}"
-      GATUS_TOKEN: "{{ gatus_external_token | default('') }}"
+      # Alerting — fallback webhook (Gatus pushes handled by host-side watchdog)
       ALERT_WEBHOOK_URL: "{{ alert_webhook_url | default('') }}"
 
       # WireGuard IPs for pgproxy target resolution (entrypoint-wrapper uses these)

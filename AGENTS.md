@@ -29,7 +29,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 |-----------|---------|-------------|
 | OS | Debian 13 | Hardened with nftables + fail2ban |
 | WireGuard | kernel | Infrastructure backbone tunnel, zero-dependency private network |
-| PowerDNS | 4.9 | Both nodes Native (read-write), shared PostgreSQL HA backend |
+| PowerDNS | 5.0 | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
 | NetBird | 0.67.0 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS |
@@ -145,7 +145,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 29 | `pdns_control ping` is invalid in PowerDNS 4.9 | Use `pdns_control uptime > /dev/null 2>&1` for health checks |
+| 29 | `pdns_control ping` is invalid in PowerDNS 5.0 | Use `pdns_control uptime > /dev/null 2>&1` for health checks |
 | 30 | `pdnsutil add-record` does NOT auto-increment SOA serial | Always run `pdnsutil increase-serial` after |
 | 33 | `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0 | Manually increment serial after zone creation |
 | 45 | PowerDNS `.secrets` file and API key in debug output | pdns.conf mode 0640 (group: pdns UID 953); no API key in debug msgs |
@@ -342,8 +342,8 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 130 | LUA `ifportup()`/`ifurlup()` fails inside Docker — hairpin NAT prevents container from reaching host's own forwarded ports | Use static A/AAAA round-robin records instead; `dns_health_check_enabled` defaults to `false` |
-| 131 | Static round-robin returns both IPs during single-node deploy — half of requests fail | Accepted tradeoff: both IPs always in DNS, clients retry; Phase 2 bootstrap has brief window where ns2 is unreachable |
+| 130 | LUA `ifportup()`/`ifurlup()` fails inside Docker — hairpin NAT prevents container from reaching host's own forwarded ports | Use static active-passive DNS (primary IP only); `dns_health_check_enabled` defaults to `false` |
+| 131 | Active-passive DNS means single IP during normal operation — failover switches to surviving node | pg-role-watchdog detects role change and calls platform-dns-switch within 10s |
 
 ### Zitadel
 

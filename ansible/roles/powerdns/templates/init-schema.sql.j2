@@ -2,7 +2,7 @@
 -- Run against the PostgreSQL HA cluster (not a standalone container).
 -- This schema is replicated to the standby via streaming replication.
 
--- PowerDNS 4.9 PostgreSQL Schema (Official)
+-- PowerDNS 5.0 PostgreSQL Schema (Official)
 CREATE TABLE IF NOT EXISTS domains (
   id                    SERIAL PRIMARY KEY,
   name                  VARCHAR(255) NOT NULL,

@@ -35,29 +35,28 @@ platform_alert() {
         gatus_success="false"
     fi
 
-    # Escape message for JSON
-    local safe_msg
-    safe_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
-
-    # Push to local Gatus external endpoint (primary alert path)
-    # Key format: {hostname}_{service} (matches Gatus config external-endpoints)
+    # Push to local Gatus external endpoint (query-param API, no JSON body needed)
     if [ -n "$PLATFORM_GATUS_TOKEN" ]; then
         local gatus_key="${PLATFORM_HOSTNAME}_${service}"
         curl -fsS --retry 2 --max-time 5 -X POST \
-            "${PLATFORM_GATUS_URL}/api/v1/endpoints/${gatus_key}/external" \
+            "${PLATFORM_GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \
             -H "Authorization: Bearer ${PLATFORM_GATUS_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{\"success\": ${gatus_success}, \"errors\": [\"${safe_msg}\"]}" \
             > /dev/null 2>&1 || \
             echo "[${timestamp}] WARNING: Failed to push to Gatus (endpoint: ${gatus_key})"
     fi
 
-    # Fallback: send to raw webhook if configured (for non-Gatus setups)
+    # Fallback: send to raw webhook if configured (JSON via python3 — safe escaping)
     if [ -n "$PLATFORM_WEBHOOK_URL" ]; then
-        curl -fsS --retry 3 --max-time 10 -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"host\": \"${PLATFORM_HOSTNAME}\", \"service\": \"${service}\", \"level\": \"${level}\", \"message\": \"${safe_msg}\", \"timestamp\": \"${timestamp}\"}" \
-            "$PLATFORM_WEBHOOK_URL" > /dev/null 2>&1 || \
-            echo "[${timestamp}] WARNING: Failed to send webhook alert"
+        local json_body
+        json_body=$(_WH="${PLATFORM_HOSTNAME}" _WS="${service}" _WL="${level}" _WT="${timestamp}" \
+            python3 -c "import sys,json,os; print(json.dumps({'host':os.environ['_WH'],'service':os.environ['_WS'],'level':os.environ['_WL'],'message':sys.stdin.read().strip(),'timestamp':os.environ['_WT']}))" \
+            <<< "$message" 2>/dev/null || true)
+        if [ -n "${json_body:-}" ]; then
+            curl -fsS --retry 3 --max-time 10 -X POST \
+                -H "Content-Type: application/json" \
+                -d "$json_body" \
+                "$PLATFORM_WEBHOOK_URL" > /dev/null 2>&1 || \
+                echo "[${timestamp}] WARNING: Failed to send webhook alert"
+        fi
     fi
 }

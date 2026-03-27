@@ -1,6 +1,6 @@
 # PowerDNS Role
 
-Deploys PowerDNS 4.9 authoritative server on both ns1 and ns2 with a shared PostgreSQL HA backend. Zone data replicates via PostgreSQL streaming replication (repmgr), not AXFR/NOTIFY.
+Deploys PowerDNS 5.0 authoritative server on both ns1 and ns2 with a shared PostgreSQL HA backend. Zone data replicates via PostgreSQL streaming replication (repmgr), not AXFR/NOTIFY.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Both nodes run PowerDNS in **Native mode** (read-write). There is no DNS primary
 ```
 ns1                                ns2
 ┌──────────────────┐               ┌──────────────────┐
-│  PowerDNS 4.9    │               │  PowerDNS 4.9    │
+│  PowerDNS 5.0    │               │  PowerDNS 5.0    │
 │  (Native, r/w)   │               │  (Native, r/w)   │
 │       │          │               │       │          │
 │  ┌────▼────┐     │               │  ┌────▼────┐     │
@@ -57,7 +57,7 @@ Set in `group_vars/all.yml` or vault:
 
 1. **Generates secrets** -- API key, DB passwords, admin secret key (persisted in `.generated_secrets/`)
 2. **Creates databases** -- `powerdns` and `pdnsadmin` databases/users on the PG primary
-3. **Initializes schema** -- PowerDNS 4.9 official PostgreSQL schema (idempotent, `IF NOT EXISTS`)
+3. **Initializes schema** -- PowerDNS 5.0 official PostgreSQL schema (idempotent, `IF NOT EXISTS`)
 4. **Deploys stack** -- `pdns.conf`, `docker-compose.yml`, `nginx.conf` templates
 5. **Starts services** -- PowerDNS + nginx proxy (+ PowerDNS-Admin on ns1)
 6. **Creates platform zone** -- `{{ platform_domain }}` as Native zone with SOA serial increment
@@ -71,7 +71,7 @@ Set in `group_vars/all.yml` or vault:
 
 ## Gotchas
 
-- `pdns_control ping` is invalid in PowerDNS 4.9; use `pdns_control uptime` for health checks (gotcha 29)
+- `pdns_control ping` is invalid in PowerDNS 5.0; use `pdns_control uptime` for health checks (gotcha 29)
 - `pdnsutil add-record` does NOT auto-increment SOA serial; always run `pdnsutil increase-serial` after (gotcha 30)
 - `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0; manually increment after zone creation (gotcha 33)
 - PowerDNS webserver restricted to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` (gotcha 46)
