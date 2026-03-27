@@ -17,13 +17,10 @@ services:
       - "0.0.0.0:9443:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
+      - {{ portainer_install_dir }}/data:/data
     # No Docker healthcheck — image has no wget/curl (gotcha 112)
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "2"
-
-volumes:
-  portainer_data:

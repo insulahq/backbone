@@ -64,7 +64,7 @@ services:
       PDNS_API_URL: "http://pdns:{{ powerdns_webserver_internal_port | default(8091) }}"
       PDNS_VERSION: "{{ powerdns_version }}"
     volumes:
-      - pdns_admin_data:/data
+      - {{ powerdns_install_dir }}/admin-data:/data
     networks:
       - powerdns_internal
       - postgresql_default  # For PowerDNS-Admin database
@@ -114,7 +114,3 @@ networks:
   postgresql_default:
     external: true
 
-{% if powerdns_admin_enabled | bool %}
-volumes:
-  pdns_admin_data:
-{% endif %}

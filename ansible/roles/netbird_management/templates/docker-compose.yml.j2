@@ -58,7 +58,7 @@ services:
       - '0.0.0.0:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
       - '[::]:{{ netbird_stun_port }}:{{ netbird_stun_port }}/udp'
     volumes:
-      - netbird_data:/var/lib/netbird
+      - {{ netbird_install_dir }}/data:/var/lib/netbird
       - ./config.yaml:/etc/netbird/config.yaml
     command: ["--config", "/etc/netbird/config.yaml"]
     labels:
@@ -91,9 +91,6 @@ services:
       options:
         max-size: "200m"
         max-file: "2"
-
-volumes:
-  netbird_data:
 
 networks:
   netbird:
