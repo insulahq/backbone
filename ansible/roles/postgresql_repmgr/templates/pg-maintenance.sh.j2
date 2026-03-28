@@ -44,7 +44,7 @@ for DB in $DATABASES; do
 
     # Reindex system catalogs (prevents index bloat on heavily-written databases like Zitadel)
     log "Running REINDEX SYSTEM on database: $DB"
-    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM $DB" 2>&1; then
+    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM" 2>&1; then
         platform_alert "warning" "postgresql" "REINDEX SYSTEM failed on database $DB"
         ERRORS=$((ERRORS + 1))
     fi

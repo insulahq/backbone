@@ -72,7 +72,10 @@ cmd_database() {
         esac
     done
 
-    local dump_file="/tmp/pg_dumpall.sql"
+    local dump_dir
+    dump_dir=$(mktemp -d /root/pg-restore-XXXXXX)
+    chmod 700 "$dump_dir"
+    local dump_file="${dump_dir}/pg_dumpall.sql"
 
     log "Extracting database dump from latest pgdump snapshot"
     restic "${RESTIC_OPTS[@]}" dump latest pg_dumpall.sql --tag pgdump > "$dump_file"
@@ -97,7 +100,7 @@ cmd_database() {
         log "Loading dump into PostgreSQL (this may take a while)..."
         docker exec -i postgresql psql -U postgres < "$dump_file"
         log "Database restore complete"
-        rm -f "$dump_file"
+        rm -rf "$dump_dir"
     else
         log "Dump saved to ${dump_file}"
         log "To load into PostgreSQL: docker exec -i postgresql psql -U postgres < ${dump_file}"

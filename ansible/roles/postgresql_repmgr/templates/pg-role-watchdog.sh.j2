@@ -95,7 +95,9 @@ echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
 sleep 7
 
 # 3. Restart PG-dependent services FIRST (they need fresh connections via new pgproxy target)
-docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --timeout 5 2>&1 || true
+if ! docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --timeout 5 2>&1; then
+  echo "$(date): WARNING — one or more service restarts failed after PG role change"
+fi
 
 # 4. Wait for PowerDNS to be healthy (needed for DNS switch API call)
 for _i in $(seq 1 12); do

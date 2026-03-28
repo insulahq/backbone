@@ -86,32 +86,25 @@
       ignore_errors: true
       tags: [database]
 
-    - name: "Extract database dump from backup"
+    - name: "Extract and load database dump (primary only)"
+      command: /etc/restic/restore.sh database --load
+      register: _db_restore
+      when: (_is_primary.stdout | default('') | trim) == 't'
+      tags: [database]
+
+    - name: "Extract database dump only (standby — not loading)"
       command: /etc/restic/restore.sh database
       register: _db_extract
+      when: (_is_primary.stdout | default('') | trim) != 't'
       tags: [database]
 
-    - name: "Show database extract result"
+    - name: "Show database restore result"
       debug:
-        msg: "{{ _db_extract.stdout_lines | default([]) }}"
-      tags: [database]
-
-    - name: "Load database dump into PostgreSQL (primary only)"
-      shell: docker exec -i postgresql psql -U postgres < /tmp/pg_dumpall.sql
-      when: (_is_primary.stdout | default('') | trim) == 't'
-      register: _db_load
-      tags: [database]
-
-    - name: "Show database load result"
-      debug:
-        msg: "Database restore {{ 'completed on primary' if _db_load is changed else 'skipped (not primary — run on the primary node)' }}"
+        msg: "{{ (_db_restore.stdout_lines | default(_db_extract.stdout_lines | default([]))) }}"
       tags: [database]
 
     - name: "Clean up temporary files"
       file:
-        path: "{{ item }}"
+        path: "{{ restore_dir }}"
         state: absent
-      loop:
-        - /tmp/pg_dumpall.sql
-        - "{{ restore_dir }}"
-      tags: [files, database]
+      tags: [files]
