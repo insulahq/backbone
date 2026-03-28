@@ -15,8 +15,11 @@ export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
 # We use -F /dev/null to skip SSH config and specify all options explicitly.
 # restic's sftp.args replaces the FULL sftp command (including binary name).
 # Using a bash array ensures the multi-word sftp.args value is passed as a single argument.
-SFTP_ARGS="sftp -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }}"
-RESTIC_OPTS=("-o" "sftp.args=${SFTP_ARGS}")
+# Use sftp.command (not sftp.args) — spawns SSH directly with full control over
+# port, known_hosts, and identity file. Avoids sftp binary's own SSH subprocess
+# which may use different host key verification paths.
+SFTP_CMD="ssh -F /dev/null -p {{ backup_sftp_port }} -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }} -s sftp"
+RESTIC_OPTS=("-o" "sftp.command=${SFTP_CMD}")
 
 # Logging
 LOG_FILE="/var/log/restic/backup-{{ inventory_hostname }}.log"

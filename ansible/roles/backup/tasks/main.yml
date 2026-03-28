@@ -121,7 +121,7 @@
   # Restic bypasses system SSH config (due to NetBird ProxyCommand interception).
   # Seed a dedicated known_hosts file in restic config dir used by the backup script.
   shell: |
-    ssh-keyscan -H {{ backup_sftp_host }} 2>/dev/null | grep -v "^#" > {{ restic_config_dir }}/known_hosts.tmp
+    ssh-keyscan -H -p {{ backup_sftp_port }} {{ backup_sftp_host }} 2>/dev/null > {{ restic_config_dir }}/known_hosts.tmp
     mv {{ restic_config_dir }}/known_hosts.tmp {{ restic_config_dir }}/known_hosts
     chmod 600 {{ restic_config_dir }}/known_hosts
   changed_when: true
@@ -130,7 +130,7 @@
   # SFTP backup server only supports SFTP, not shell commands.
   # Use -F /dev/null to bypass NetBird SSH config interception (gotcha 9).
   # Use the restic-specific known_hosts file seeded by the keyscan task above.
-  shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }}"
+  shell: "echo quit | sftp -F /dev/null -oPort={{ backup_sftp_port }} -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }}"
   register: sftp_test
   changed_when: false
   failed_when: sftp_test.rc != 0

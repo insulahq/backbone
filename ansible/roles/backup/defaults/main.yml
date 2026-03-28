@@ -16,6 +16,7 @@ restic_repository: "sftp:{{ backup_sftp_user }}@{{ backup_sftp_host }}:{{ backup
 # backup_sftp_user: user@example
 # backup_sftp_host: sftp.example.com
 # backup_sftp_path: /backups
+backup_sftp_port: 22  # Override to 23 for Hetzner Storage Box
 
 # SSH key for backup server access
 # The private key is copied from the control machine to each server.
