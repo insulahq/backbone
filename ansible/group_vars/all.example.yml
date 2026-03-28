@@ -143,7 +143,7 @@ gatus_domain: "status.{{ platform_domain }}"
 backup_enabled: false
 backup_sftp_user: <YOUR_SFTP_USER>
 backup_sftp_host: <YOUR_SFTP_HOST>
-backup_sftp_path: /backups
+backup_sftp_path: backups
 # backup_sftp_port: 23  # Hetzner Storage Box uses port 23 (default: 22)
 # SSH key for backup server SFTP access (separate from per-server Ansible keys).
 # Default: ~/hosting-platform.key — override if your backup server uses a different key.
