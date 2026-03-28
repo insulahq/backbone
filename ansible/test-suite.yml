@@ -380,7 +380,7 @@
       tags: [backup]
 
     - name: "Backup | backup server SFTP connectivity"
-      shell: "echo quit | sftp -F /dev/null -oConnectTimeout=10 -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir | default('/etc/restic') }}/known_hosts -i {{ restic_ssh_key_path | default('/etc/restic/hosting-platform.key') }} {{ backup_sftp_user }}@{{ backup_sftp_host }} 2>&1"
+      shell: "/etc/restic/restore.sh list 2>&1 | grep -q 'snapshots'"
       register: _t_backup_sftp
       changed_when: false
       ignore_errors: true
