@@ -44,12 +44,7 @@ services:
       # Alerting — fallback webhook (Gatus pushes handled by host-side watchdog)
       ALERT_WEBHOOK_URL: "{{ alert_webhook_url | default('') }}"
 
-      # WireGuard IPs for pgproxy target resolution (entrypoint-wrapper uses these)
-      LOCAL_WG_IP: "{{ wireguard_ip }}"
-      PEER_WG_IP: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
-
-      # DNS switching: delegated to /usr/local/bin/platform-dns-switch on the host
-      # (called via nsenter from entrypoint-wrapper). Config in /etc/platform-dns-switch.env.
+      # DNS switching and service restarts handled by pg-role-watchdog on the host.
 
     entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     command: []

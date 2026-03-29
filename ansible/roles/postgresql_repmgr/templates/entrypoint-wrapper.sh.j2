@@ -52,7 +52,8 @@ WATCHDOG_PID=""
 # ==========================================================================
 # Inline implementation because this runs inside a Docker container
 # (cannot source the host's platform-alert.sh library).
-# Uses env vars from docker-compose: ALERT_WEBHOOK_URL, GATUS_URL, GATUS_TOKEN
+# Uses env vars from docker-compose: ALERT_WEBHOOK_URL
+# Gatus alerting handled by host-side pg-role-watchdog (not inside container).
 send_alert() {
   local level="$1"   # info | warning | critical
   local message="$2"
@@ -591,11 +592,9 @@ start_as_standby() {
     sleep 1
     STARTUP_WAIT=$((STARTUP_WAIT + 1))
     if [ "$STARTUP_WAIT" -ge "$STARTUP_MAX" ]; then
-      # Check if PG log shows WAL removal error
-      WAL_REMOVED=$(pg_ctl -D "$PGDATA" -l /dev/null status 2>&1 || true)
-      PG_STDERR=$(cat "$PGDATA/log/postgresql*.log" 2>/dev/null | tail -50 || true)
-      if echo "$PG_STDERR" | grep -q "has already been removed" 2>/dev/null || \
-         docker logs postgresql 2>&1 | tail -20 | grep -q "has already been removed" 2>/dev/null; then
+      # Check if PG is stuck replaying removed WAL (look in PG logs or container stderr)
+      if grep -q "has already been removed" "$PGDATA"/log/postgresql*.log 2>/dev/null || \
+         grep -q "has already been removed" /proc/$PG_PID/fd/2 2>/dev/null; then
         echo "==> STARTUP TIMEOUT: WAL segment removed on primary — performing full re-clone..."
         send_alert "warning" "WAL gap on ${NODE_NAME}: standby stuck in startup, performing full re-clone"
         kill "$PG_PID" 2>/dev/null || true
@@ -649,8 +648,7 @@ start_as_standby() {
   if [ "$WAL_OK" = true ]; then
     echo "==> WAL streaming confirmed"
   else
-    # Confirm WAL gap by checking PG log for the specific error
-    PG_LOG=$(pg_ctl -D "$PGDATA" -l /dev/null status 2>&1 || true)
+    # Confirm WAL gap by checking WAL receiver status
     WAL_GAP_DETECTED=false
     # Check WAL receiver status via SQL (docker CLI not available in this container)
     if psql -U postgres -tAc "SELECT 1" >/dev/null 2>&1; then
