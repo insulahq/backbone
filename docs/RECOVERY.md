@@ -1,21 +1,26 @@
 # Disaster Recovery Runbook
 
-**Last Updated:** 2026-03-27
+**Last Updated:** 2026-03-29
 **Audience:** Operators responding to infrastructure failures
 
 ---
 
 ## Quick Reference
 
-| Scenario | RTO | RPO | Procedure |
-|----------|-----|-----|-----------|
-| Single node down (other healthy) | 1-2 min (auto) | 0 (streaming repl) | [Scenario 1](#scenario-1-single-node-down) |
-| PostgreSQL failover (automatic) | ~60s (repmgrd) | 0 | [Scenario 2](#scenario-2-postgresql-failover) |
-| Single node disk failure | 30-60 min | Last backup | [Scenario 3](#scenario-3-disk-failure-rebuild-node) |
-| Both nodes down | 1-2 hours | Last backup | [Scenario 4](#scenario-4-both-nodes-down) |
-| Restic backup corruption | N/A | Previous backup | [Scenario 5](#scenario-5-backup-repository-issues) |
-| NetBird mesh broken | 5-10 min | N/A | [Scenario 6](#scenario-6-netbird-mesh-broken) |
-| Split-brain PostgreSQL | 10-15 min | Depends | [Scenario 7](#scenario-7-split-brain-postgresql) |
+| # | Scenario | Recovery | RTO | RPO |
+|---|----------|----------|-----|-----|
+| 1 | [Single node down (other healthy)](#scenario-1-single-node-down) | Automatic | ~80s | 0 |
+| 2 | [PostgreSQL failover](#scenario-2-postgresql-failover) | Automatic | ~80s | 0 |
+| 3 | [Node replacement (new server)](#scenario-3-node-replacement) | Manual | ~30 min | 0 |
+| 4 | [Both nodes down simultaneously](#scenario-4-both-nodes-down) | Manual | 1-2 hours | Up to 24h |
+| 5 | [Both down, standby boots first](#scenario-5-standby-boots-first) | Auto (300s) | ~5 min | 0 |
+| 6 | [PG container crash (not node)](#scenario-6-pg-container-crash) | Automatic | 10-20s | 0 |
+| 7 | [WAL gap (standby fell behind)](#scenario-7-wal-gap) | Automatic | 60-300s | 0 |
+| 8 | [Split-brain PostgreSQL](#scenario-8-split-brain) | Automatic | 30-45s | Diverged writes lost |
+| 9 | [NetBird mesh broken](#scenario-9-netbird-mesh-broken) | Manual | 5-10 min | N/A |
+| 10 | [Database-only restore](#scenario-10-database-only-restore) | Manual | 10-30 min | Up to 24h |
+| 11 | [Backup repository issues](#scenario-11-backup-issues) | Manual | Varies | Previous backup |
+| 12 | [Control machine lost](#scenario-12-control-machine-lost) | Manual | 1-4 hours | 0 (if servers up) |
 
 ---
 
@@ -27,145 +32,123 @@ Before any recovery, ensure you have:
 2. Ansible control machine with the repo checked out
 3. Access to `ansible/group_vars/all.yml` and `ansible/inventory/hosts.yml`
 4. Restic password (stored in `ansible/.generated_secrets/restic_password`)
-5. SFTP backup server credentials
+5. Backup server credentials (SFTP or S3)
+
+> **CRITICAL:** Back up `.generated_secrets/` offline. See [Offline Secrets Procedure](#offline-secrets-procedure).
 
 ---
 
 ## Scenario 1: Single Node Down
 
-**Symptoms:** One server unreachable, DNS still resolving on the other.
+**Symptoms:** One server unreachable, DNS still resolving via the other.
 
-**Impact:**
-- DNS: Reduced redundancy but still serving (other node answers)
-- PostgreSQL: repmgrd will promote standby to primary within ~60s
-- NetBird: Dashboard available via active-passive DNS (watchdog switches to surviving node)
-- Backups: Unaffected on surviving node
+**What happens automatically:**
+1. repmgrd on the surviving standby detects primary failure (~60s)
+2. `promote-check.sh` validates external connectivity (prevents false promotion)
+3. Standby promotes to primary
+4. `pg-role-watchdog` (within 10s) detects role change → updates pgproxy → restarts services → switches DNS
 
-**Action:**
+**Impact during recovery:**
+- DNS: Other node continues serving (both are authoritative NS)
+- PostgreSQL: Write unavailability for ~80s (detection + promotion + DNS switch)
+- Services: Brief restart on the surviving node (PowerDNS, NetBird, Zitadel, Gatus)
+
+**When the failed node returns:**
+The entrypoint automatically detects the role change, uses `pg_rewind` to rejoin as standby, and resumes streaming replication. No manual action needed.
+
 ```bash
-# 1. Verify the surviving node is healthy
-ssh root@<SURVIVING_IP> "docker ps && netbird status && systemctl status restic-backup.timer"
-
-# 2. Check PostgreSQL role
+# Verify automatic recovery
 ssh root@<SURVIVING_IP> "docker exec postgresql repmgr cluster show"
 
-# 3. If down node comes back, it should auto-rejoin as standby
-# Monitor logs:
-ssh root@<RECOVERED_IP> "docker logs -f postgresql 2>&1 | head -100"
-
-# 4. If auto-rejoin fails, run the playbook to re-sync:
+# If auto-rejoin fails after node returns:
 cd ansible
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <RECOVERED_NODE>
 ```
 
 ---
 
-## Scenario 2: PostgreSQL Failover (Automatic)
+## Scenario 2: PostgreSQL Failover
 
-**Symptoms:** repmgrd promoted standby to primary. Old primary is down or degraded.
+**Symptoms:** repmgrd promoted standby to primary. Services may show brief errors.
 
 **Verification:**
 ```bash
-# Check which node is primary on BOTH nodes
+# Check roles on both nodes
 ssh root@<NS1_IP> "docker exec postgresql repmgr cluster show"
 ssh root@<NS2_IP> "docker exec postgresql repmgr cluster show"
 
 # Check repmgr events
 ssh root@<NEW_PRIMARY_IP> "docker exec postgresql repmgr cluster event --limit=10"
+
+# Check watchdog handled DNS switch
+ssh root@<NEW_PRIMARY_IP> "journalctl -u pg-role-watchdog --since '5 minutes ago' --no-pager"
 ```
 
-**After old primary recovers:**
-The entrypoint wrapper (`entrypoint-wrapper.sh`) automatically detects the role change on restart:
-1. Queries the peer to determine who is primary
-2. Compares timelines
-3. Uses `pg_rewind` to rejoin as standby if needed
-4. Falls back to full re-clone if `pg_rewind` fails
+**After old primary recovers:** Automatic — entrypoint uses `pg_rewind` or full re-clone.
 
 ```bash
-# If automatic rejoin doesn't work, force a rejoin:
-ssh root@<OLD_PRIMARY_IP> "docker exec postgresql repmgr standby clone --force -h <NEW_PRIMARY_WIREGUARD_IP> -U repmgr -d repmgr"
-ssh root@<OLD_PRIMARY_IP> "docker restart postgresql"
+# Force rejoin if automatic fails:
+ssh root@<OLD_PRIMARY_IP> "cd /opt/postgresql && docker compose restart postgresql"
+# Monitor: docker logs -f postgresql
 ```
-
-**Important:** Update `postgresql_primary_node` in `group_vars/all.yml` to reflect the new primary, so future Ansible runs deploy in the correct order.
 
 ---
 
-## Scenario 3: Disk Failure — Rebuild Node
+## Scenario 3: Node Replacement (New Server)
 
-**Symptoms:** Server disk is dead. the provider has re-provisioned with fresh Debian 13.
+**Symptoms:** Server is permanently dead. Provider has provisioned a new Debian 13 server.
 
-**Procedure:**
+**Timeline: ~30 minutes, zero downtime for users.**
 
-### Step 1: Verify backup availability
+### Step 1: Update inventory (2 min)
+
+Edit `ansible/inventory/hosts.yml` — change the dead node's `ansible_host` to the new IP.
+If the new server has a different IPv6, update `public_ipv6` too.
+
+> WireGuard IP (`10.100.0.x`) and hostname stay the same.
+
+### Step 2: Update DNS glue records (5 min)
+
+At your domain registrar, update the NS glue record for the dead node to the new IP.
+Propagation takes up to 48h but the surviving node serves DNS throughout.
+
+### Step 3: Update WireGuard on surviving node (if IP changed)
+
 ```bash
-# On the control machine (or surviving node)
-export RESTIC_REPOSITORY="sftp:<SFTP_USER>@<SFTP_HOST>:/backups/<DEAD_NODE>"
-export RESTIC_PASSWORD_FILE="ansible/.generated_secrets/restic_password"
-
-# List available snapshots
-restic snapshots --host <DEAD_NODE>
-
-# Check what's in the latest snapshot
-restic ls latest --host <DEAD_NODE>
+# Only needed if the new server has a DIFFERENT public IP
+ansible-playbook -i inventory/hosts.yml deploy-wireguard.yml --limit <SURVIVING_NODE>
 ```
 
-### Step 2: Run Ansible to rebuild
+This updates the surviving node's WireGuard config with the new server's endpoint IP.
+
+### Step 4: Deploy to the new server (~15 min)
+
 ```bash
 cd ansible
-
-# 1. Deploy base OS hardening + Docker + WireGuard tunnel
-ansible-playbook -i inventory/hosts.yml site.yml --tags common,wireguard --limit <DEAD_NODE> \
+ansible-playbook -i inventory/hosts.yml site.yml --limit <NEW_NODE> \
   -e "ansible_ssh_private_key_file=$HOME/hosting-platform.key"
-# The `-e` override is needed because the re-provisioned server does not
-# have the per-server SSH public key in its `authorized_keys` yet.
-
-# 2. Deploy Traefik
-ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <DEAD_NODE>
-
-# 3. Deploy PostgreSQL (it will join as standby automatically)
-ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <DEAD_NODE>
-
-# 4. Deploy PowerDNS
-ansible-playbook -i inventory/hosts.yml deploy-powerdns.yml --limit <DEAD_NODE>
-
-# 5. Deploy Zitadel (stateless — just starts and connects to existing PG data)
-ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml --limit <DEAD_NODE>
-
-# 6. Deploy NetBird management
-ansible-playbook -i inventory/hosts.yml deploy-netbird.yml --limit <DEAD_NODE>
-
-# 7. Re-enroll as NetBird peer
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <DEAD_NODE>
-
-# 8. Check NetBird IP (may have changed — gotcha 17)
-ssh root@<NEW_IP> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"ip\"])'"
-
-# 9. Deploy Gatus monitoring
-ansible-playbook -i inventory/hosts.yml deploy-gatus.yml --limit <DEAD_NODE>
-
-# 10. Deploy Portainer
-ansible-playbook -i inventory/hosts.yml deploy-portainer.yml --limit <DEAD_NODE>
-
-# 11. Deploy backups
-ansible-playbook -i inventory/hosts.yml deploy-backup.yml --limit <DEAD_NODE>
 ```
 
-### Step 3: Restore configuration files from backup (if needed)
+This runs the full stack: OS hardening → WireGuard → PostgreSQL (auto-clones from primary) → all services.
+
+### Step 5: Re-enroll NetBird peer (5 min)
+
 ```bash
-# On the rebuilt node, if specific config files are needed:
-ssh root@<REBUILT_NODE>
-
-export RESTIC_REPOSITORY="sftp:<USER>@<HOST>:/backups/<NODE>"
-export RESTIC_PASSWORD_FILE="/etc/restic/password"
-
-# Restore specific paths (example: NetBird config)
-restic restore latest --target /tmp/restore --include "/opt/netbird/config.yaml"
-
-# Copy restored files to correct locations
-cp /tmp/restore/opt/netbird/config.yaml /opt/netbird/
-docker restart netbird-server
+# Create a new setup key in the NetBird dashboard (vpn.<domain>)
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NEW_NODE>
 ```
+
+### Step 6: Verify
+
+```bash
+ansible-playbook -i inventory/hosts.yml test-suite.yml
+```
+
+**What you DON'T need to do:**
+- No database restore (PG auto-clones from surviving primary)
+- No DNS zone recreation (replicated via PG)
+- No certificate transfer (Traefik re-issues via ACME)
+- No WireGuard key regeneration (reuses existing keys from `.generated_secrets/`)
 
 ---
 
@@ -173,267 +156,272 @@ docker restart netbird-server
 
 **Symptoms:** Both servers unreachable. Total outage.
 
-**Procedure:**
+### If servers can be rebooted (not lost)
 
-1. Provision two new Debian 13 servers on two geographically separated servers
+Boot either node. If the **old primary** boots first, it starts normally. If the **standby** boots first, see [Scenario 5](#scenario-5-standby-boots-first).
+
+### If both servers are permanently lost
+
+1. Provision two new Debian 13 servers (different locations)
 2. Update `inventory/hosts.yml` with new IPs
-3. Follow `docs/BOOTSTRAP.md` for a fresh deployment
-
-   > **Remember:** Fresh servers require the bootstrapping SSH key override. See BOOTSTRAP.md Step 2 for the `-e` flag.
-
-4. After PostgreSQL is running on the new primary, restore data from backup:
+3. If IPs changed, update NS glue records at your registrar
+4. Follow [docs/BOOTSTRAP.md](BOOTSTRAP.md) for fresh deployment
+5. Restore database from backup:
 
 ```bash
-# On the control machine
-restic restore latest \
-    --target /tmp/restore \
-    --host <OLD_PRIMARY_NODE> \
-    --include "/opt/powerdns" \
-    --include "/opt/netbird"
-
-# Copy PostgreSQL data (zones, NetBird config) to new primary
-scp -r /tmp/restore/opt/powerdns/pdns.conf root@<NEW_PRIMARY>:/opt/powerdns/
-scp -r /tmp/restore/opt/netbird/ root@<NEW_PRIMARY>:/opt/netbird/
+# On the new primary, after PostgreSQL is running:
+/etc/restic/restore.sh database --load
 ```
 
-5. Recreate DNS zones from PowerDNS backup or re-add manually
-6. Re-create NetBird setup key and PAT (old ones are invalidated)
-7. Update `group_vars/all.yml` with new values
+6. Re-create NetBird setup key (old ones are invalidated)
+7. Verify: `ansible-playbook -i inventory/hosts.yml test-suite.yml`
+
+**RPO:** Up to 24 hours (daily backup). Streaming replication data between the last backup and the failure is lost.
 
 ---
 
-## Scenario 5: Backup Repository Issues
+## Scenario 5: Standby Boots First (Primary Gone)
 
-### Restic password lost
-**Impact:** All existing backups are permanently inaccessible (gotcha 10).
+**Symptoms:** After a dual outage, the standby boots but the primary never comes back.
+
+**What happens automatically:**
+1. Entrypoint detects it was a standby, tries to reach the primary
+2. Waits up to 300s (5 minutes) for the primary to appear
+3. After timeout: **self-promotes** to primary
+4. Watchdog switches DNS to this node
+
+**No manual action needed.** Monitor via:
 ```bash
-# The password is stored in:
-#   - ansible/.generated_secrets/restic_password (control machine)
-#   - /etc/restic/password (on each server)
-# If both are lost, you must wipe and re-initialize:
-ssh root@<NODE> "restic -r <REPO> cat config"  # Will fail without password
-
-# Nuclear option: wipe and start fresh (gotcha 10)
-# WARNING: This destroys ALL existing backups
-ssh root@<NODE> "sftp <USER>@<HOST>:/backups/<NODE>"
-# sftp> rm *
-# sftp> exit
-ssh root@<NODE> "systemctl start restic-backup.service"  # Re-initializes repo
+ssh root@<BOOTED_NODE> "docker logs -f postgresql 2>&1 | grep -E 'SELF-PROMOTING|RESOLVED|ready to accept'"
 ```
+
+---
+
+## Scenario 6: PG Container Crash (Not Full Node)
+
+**Symptoms:** PostgreSQL container restarted but node is healthy.
+
+**What happens automatically:**
+1. Docker restarts the container (`unless-stopped` policy)
+2. Entrypoint re-runs: detects role from peer, starts correctly
+3. If restart completes within 60s, no failover (repmgrd reconnect window)
+4. If restart takes >60s, standby promotes (same as Scenario 1)
+
+Typically recovers in 10-20s with no failover.
+
+---
+
+## Scenario 7: WAL Gap (Standby Fell Behind)
+
+**Symptoms:** Standby was offline too long, primary's `max_slot_wal_keep_size` removed WAL segments.
+
+**What happens automatically:**
+1. On standby restart, PG tries to stream missing WAL → fails
+2. **During startup:** If PG gets stuck in replay for >90s, entrypoint detects the "has already been removed" error and auto-re-clones from primary
+3. **After startup:** If WAL receiver drops after PG is running, the entrypoint's WAL health check detects the gap and auto-re-clones
+
+```bash
+# Monitor re-clone progress:
+ssh root@<STANDBY> "docker logs -f postgresql 2>&1 | grep -E 'Re-clone|standby clone|streaming'"
+```
+
+**Manual fix if auto-recovery fails:**
+```bash
+ssh root@<STANDBY> "cd /opt/postgresql && docker compose stop postgresql && \
+  docker volume rm postgresql_postgresql_data && docker compose up -d postgresql"
+```
+
+---
+
+## Scenario 8: Split-Brain PostgreSQL
+
+**Symptoms:** Both nodes think they are primary.
+
+**What happens automatically:**
+The `split_brain_watchdog` (runs every 15s on primary) detects dual-primary via peer query. Resolution:
+- Higher timeline wins (was promoted more recently)
+- Same timeline: `REPMGR_INITIAL_ROLE` is the deterministic tiebreaker
+- Loser self-demotes: writes `.demoted` marker → container restarts as standby → `pg_rewind`
+
+```bash
+# Check if already auto-resolved:
+ssh root@<NODE> "docker logs postgresql 2>&1 | grep -E 'SPLIT-BRAIN|SELF-DEMOTING'"
+
+# Manual resolution if watchdog hasn't acted:
+# 1. Identify which node has fewer/older writes
+ssh root@<NS1> "docker exec postgresql psql -U postgres -tc 'SELECT timeline_id FROM pg_control_checkpoint()'"
+ssh root@<NS2> "docker exec postgresql psql -U postgres -tc 'SELECT timeline_id FROM pg_control_checkpoint()'"
+
+# 2. Demote the lower-timeline node
+ssh root@<DEMOTE_NODE> "cd /opt/postgresql && docker compose restart postgresql"
+```
+
+> **Data impact:** Writes to the demoted node since divergence are lost (`pg_rewind` rolls them back). The window is typically <60s.
+
+---
+
+## Scenario 9: NetBird Mesh Broken
+
+**Symptoms:** Servers can't reach each other via NetBird IPs (`100.x.x.x`). Public IPs still work.
+
+> **No impact on core infrastructure.** WireGuard (`wg0`) is independent of NetBird (`wt0`). PostgreSQL replication, PowerDNS API, and all inter-node communication use WireGuard.
+
+```bash
+# 1. Check status
+ssh root@<NODE> "netbird status"
+
+# 2. Reconnect
+ssh root@<NODE> "netbird down && netbird up"
+
+# 3. Re-enroll if needed
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NODE>
+```
+
+---
+
+## Scenario 10: Database-Only Restore
+
+**Symptoms:** Data corruption, accidental deletion, or need to rollback.
+
+PostgreSQL is backed up via `pg_dumpall` piped to restic stdin, tagged `pgdump`.
+
+```bash
+# List available database snapshots
+ssh root@<NODE> "/etc/restic/restore.sh list"
+
+# Extract and load on the primary node
+ssh root@<PRIMARY> "/etc/restic/restore.sh database --load"
+
+# Or extract only (review before loading)
+ssh root@<NODE> "/etc/restic/restore.sh database"
+# Then manually: docker exec -i postgresql psql -U postgres < /root/pg-restore-*/pg_dumpall.sql
+
+# Ansible playbook (remote)
+ansible-playbook -i inventory/hosts.yml restore.yml --limit <PRIMARY> --tags database
+```
+
+> **WARNING:** `pg_dumpall --load` overwrites ALL databases. The standby will automatically re-sync via streaming replication after the primary is updated.
+
+---
+
+## Scenario 11: Backup Issues
 
 ### Backup failures
 ```bash
-# Check recent backup logs
+# Check logs
 ssh root@<NODE> "journalctl -u restic-backup.service --since '24 hours ago'"
 
-# Check backup server connectivity
-ssh root@<NODE> "echo quit | sftp -o ConnectTimeout=10 -i /etc/restic/hosting-platform.key <USER>@<HOST>"
-
-# Run backup manually with verbose output
+# Run manually
 ssh root@<NODE> "/etc/restic/backup.sh"
 
 # Check repo integrity
-ssh root@<NODE> "restic -r <REPO> check"
+ssh root@<NODE> "/etc/restic/restore.sh list"
+```
+
+### Restic password lost
+The password is stored in:
+- `ansible/.generated_secrets/restic_password` (control machine)
+- `/etc/restic/password` (on each server)
+
+If ALL copies are lost, existing backups are **permanently inaccessible**. You must wipe the repo and start fresh:
+```bash
+# Nuclear option — destroys all existing backups
+ssh root@<NODE> "rm -rf /var/cache/restic/*"
+ssh root@<NODE> "systemctl start restic-backup.service"  # Re-initializes
 ```
 
 ---
 
-## Scenario 6: NetBird Mesh Broken
+## Scenario 12: Control Machine Lost
 
-**Symptoms:** Servers can't reach each other via NetBird IPs. Public IPs still work.
+**Symptoms:** The Ansible control machine is dead. Servers are still running.
 
-> **Note:** The WireGuard infrastructure tunnel (`wg0`) is independent of NetBird.
-> If WireGuard is up, PostgreSQL replication and PowerDNS API still function.
-> NetBird (`wt0`) is used for Phase 2 peer connectivity and remote admin access.
+**Immediate impact:** None — servers run independently.
 
-```bash
-# 1. Check NetBird status on both nodes
-ssh root@<NS1_PUBLIC_IP> "netbird status"
-ssh root@<NS2_PUBLIC_IP> "netbird status"
+**To regain management access:**
 
-# 2. If disconnected, try reconnecting
-ssh root@<NODE> "netbird down && netbird up"
-
-# 3. If enrollment is lost, re-enroll
-ssh root@<NODE> "netbird down"
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NODE>
-
-# 4. Check if NetBird IP changed (gotcha 17)
-ssh root@<NODE> "netbird status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"localPeerState\"][\"ip\"])'"
-```
-
----
-
-## Scenario 7: Split-Brain PostgreSQL
-
-**Symptoms:** Both nodes think they are primary. Detected by runtime watchdog or manual check.
+1. Set up a new control machine with Ansible + this repo
+2. Recover `.generated_secrets/` from your offline backup (see [Offline Secrets Procedure](#offline-secrets-procedure))
+3. If no offline backup exists, recover from a running server:
 
 ```bash
-# 1. Identify the situation
-ssh root@<NS1> "docker exec postgresql repmgr cluster show"
-ssh root@<NS2> "docker exec postgresql repmgr cluster show"
+# The restic password is on every server
+ssh root@<ANY_NODE> "cat /etc/restic/password"
 
-# 2. Check timelines (higher timeline = more recent promotion)
-ssh root@<NS1> "docker exec postgresql psql -U postgres -tc 'SELECT pg_control_checkpoint()'"
-ssh root@<NS2> "docker exec postgresql psql -U postgres -tc 'SELECT pg_control_checkpoint()'"
+# Service configs (containing all passwords) are under /opt
+ssh root@<ANY_NODE> "cat /opt/zitadel/config.yaml"     # Zitadel passwords
+ssh root@<ANY_NODE> "cat /opt/powerdns/pdns.conf"       # PowerDNS API key
+ssh root@<ANY_NODE> "cat /opt/netbird/config.yaml"      # NetBird secrets
+ssh root@<ANY_NODE> "cat /etc/wireguard/wg0.conf"       # WireGuard keys
 
-# 3. The entrypoint wrapper has a watchdog that auto-demotes the lower-timeline node
-# Check if it already resolved:
-ssh root@<NODE> "docker logs postgresql 2>&1 | tail -50"
-
-# 4. If not auto-resolved, manually demote one node:
-# Pick the node with FEWER recent writes (or lower timeline)
-ssh root@<DEMOTE_NODE> "docker exec postgresql repmgr standby clone --force -h <PRIMARY_WIREGUARD_IP> -U repmgr -d repmgr"
-ssh root@<DEMOTE_NODE> "docker restart postgresql"
-
-# 5. Verify resolution
-ssh root@<PRIMARY> "docker exec postgresql repmgr cluster show"
+# Reconstruct group_vars/all.yml from these values + the example file
 ```
+
+4. Recreate `inventory/hosts.yml` from the example + known server IPs
+5. Test access: `ansible all -i inventory/hosts.yml -m ping`
 
 ---
 
 ## Verification Checklist
 
-After any recovery, verify all components:
+After any recovery, run the automated test suite:
 
 ```bash
-# DNS resolution (both nodes)
-dig @<NS1_PUBLIC_IP> <PLATFORM_DOMAIN> SOA +short
-dig @<NS2_PUBLIC_IP> <PLATFORM_DOMAIN> SOA +short
+# Full validation (87 tests)
+ansible-playbook -i inventory/hosts.yml test-suite.yml
 
-# WireGuard tunnel connectivity
-ssh root@<NS1> "ping -c 3 10.100.0.2"
-ssh root@<NS2> "ping -c 3 10.100.0.1"
+# Failover-specific (21 tests including pre/post-flight)
+ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
+```
 
-# PostgreSQL replication
+Or verify manually:
+```bash
+# PostgreSQL cluster
 ssh root@<PRIMARY> "docker exec postgresql repmgr cluster show"
 
-# Traefik TLS
-curl -I https://vpn.<PLATFORM_DOMAIN>
+# DNS (from any external resolver)
+dig @<NS1_IP> <DOMAIN> SOA +short
+dig @<NS2_IP> <DOMAIN> SOA +short
+
+# WireGuard tunnel
+ssh root@<NS1> "ping -c 3 10.100.0.2"
+
+# TLS certificates
+curl -I https://vpn.<DOMAIN>
 
 # Backup timer
-ssh root@<NS1> "systemctl status restic-backup.timer"
-ssh root@<NS2> "systemctl status restic-backup.timer"
-
-# PowerDNS API (via WireGuard IP)
-curl -s -H "X-API-Key: <KEY>" http://<WIREGUARD_IP>:8081/api/v1/servers/localhost/zones | python3 -m json.tool
-```
-
----
-
-## Scenario 8: Database-Only Restore
-
-**Symptoms:** Data corruption, accidental deletion, or need to rollback to a previous database state.
-
-PostgreSQL is backed up via `pg_dumpall` piped to restic stdin (not as a file on disk).
-The dump is stored as a stdin snapshot tagged `pgdump`.
-
-```bash
-# 1. List available database snapshots
-ssh root@<NODE> "restic snapshots --tag pgdump"
-
-# 2. Extract the dump to stdout
-ssh root@<NODE> "restic dump latest pg_dumpall.sql --tag pgdump > /tmp/pg_dumpall.sql"
-
-# 3. Review the dump (optional — check what's inside)
-head -100 /tmp/pg_dumpall.sql
-
-# 4. Restore into PostgreSQL (WARNING: this overwrites ALL databases)
-ssh root@<PRIMARY_NODE> "docker exec -i postgresql psql -U postgres < /tmp/pg_dumpall.sql"
-
-# 5. Clean up
-rm -f /tmp/pg_dumpall.sql
-```
-
-**For selective restore** (single database):
-```bash
-# Extract and filter for a specific database
-ssh root@<NODE> "restic dump latest pg_dumpall.sql --tag pgdump" | \
-  sed -n '/^\\connect \"netbird\"/,/^\\connect /p' > /tmp/netbird_only.sql
-```
-
----
-
-## Scenario 9: Using the Restore Script
-
-A restore helper script is deployed to `/etc/restic/restore.sh` on each server.
-
-```bash
-# List available snapshots
-/etc/restic/restore.sh list
-
-# Restore all files to /tmp/restore
-/etc/restic/restore.sh files
-
-# Restore only a specific path
-/etc/restic/restore.sh files --include /opt/traefik
-
-# Restore the database dump
-/etc/restic/restore.sh database
-
-# Restore database and load into running PostgreSQL
-/etc/restic/restore.sh database --load
-```
-
-**From the Ansible control machine** (uses the restore playbook):
-```bash
-cd ansible
-
-# Interactive restore — lists snapshots, restores files + database
-ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE>
-
-# Restore only the database
-ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE> --tags database
-
-# Restore only files
-ansible-playbook -i inventory/hosts.yml restore.yml --limit <NODE> --tags files
+ssh root@<NODE> "systemctl status restic-backup.timer"
 ```
 
 ---
 
 ## Offline Secrets Procedure
 
-**CRITICAL:** The `ansible/.generated_secrets/` directory lives ONLY on the Ansible
-control machine. It contains secrets required for recovery that CANNOT be regenerated:
+**CRITICAL:** `ansible/.generated_secrets/` lives ONLY on the Ansible control machine. It contains secrets that CANNOT be regenerated:
 
 | Secret | Why it's critical |
 |--------|------------------|
 | `restic_password` | Without it, all backups are permanently inaccessible |
 | `zitadel_masterkey` | Immutable after first Zitadel init — cannot be changed |
 | `ssh/{ns1,ns2}` | Per-server SSH keypairs for Ansible access |
+| `wireguard/{ns1,ns2}.key` | WireGuard tunnel private keys |
 | All other passwords | Database credentials, API keys, etc. |
 
-### Backup procedure (do this after every `setup.sh` run):
+### Back up after every `setup.sh` run:
 
 ```bash
-# Option 1: Encrypted archive to a USB drive or safe location
+# Encrypted archive to USB or safe location
 cd ansible
-tar czf - .generated_secrets/ | gpg --symmetric --cipher-algo AES256 \
+tar czf - .generated_secrets/ group_vars/all.yml inventory/hosts.yml | \
+  gpg --symmetric --cipher-algo AES256 \
   -o hosting-platform-secrets-$(date +%Y%m%d).gpg
-# Store the GPG passphrase separately from the archive (e.g., password manager)
 
-# Option 2: Encrypt with Ansible Vault and store in a git-ignored location
-ansible-vault encrypt_string --vault-password-file /path/to/vault-pass \
-  "$(cat .generated_secrets/restic_password)" --name restic_password
-
-# Option 3: Print the restic password for physical storage
-echo "RESTIC PASSWORD: $(cat .generated_secrets/restic_password)"
-# Write it down and store in a fireproof safe
+# Store the GPG passphrase separately (password manager, physical safe)
 ```
 
-### Recovery without control machine:
+### Recovery without offline backup:
 
-If the control machine is lost but you have the restic password:
-```bash
-# 1. On a surviving server, the restic password is at /etc/restic/password
-cat /etc/restic/password
-
-# 2. All other secrets can be recovered from a restic snapshot:
-restic dump latest /etc/restic/password --tag <HOSTNAME>
-
-# 3. Service configs (with embedded passwords) are under /opt:
-restic restore latest --target /tmp/restore --include /opt
-```
+If the control machine is lost but at least one server is running, see [Scenario 12](#scenario-12-control-machine-lost) — all secrets can be reconstructed from the running server's config files.
 
 ---
 
@@ -441,7 +429,8 @@ restic restore latest --target /tmp/restore --include /opt
 
 | Resource | Access |
 |----------|--------|
-| cloud provider Console | <PROVIDER_CONSOLE_URL> |
-| provider panel (backup server) | <PROVIDER_PANEL_URL> |
-| Restic password file | `ansible/.generated_secrets/restic_password` |
+| Cloud provider console | `<PROVIDER_CONSOLE_URL>` |
+| Backup server panel | `<PROVIDER_PANEL_URL>` |
+| Restic password | `ansible/.generated_secrets/restic_password` |
 | All generated secrets | `ansible/.generated_secrets/` |
+| Offline backup | `<LOCATION_OF_GPG_ARCHIVE>` |
