@@ -26,9 +26,9 @@ services:
       - traefik.http.routers.uptime-kuma.middlewares=ratelimit@file
       - traefik.http.services.uptime-kuma.loadbalancer.server.port=3001
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const http=require('http');const r=http.get('http://localhost:3001/api/status-page/heartbeat',{timeout:3000},s=>{process.exit(s.statusCode===200?0:1)});r.on('error',()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "extra/healthcheck"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
       start_period: 30s
     logging:

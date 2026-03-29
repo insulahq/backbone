@@ -39,16 +39,13 @@
         pull: always
       tags: [uptime-kuma]
 
-    - name: Wait for Uptime Kuma to be ready
-      uri:
-        url: "http://127.0.0.1:3001/api/status-page/heartbeat"
-        method: GET
-        status_code: [200, 401, 403]
-        timeout: 5
+    - name: Wait for Uptime Kuma container to be healthy
+      community.docker.docker_container_info:
+        name: uptime-kuma
       register: _uk_health
       retries: 12
       delay: 5
-      until: _uk_health is success
+      until: (_uk_health.container.State.Health.Status | default('')) == 'healthy'
       tags: [uptime-kuma]
 
     # DNS record for Uptime Kuma (active-passive, primary IP only)
