@@ -1,0 +1,8 @@
+[Unit]
+Description=PostgreSQL Auto-Failback (return primary to preferred node)
+After=docker.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+ExecStart=/usr/local/bin/pg-auto-failback.sh

@@ -1,0 +1,11 @@
+[Unit]
+Description=PostgreSQL Auto-Failback (every 60s)
+After=docker.service
+
+[Timer]
+OnBootSec=360
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target multi-user.target

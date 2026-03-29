@@ -118,6 +118,52 @@
     enabled: true
     state: started
 
+# Auto-failback — returns primary role to preferred node after failover recovery
+- name: Deploy PG auto-failback script
+  template:
+    src: pg-auto-failback.sh.j2
+    dest: /usr/local/bin/pg-auto-failback.sh
+    mode: '0755'
+  when: postgresql_auto_failback | bool
+
+- name: Deploy PG auto-failback timer
+  template:
+    src: pg-auto-failback.timer.j2
+    dest: /etc/systemd/system/pg-auto-failback.timer
+    mode: '0644'
+  when: postgresql_auto_failback | bool
+
+- name: Deploy PG auto-failback service
+  template:
+    src: pg-auto-failback.service.j2
+    dest: /etc/systemd/system/pg-auto-failback.service
+    mode: '0644'
+  when: postgresql_auto_failback | bool
+
+- name: Deploy peer SSH key for auto-failback (allows cross-node PG restart)
+  copy:
+    src: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+    dest: /root/.ssh/peer_key
+    mode: '0600'
+  no_log: true
+  when: postgresql_auto_failback | bool
+
+- name: Enable and start PG auto-failback timer
+  systemd:
+    name: pg-auto-failback.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: postgresql_auto_failback | bool
+
+- name: Disable PG auto-failback timer (if disabled)
+  systemd:
+    name: pg-auto-failback.timer
+    enabled: false
+    state: stopped
+  ignore_errors: true
+  when: not (postgresql_auto_failback | bool)
+
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:
     project_src: "{{ postgresql_install_dir }}"

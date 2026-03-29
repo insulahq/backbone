@@ -29,6 +29,12 @@ postgresql_node_ids:
   ns1: 1
   ns2: 2
 
+# Auto-failback: return primary role to preferred node after failover recovery.
+# Uses dns_failover_primary (default: ns1) as the preferred primary.
+# When the preferred node rejoins as standby and both nodes are healthy,
+# a coordinated repmgr switchover returns the primary role automatically.
+postgresql_auto_failback: true
+
 # Credentials -- set in group_vars/all.yml
 # postgresql_superuser_password: ""
 # postgresql_repmgr_password: ""

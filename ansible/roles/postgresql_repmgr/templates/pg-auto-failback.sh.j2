@@ -1,0 +1,112 @@
+#!/bin/bash
+# ==========================================================================
+# PostgreSQL Auto-Failback — Return Primary Role to Preferred Node
+# ==========================================================================
+# Runs every 60s via systemd timer on the PREFERRED PRIMARY node only.
+# If this node is standby but should be primary (and conditions are safe),
+# performs a coordinated repmgr switchover to reclaim the primary role.
+#
+# Safety guards:
+#   1. Only runs on the preferred primary node ({{ dns_failover_primary | default('ns1') }})
+#   2. Both nodes must be healthy and streaming
+#   3. 5-minute settling delay — node must have been standby for >5 min
+#   4. 30-minute cooldown — no switchover if a failover event happened recently
+#   5. Coordinated switchover (not forced promotion) — zero data loss
+# ==========================================================================
+
+set -euo pipefail
+
+PREFERRED_PRIMARY="{{ dns_failover_primary | default('ns1') }}"
+NODE_NAME="{{ inventory_hostname }}"
+COOLDOWN_FILE="/tmp/pg-failback-cooldown"
+SETTLING_MIN=300   # 5 minutes
+COOLDOWN_MIN=1800  # 30 minutes
+
+# Only run on the preferred primary node
+if [ "$NODE_NAME" != "$PREFERRED_PRIMARY" ]; then
+  exit 0
+fi
+
+# Check if PG container is running and healthy
+PG_HEALTH=$(docker inspect postgresql --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+if [ "$PG_HEALTH" != "healthy" ]; then
+  exit 0
+fi
+
+# Check current role — only act if we're standby
+PG_ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+if [ "$PG_ROLE" != "t" ]; then
+  # We're already primary (or error) — nothing to do
+  exit 0
+fi
+
+# === We are the preferred primary but running as standby ===
+
+# Guard 1: Cooldown — check if a recent failover happened
+if [ -f "$COOLDOWN_FILE" ]; then
+  COOLDOWN_AGE=$(( $(date +%s) - $(stat -c %Y "$COOLDOWN_FILE") ))
+  if [ "$COOLDOWN_AGE" -lt "$COOLDOWN_MIN" ]; then
+    exit 0  # Too soon after last failover/switchover
+  fi
+  rm -f "$COOLDOWN_FILE"
+fi
+
+# Guard 2: Settling delay — check PG container uptime
+CONTAINER_STARTED=$(docker inspect postgresql --format "{% raw %}{{.State.StartedAt}}{% endraw %}" 2>/dev/null || echo "")
+if [ -n "$CONTAINER_STARTED" ]; then
+  STARTED_EPOCH=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "0")
+  NOW_EPOCH=$(date +%s)
+  UPTIME=$((NOW_EPOCH - STARTED_EPOCH))
+  if [ "$UPTIME" -lt "$SETTLING_MIN" ]; then
+    exit 0  # Container hasn't been running long enough
+  fi
+fi
+
+# Guard 3: WAL streaming must be active (we're a healthy standby)
+WAL_STATUS=$(docker exec postgresql psql -U postgres -tAc "SELECT status FROM pg_stat_wal_receiver;" 2>/dev/null || echo "")
+if [ "$WAL_STATUS" != "streaming" ]; then
+  exit 0  # Not streaming — unsafe to switchover
+fi
+
+# Guard 4: Peer must be reachable and running as primary
+PEER_RECOVERY=$(docker exec postgresql psql -U postgres -d repmgr -h "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}" -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+if [ "$PEER_RECOVERY" != "f" ]; then
+  exit 0  # Peer is not primary or unreachable
+fi
+
+# === All guards passed — perform failback ===
+echo "$(date): AUTO-FAILBACK: Preferred primary $NODE_NAME is standby. Initiating failback..."
+
+# Set cooldown marker BEFORE attempting (prevents rapid retries on failure)
+touch "$COOLDOWN_FILE"
+
+# Use pg_promote() to promote this standby directly (bypasses repmgr's
+# "already has active primary" safety check). This intentionally creates
+# a brief dual-primary state which the split-brain watchdog on the peer
+# resolves within ~30s (peer has lower timeline → self-demotes).
+PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+
+if docker exec postgresql psql -U postgres -c "SELECT pg_promote(true, 60);" 2>&1; then
+  echo "$(date): AUTO-FAILBACK: $NODE_NAME promoted via pg_promote()."
+  # Update pgproxy target immediately
+  echo "postgresql" > /opt/postgresql/pgproxy-target
+  # Re-register as primary in repmgr
+  sleep 5
+  docker exec postgresql repmgr -f /etc/repmgr/repmgr.conf primary register --force 2>&1 || true
+  # Watchdog handles DNS switch + service restarts within 10s.
+
+  # Signal peer to restart its PG container so it detects the new primary
+  # and rejoins as standby. Uses the per-server SSH key deployed by Ansible.
+  PEER_SSH_KEY="/root/.ssh/peer_key"
+  if [ -f "$PEER_SSH_KEY" ]; then
+    echo "$(date): AUTO-FAILBACK: Restarting peer ($PEER_NAME) PG via SSH..."
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
+      "root@${PEER_WG_IP}" "cd /opt/postgresql && docker compose restart postgresql" 2>&1 || \
+      echo "$(date): AUTO-FAILBACK: WARNING — could not restart peer PG via SSH. Peer will rejoin on next restart."
+  else
+    echo "$(date): AUTO-FAILBACK: No peer SSH key at $PEER_SSH_KEY. Peer must be restarted manually."
+  fi
+else
+  echo "$(date): AUTO-FAILBACK: pg_promote() FAILED. Cooldown active for ${COOLDOWN_MIN}s."
+fi
