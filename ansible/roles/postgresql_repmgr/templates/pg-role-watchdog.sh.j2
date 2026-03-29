@@ -2,7 +2,7 @@
 # ==========================================================================
 # PostgreSQL Role Watchdog — Self-Healing pgproxy + DNS + Consumer Manager
 # ==========================================================================
-# Runs every 10s via systemd timer on the HOST (not inside a container).
+# Runs every 30s via systemd timer on the HOST (not inside a container).
 # Detects PG role changes and fixes pgproxy target, DNS, and consumer
 # containers immediately. Replaces the unreliable signal-file mechanism.
 #

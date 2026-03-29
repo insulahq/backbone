@@ -1,11 +1,11 @@
 [Unit]
-Description=PostgreSQL Role Watchdog (every 10s)
+Description=PostgreSQL Role Watchdog (every 30s)
 After=docker.service
 
 [Timer]
 OnBootSec=30
-OnUnitActiveSec=10
-AccuracySec=1
+OnUnitActiveSec=30
+AccuracySec=3
 
 [Install]
 WantedBy=timers.target multi-user.target
