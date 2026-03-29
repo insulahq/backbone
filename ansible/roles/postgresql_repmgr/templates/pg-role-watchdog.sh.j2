@@ -61,6 +61,17 @@ else
   DNS_OK=true  # Standby doesn't own DNS
 fi
 
+# Push PG role to Gatus — green when primary, red when standby
+# This makes the Gatus dashboard visually show which node owns the primary role
+GATUS_TOKEN=$(cat /etc/gatus-token 2>/dev/null || true)
+if [ -n "$GATUS_TOKEN" ]; then
+  IS_PRIMARY=$( [ "$PG_ROLE" = "f" ] && echo "true" || echo "false" )
+  curl -fsS --max-time 3 -X POST \
+    "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-primary/external?success=${IS_PRIMARY}" \
+    -H "Authorization: Bearer ${GATUS_TOKEN}" \
+    >/dev/null 2>&1 || true
+fi
+
 # Write-health probe (primary only) — detect disk-full or read-only state
 if [ "$PG_ROLE" = "f" ]; then
   docker exec postgresql psql -U postgres -qc "CREATE TABLE IF NOT EXISTS _watchdog_heartbeat(id int PRIMARY KEY DEFAULT 1 CHECK(id=1), ts timestamptz NOT NULL)" 2>/dev/null || true
@@ -70,8 +81,7 @@ if [ "$PG_ROLE" = "f" ]; then
     GATUS_SUCCESS=false
     echo "$(date): WARNING — Primary cannot write to PostgreSQL (disk full / read-only?)"
   fi
-  # Push write-health to Gatus (token from dedicated secrets file)
-  GATUS_TOKEN=$(cat /etc/gatus-token 2>/dev/null || true)
+  # Push write-health to Gatus
   if [ -n "$GATUS_TOKEN" ]; then
     curl -fsS --max-time 3 -X POST \
       "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-writable/external?success=${GATUS_SUCCESS}" \

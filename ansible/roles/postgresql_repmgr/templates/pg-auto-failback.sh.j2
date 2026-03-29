@@ -19,7 +19,7 @@ set -euo pipefail
 PREFERRED_PRIMARY="{{ dns_failover_primary | default('ns1') }}"
 NODE_NAME="{{ inventory_hostname }}"
 COOLDOWN_FILE="/tmp/pg-failback-cooldown"
-SETTLING_MIN=300   # 5 minutes
+SETTLING_MIN=1800  # 30 minutes
 COOLDOWN_MIN=1800  # 30 minutes
 
 # Only run on the preferred primary node
