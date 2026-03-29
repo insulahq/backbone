@@ -139,24 +139,62 @@ fi
 prompt SSH_PORT "SSH port" "22"
 echo ""
 
-echo -e "${BOLD}--- Backup (SFTP backup server) ---${NC}"
+echo -e "${BOLD}--- Backup ---${NC}"
 echo ""
+echo "  Restic encrypted backups to SFTP or S3-compatible storage."
 echo "  Leave empty to disable backups for now. You can enable later."
-prompt_optional SFTP_USER "backup server subaccount user"
-prompt_optional SFTP_HOST "backup server hostname"
-if [ -n "$SFTP_USER" ] && [ -n "$SFTP_HOST" ]; then
-    BACKUP_ENABLED="true"
-    prompt_optional SFTP_PATH "backup server base path" "/backups"
-    prompt_optional BACKUP_SSH_KEY "SSH key for backup server SFTP (use a SEPARATE key, not the bootstrap key)" ""
-    if [ -z "$BACKUP_SSH_KEY" ]; then
-        warn "No backup SSH key specified. Generate one with: ssh-keygen -t ed25519 -f ~/.ssh/backup-sftp.key"
-        BACKUP_SSH_KEY=""
-    fi
-else
-    BACKUP_ENABLED="false"
-    SFTP_PATH="/backups"
-    BACKUP_SSH_KEY=""
-fi
+echo ""
+echo "  1) SFTP (Hetzner Storage Box, rsync.net, any SSH server)"
+echo "  2) S3   (AWS S3, MinIO, Wasabi, Backblaze B2)"
+echo "  3) Skip (configure later)"
+echo ""
+echo -en "${BOLD}Backup target [1/2/3]:${NC} "
+read -r BACKUP_CHOICE
+BACKUP_CHOICE="${BACKUP_CHOICE:-3}"
+
+BACKUP_BACKEND="sftp"
+BACKUP_ENABLED="false"
+SFTP_USER=""
+SFTP_HOST=""
+SFTP_PATH="backups"
+SFTP_PORT="22"
+BACKUP_SSH_KEY=""
+S3_ENDPOINT=""
+S3_BUCKET=""
+S3_PATH=""
+S3_ACCESS_KEY=""
+S3_SECRET_KEY=""
+S3_REGION=""
+
+case "$BACKUP_CHOICE" in
+    1)
+        BACKUP_BACKEND="sftp"
+        BACKUP_ENABLED="true"
+        echo ""
+        prompt SFTP_USER "SFTP user (e.g., u123456-sub1)"
+        prompt SFTP_HOST "SFTP hostname (e.g., u123456.your-storagebox.de)"
+        prompt_optional SFTP_PATH "SFTP base path" "backups"
+        prompt_optional SFTP_PORT "SFTP port (23 for Hetzner Storage Box)" "22"
+        prompt_optional BACKUP_SSH_KEY "SSH key for backup SFTP (separate from bootstrap key)" ""
+        if [ -z "$BACKUP_SSH_KEY" ]; then
+            warn "No backup SSH key specified. Generate one with: ssh-keygen -t ed25519 -f ~/.ssh/backup-sftp.key"
+        fi
+        ;;
+    2)
+        BACKUP_BACKEND="s3"
+        BACKUP_ENABLED="true"
+        echo ""
+        prompt S3_ENDPOINT "S3 endpoint (e.g., s3.eu-central-1.amazonaws.com)"
+        prompt S3_BUCKET "S3 bucket name"
+        prompt_optional S3_PATH "Path prefix inside bucket" ""
+        prompt S3_ACCESS_KEY "S3 access key"
+        prompt S3_SECRET_KEY "S3 secret key"
+        prompt_optional S3_REGION "S3 region (some providers require this)" ""
+        ;;
+    *)
+        info "Backups disabled — configure later in group_vars/all.yml"
+        ;;
+esac
 echo ""
 
 echo -e "${BOLD}--- Organization ---${NC}"
@@ -282,38 +320,43 @@ gatus_domain: "status.{{ platform_domain }}"
 
 # Backup
 backup_enabled: ${BACKUP_ENABLED}
+backup_backend: ${BACKUP_BACKEND}
 ALLVARS_EOF
 
-if [ "$BACKUP_ENABLED" = "true" ]; then
+if [ "$BACKUP_BACKEND" = "sftp" ] && [ "$BACKUP_ENABLED" = "true" ]; then
     cat >> group_vars/all.yml << BACKUP_EOF
 backup_sftp_user: ${SFTP_USER}
 backup_sftp_host: ${SFTP_HOST}
 backup_sftp_path: ${SFTP_PATH}
-restic_ssh_key_src: "${BACKUP_SSH_KEY}"
+backup_sftp_port: ${SFTP_PORT}
+BACKUP_EOF
+    if [ -n "$BACKUP_SSH_KEY" ]; then
+        echo "restic_ssh_key_src: \"${BACKUP_SSH_KEY}\"" >> group_vars/all.yml
+    fi
+fi
+
+if [ "$BACKUP_BACKEND" = "s3" ] && [ "$BACKUP_ENABLED" = "true" ]; then
+    cat >> group_vars/all.yml << BACKUP_EOF
+backup_s3_endpoint: ${S3_ENDPOINT}
+backup_s3_bucket: ${S3_BUCKET}
+backup_s3_path: "${S3_PATH}"
+backup_s3_access_key: "${S3_ACCESS_KEY}"
+backup_s3_secret_key: "${S3_SECRET_KEY}"
+backup_s3_region: "${S3_REGION}"
 BACKUP_EOF
 fi
 
 cat >> group_vars/all.yml << 'PATHS_EOF'
 
-# Backup paths per server
+# Backup paths per server (/opt covers all service configs + data)
 ns1_backup_paths:
-  - /opt/postgresql/backups
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /opt/gatus
-  - /opt/portainer
+  - /opt
   - /etc/restic
   - /root/.ssh
   - /etc/wireguard
 
 ns2_backup_paths:
-  - /opt/postgresql/backups
-  - /opt/powerdns
-  - /opt/netbird
-  - /opt/zitadel
-  - /opt/gatus
-  - /opt/portainer
+  - /opt
   - /etc/restic
   - /root/.ssh
   - /etc/wireguard
