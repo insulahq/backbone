@@ -50,11 +50,61 @@
 
     # DNS record for Uptime Kuma (active-passive, primary IP only)
     - name: Create DNS A record for Uptime Kuma
-      shell: >
-        /usr/local/bin/platform-dns-switch primary-only 2>&1
-      changed_when: false
+      uri:
+        url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+        method: PATCH
+        headers:
+          X-API-Key: "{{ powerdns_api_key }}"
+        body_format: json
+        body:
+          rrsets:
+            - name: "{{ uptime_kuma_domain }}."
+              type: A
+              ttl: 30
+              changetype: REPLACE
+              records:
+                - content: "{{ hostvars[dns_failover_primary | default('ns1')]['ansible_host'] }}"
+                  disabled: false
+        status_code: [200, 204]
       ignore_errors: true
-      when: uptime_kuma_create_dns_records | bool
+      when:
+        - uptime_kuma_create_dns_records | bool
+        - powerdns_api_key is defined
+      tags: [uptime-kuma]
+
+    - name: Create DNS AAAA record for Uptime Kuma
+      uri:
+        url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+        method: PATCH
+        headers:
+          X-API-Key: "{{ powerdns_api_key }}"
+        body_format: json
+        body:
+          rrsets:
+            - name: "{{ uptime_kuma_domain }}."
+              type: AAAA
+              ttl: 30
+              changetype: REPLACE
+              records:
+                - content: "{{ hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] }}"
+                  disabled: false
+        status_code: [200, 204]
+      ignore_errors: true
+      when:
+        - uptime_kuma_create_dns_records | bool
+        - powerdns_api_key is defined
+        - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
+      tags: [uptime-kuma]
+
+    - name: Increment SOA serial after DNS record creation
+      community.docker.docker_container_exec:
+        container: powerdns-auth
+        command: pdnsutil increase-serial {{ platform_domain }}
+      changed_when: true
+      ignore_errors: true
+      when:
+        - uptime_kuma_create_dns_records | bool
+        - powerdns_api_key is defined
       tags: [uptime-kuma]
 
     - name: Display Uptime Kuma info
