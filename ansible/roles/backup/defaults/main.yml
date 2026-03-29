@@ -1,6 +1,6 @@
 ---
 # Backup Role — Default Variables
-# Deploys Restic backup to SFTP backup server
+# Deploys Restic backup to SFTP or S3-compatible storage
 
 # Set to false to skip backup deployment (e.g., no backup server credentials yet)
 backup_enabled: true
@@ -11,18 +11,36 @@ restic_install_dir: /usr/local/bin
 restic_config_dir: /etc/restic
 restic_cache_dir: /var/cache/restic
 
-# Backup repository (SFTP backup server)
-restic_repository: "sftp:{{ backup_sftp_user }}@{{ backup_sftp_host }}:{{ backup_sftp_path }}/{{ inventory_hostname }}"
-# backup_sftp_user: user@example
-# backup_sftp_host: sftp.example.com
-# backup_sftp_path: /backups
+# Backend type: "sftp" or "s3"
+backup_backend: sftp
+
+# --- SFTP backend settings ---
+# restic_repository is auto-constructed from these when backup_backend=sftp
+backup_sftp_user: ""
+backup_sftp_host: ""
+backup_sftp_path: backups
 backup_sftp_port: 22  # Override to 23 for Hetzner Storage Box
 
-# SSH key for backup server access
-# The private key is copied from the control machine to each server.
-# Stored in restic config dir (not /root/.ssh) so the hardened systemd service can read it.
+# SSH key for SFTP backup server access
 restic_ssh_key_src: "~/hosting-platform.key"      # path on control machine
 restic_ssh_key_path: /etc/restic/hosting-platform.key  # deployed path on servers
+
+# --- S3 backend settings ---
+# Works with AWS S3, MinIO, Backblaze B2, Wasabi, or any S3-compatible service
+backup_s3_endpoint: ""       # e.g. s3.amazonaws.com, s3.eu-central-1.amazonaws.com, s3.wasabisys.com
+backup_s3_bucket: ""         # e.g. my-hosting-backups
+backup_s3_path: ""           # optional prefix inside bucket (e.g. backups)
+backup_s3_access_key: ""
+backup_s3_secret_key: ""
+backup_s3_region: ""         # optional, some providers require it
+
+# Repository URL — auto-constructed based on backend type
+restic_repository: >-
+  {% if backup_backend == 's3' -%}
+  s3:https://{{ backup_s3_endpoint }}/{{ backup_s3_bucket }}{{ ('/' + backup_s3_path) if backup_s3_path else '' }}/{{ inventory_hostname }}
+  {%- else -%}
+  sftp:{{ backup_sftp_user }}@{{ backup_sftp_host }}:{{ backup_sftp_path }}/{{ inventory_hostname }}
+  {%- endif %}
 
 # Restic repository password (for encryption)
 # restic_password: <set in vault or group_vars>

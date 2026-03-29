@@ -137,17 +137,30 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_email_to: "admin@example.com"
 
 # ============================================================================
-# Backup (Restic to SFTP backup server)
+# Backup (Restic to SFTP or S3-compatible storage)
 # ============================================================================
-# Set to false to skip backup deployment (e.g., no backup server credentials yet)
+# Set to false to skip backup deployment (e.g., no credentials yet)
 backup_enabled: false
+
+# Backend type: "sftp" or "s3"
+backup_backend: sftp
+
+# --- SFTP backend (default) ---
 backup_sftp_user: <YOUR_SFTP_USER>
 backup_sftp_host: <YOUR_SFTP_HOST>
 backup_sftp_path: backups
 # backup_sftp_port: 23  # Hetzner Storage Box uses port 23 (default: 22)
-# SSH key for backup server SFTP access (separate from per-server Ansible keys).
-# Default: ~/hosting-platform.key — override if your backup server uses a different key.
-# restic_ssh_key_src: "~/hosting-platform.key"
+# restic_ssh_key_src: "~/hosting-platform.key"  # SSH key on control machine
+
+# --- S3 backend (any S3-compatible service) ---
+# Uncomment and set backup_backend: s3 to use S3 instead of SFTP
+# backup_s3_endpoint: s3.eu-central-1.amazonaws.com  # AWS, MinIO, Wasabi, Backblaze, etc.
+# backup_s3_bucket: my-hosting-backups
+# backup_s3_path: ""                                  # optional prefix inside bucket
+# backup_s3_access_key: <YOUR_ACCESS_KEY>
+# backup_s3_secret_key: <YOUR_SECRET_KEY>
+# backup_s3_region: eu-central-1                      # optional, some providers require it
+
 # If left undefined, auto-generated and persisted in .generated_secrets/
 # WARNING: changing this after repo init makes existing backups inaccessible (gotcha 10)
 # restic_password: "<GENERATE: openssl rand -base64 22>"

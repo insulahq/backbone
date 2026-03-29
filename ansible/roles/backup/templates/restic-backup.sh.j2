@@ -10,16 +10,16 @@ export RESTIC_REPOSITORY="{{ restic_repository }}"
 export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
 export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
 
-# SFTP options: bypass system SSH config to avoid NetBird ProxyCommand interception.
-# NetBird installs a global Match exec rule that intercepts ALL SSH connections.
-# We use -F /dev/null to skip SSH config and specify all options explicitly.
-# restic's sftp.args replaces the FULL sftp command (including binary name).
-# Using a bash array ensures the multi-word sftp.args value is passed as a single argument.
-# Use sftp.command (not sftp.args) — spawns SSH directly with full control over
-# port, known_hosts, and identity file. Avoids sftp binary's own SSH subprocess
-# which may use different host key verification paths.
+{% if backup_backend == 's3' %}
+# S3 backend — load credentials from environment file
+set -a; source {{ restic_config_dir }}/s3.env; set +a
+RESTIC_OPTS=()
+{% else %}
+# SFTP backend — use sftp.command for full control over SSH port/keys.
+# Bypasses NetBird ProxyCommand interception (-F /dev/null).
 SFTP_CMD="ssh -F /dev/null -p {{ backup_sftp_port }} -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }} -s sftp"
 RESTIC_OPTS=("-o" "sftp.command=${SFTP_CMD}")
+{% endif %}
 
 # Logging
 LOG_FILE="/var/log/restic/backup-{{ inventory_hostname }}.log"

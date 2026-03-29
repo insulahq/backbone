@@ -94,11 +94,13 @@
     mode: '0600'
   no_log: true
 
+# --- SFTP backend setup ---
 - name: Ensure .ssh directory exists
   file:
     path: /root/.ssh
     state: directory
     mode: '0700'
+  when: backup_backend == 'sftp'
 
 - name: Deploy backup server SSH private key from control machine
   copy:
@@ -106,6 +108,7 @@
     dest: "{{ restic_ssh_key_path }}"
     mode: '0600'
   no_log: true
+  when: backup_backend == 'sftp'
 
 - name: Create SSH config for backup server
   copy:
@@ -116,26 +119,51 @@
         UserKnownHostsFile /root/.ssh/known_hosts
     dest: /root/.ssh/config
     mode: '0600'
+  when: backup_backend == 'sftp'
 
 - name: Scan and trust backup server host keys (restic-specific known_hosts)
-  # Restic bypasses system SSH config (due to NetBird ProxyCommand interception).
-  # Seed a dedicated known_hosts file in restic config dir used by the backup script.
   shell: |
     ssh-keyscan -H -p {{ backup_sftp_port }} {{ backup_sftp_host }} 2>/dev/null > {{ restic_config_dir }}/known_hosts.tmp
     mv {{ restic_config_dir }}/known_hosts.tmp {{ restic_config_dir }}/known_hosts
     chmod 600 {{ restic_config_dir }}/known_hosts
   changed_when: true
+  when: backup_backend == 'sftp'
 
 - name: Test backup server SFTP connection
-  # SFTP backup server only supports SFTP, not shell commands.
-  # Use -F /dev/null to bypass NetBird SSH config interception (gotcha 9).
-  # Use the restic-specific known_hosts file seeded by the keyscan task above.
   shell: "echo quit | sftp -F /dev/null -oPort={{ backup_sftp_port }} -oConnectTimeout=10 -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }}"
   register: sftp_test
   changed_when: false
   failed_when: sftp_test.rc != 0
   retries: 3
   delay: 5
+  when: backup_backend == 'sftp'
+
+# --- S3 backend setup ---
+- name: Deploy S3 credentials environment file
+  copy:
+    content: |
+      AWS_ACCESS_KEY_ID={{ backup_s3_access_key }}
+      AWS_SECRET_ACCESS_KEY={{ backup_s3_secret_key }}
+      {% if backup_s3_region %}
+      AWS_DEFAULT_REGION={{ backup_s3_region }}
+      {% endif %}
+    dest: "{{ restic_config_dir }}/s3.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: backup_backend == 's3'
+
+- name: Test S3 backend connectivity
+  shell: |
+    set -a; source {{ restic_config_dir }}/s3.env; set +a
+    export RESTIC_REPOSITORY="{{ restic_repository }}"
+    export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
+    restic snapshots --no-lock 2>&1 || restic init 2>&1
+  register: s3_test
+  changed_when: "'created restic repository' in s3_test.stdout"
+  failed_when: s3_test.rc != 0
+  when: backup_backend == 's3'
 
 - name: Deploy backup script
   template:

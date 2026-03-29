@@ -13,10 +13,15 @@ export RESTIC_REPOSITORY="{{ restic_repository }}"
 export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/password"
 export RESTIC_CACHE_DIR="{{ restic_cache_dir }}"
 
-# Use sftp.command (not sftp.args) — spawns SSH directly for reliable
-# port, known_hosts, and identity file handling.
+{% if backup_backend == 's3' %}
+# S3 backend — load credentials
+set -a; source {{ restic_config_dir }}/s3.env; set +a
+RESTIC_OPTS=()
+{% else %}
+# SFTP backend
 SFTP_CMD="ssh -F /dev/null -p {{ backup_sftp_port }} -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile={{ restic_config_dir }}/known_hosts -i {{ restic_ssh_key_path }} {{ backup_sftp_user }}@{{ backup_sftp_host }} -s sftp"
 RESTIC_OPTS=("-o" "sftp.command=${SFTP_CMD}")
+{% endif %}
 
 RESTORE_DIR="/tmp/restore"
 HOSTNAME="{{ inventory_hostname }}"
