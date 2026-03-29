@@ -1,0 +1,43 @@
+---
+# Uptime Kuma — UI-Based Monitoring ({{ inventory_hostname }})
+# Supplements Gatus for user-managed monitors and notifications.
+# Single-node deployment — Gatus handles infrastructure HA monitoring.
+
+services:
+  uptime-kuma:
+    image: {{ uptime_kuma_image }}
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - {{ uptime_kuma_install_dir }}/data:/app/data
+    networks:
+      - traefik_public
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.uptime-kuma.rule=Host(`{{ uptime_kuma_domain }}`)
+      - traefik.http.routers.uptime-kuma.entrypoints=websecure
+      - traefik.http.routers.uptime-kuma.tls=true
+      - traefik.http.routers.uptime-kuma.tls.certresolver=letsencrypt
+      - traefik.http.routers.uptime-kuma.middlewares=ratelimit@file
+      - traefik.http.services.uptime-kuma.loadbalancer.server.port=3001
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const r=http.get('http://localhost:3001/api/status-page/heartbeat',{timeout:3000},s=>{process.exit(s.statusCode===200?0:1)});r.on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+networks:
+  traefik_public:
+    external: true
+    name: {{ traefik_public_network | default('traefik_public') }}

@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: uptime_kuma
+  description: Optional Uptime Kuma UI-based monitoring (supplements Gatus)
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

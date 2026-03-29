@@ -1,0 +1,19 @@
+---
+# Deploy Uptime Kuma — Optional UI-Based Monitoring
+#
+# Supplements Gatus (infrastructure HA monitoring) with a user-friendly
+# web UI for adding custom monitors and notification targets.
+#
+# Set uptime_kuma_enabled: true in group_vars/all.yml before running.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml deploy-uptime-kuma.yml
+
+- import_playbook: _ssh-keys.yml
+
+- name: Deploy Uptime Kuma
+  hosts: dns_servers
+  gather_facts: false
+  roles:
+    - role: uptime_kuma
+      tags: [uptime-kuma]

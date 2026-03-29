@@ -1,0 +1,23 @@
+---
+# Uptime Kuma — Optional UI-Based Monitoring
+# Supplements Gatus (infrastructure HA monitoring) with a user-friendly
+# web UI for adding custom monitors and notification targets.
+#
+# Set uptime_kuma_enabled: true in group_vars/all.yml to deploy.
+# Runs on a single node (not HA) — Gatus handles infrastructure HA.
+
+uptime_kuma_enabled: false
+
+# Version
+uptime_kuma_version: "1"
+uptime_kuma_image: "louislam/uptime-kuma:{{ uptime_kuma_version }}-slim"
+
+# Installation
+uptime_kuma_install_dir: /opt/uptime-kuma
+uptime_kuma_node: "{{ groups['dns_servers'] | first }}"  # Deploy on primary node only
+
+# Domain (behind Traefik)
+uptime_kuma_domain: "monitor.{{ platform_domain }}"
+
+# DNS record management
+uptime_kuma_create_dns_records: true

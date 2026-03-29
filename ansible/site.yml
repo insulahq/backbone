@@ -226,6 +226,7 @@
     - { role: netbird_management, tags: [netbird, netbird_management, phase2] }
     - { role: gatus, tags: [gatus, phase2] }
     - { role: portainer, tags: [portainer, phase2] }
+    - { role: uptime_kuma, tags: [uptime-kuma, phase2] }
     - { role: backup, tags: [backup, phase2] }
 
 # ============================================================================

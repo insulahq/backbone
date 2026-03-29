@@ -1,0 +1,74 @@
+---
+# Uptime Kuma — Optional UI-Based Monitoring
+# Only deploys on the configured node when uptime_kuma_enabled is true.
+
+- name: Skip Uptime Kuma (not enabled)
+  debug:
+    msg: "Uptime Kuma is disabled (set uptime_kuma_enabled: true to deploy)"
+  when: not (uptime_kuma_enabled | bool)
+  tags: [uptime-kuma]
+
+- name: Skip Uptime Kuma (not target node)
+  debug:
+    msg: "Uptime Kuma runs on {{ uptime_kuma_node }} only (this is {{ inventory_hostname }})"
+  when: uptime_kuma_enabled | bool and inventory_hostname != uptime_kuma_node
+  tags: [uptime-kuma]
+
+- block:
+    - name: Create Uptime Kuma directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ uptime_kuma_install_dir }}"
+        - "{{ uptime_kuma_install_dir }}/data"
+      tags: [uptime-kuma]
+
+    - name: Deploy docker-compose.yml
+      template:
+        src: docker-compose.yml.j2
+        dest: "{{ uptime_kuma_install_dir }}/docker-compose.yml"
+        mode: '0644'
+      tags: [uptime-kuma]
+
+    - name: Start Uptime Kuma
+      community.docker.docker_compose_v2:
+        project_src: "{{ uptime_kuma_install_dir }}"
+        state: present
+        pull: always
+      tags: [uptime-kuma]
+
+    - name: Wait for Uptime Kuma to be ready
+      uri:
+        url: "http://127.0.0.1:3001/api/status-page/heartbeat"
+        method: GET
+        status_code: [200, 401, 403]
+        timeout: 5
+      register: _uk_health
+      retries: 12
+      delay: 5
+      until: _uk_health is success
+      tags: [uptime-kuma]
+
+    # DNS record for Uptime Kuma (active-passive, primary IP only)
+    - name: Create DNS A record for Uptime Kuma
+      shell: >
+        /usr/local/bin/platform-dns-switch primary-only 2>&1
+      changed_when: false
+      ignore_errors: true
+      when: uptime_kuma_create_dns_records | bool
+      tags: [uptime-kuma]
+
+    - name: Display Uptime Kuma info
+      debug:
+        msg:
+          - "Uptime Kuma deployed on {{ inventory_hostname }}"
+          - "Dashboard: https://{{ uptime_kuma_domain }}"
+          - ""
+          - "First visit: create an admin account at the URL above."
+          - "Data stored at: {{ uptime_kuma_install_dir }}/data/"
+          - "Backed up automatically via /opt in restic."
+      tags: [uptime-kuma]
+
+  when: uptime_kuma_enabled | bool and inventory_hostname == uptime_kuma_node

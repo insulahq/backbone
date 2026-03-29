@@ -16,6 +16,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 | **Zitadel** | Central IAM (OIDC/OAuth2) for service authentication |
 | **Gatus** | HA monitoring dashboard, active health checks, multi-channel alerting |
 | **Portainer** | Docker management UI (VPN-only access) |
+| **Uptime Kuma** | Optional UI-based monitoring for user-managed checks (supplements Gatus) |
 | **Restic** | Encrypted incremental backups to SFTP or S3-compatible storage |
 | **OS hardening** | nftables firewall, fail2ban, SSH hardening, Docker CE |
 

@@ -137,6 +137,14 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_email_to: "admin@example.com"
 
 # ============================================================================
+# Uptime Kuma — Optional UI-Based Monitoring
+# ============================================================================
+# Supplements Gatus (infrastructure HA) with a web UI for user-managed monitors.
+# Set to true to deploy on the primary node.
+# uptime_kuma_enabled: true
+# uptime_kuma_domain: "monitor.{{ platform_domain }}"
+
+# ============================================================================
 # Backup (Restic to SFTP or S3-compatible storage)
 # ============================================================================
 # Set to false to skip backup deployment (e.g., no credentials yet)

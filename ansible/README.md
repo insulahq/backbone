@@ -16,6 +16,7 @@ Ansible playbooks and roles for deploying the hosting platform infrastructure on
 | `netbird_peer` | NetBird peer client enrollment | ns1, ns2 |
 | `gatus` | Gatus HA monitoring dashboard + multi-channel alerting | ns1, ns2 |
 | `portainer` | Portainer CE Docker management (VPN-only access) | ns1, ns2 |
+| `uptime_kuma` | Optional Uptime Kuma UI monitoring (supplements Gatus) | ns1 (configurable) |
 | `backup` | Restic encrypted backup to SFTP or S3-compatible storage | ns1, ns2 |
 
 ## Usage
