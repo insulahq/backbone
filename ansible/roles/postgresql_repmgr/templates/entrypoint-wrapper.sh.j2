@@ -565,7 +565,7 @@ start_as_standby() {
     # Configure as standby
     touch "$PGDATA/standby.signal"
     sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER application_name=$NODE_NAME'" \
       >> "$PGDATA/postgresql.auto.conf"
     echo "==> Failback preparation complete"
 
@@ -573,7 +573,7 @@ start_as_standby() {
     # --- Already a standby: update primary_conninfo ---
     # The primary hostname might have changed after a double-failover
     sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
+    echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER application_name=$NODE_NAME'" \
       >> "$PGDATA/postgresql.auto.conf"
   fi
 
@@ -604,7 +604,7 @@ start_as_standby() {
         repmgr -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
                -f "$REPMGR_CONFIG_FILE" standby clone
         sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-        echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
+        echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER application_name=$NODE_NAME'" \
           >> "$PGDATA/postgresql.auto.conf"
         echo "==> Re-clone complete, restarting..."
         RECLONED=true
@@ -675,7 +675,7 @@ start_as_standby() {
              -f "$REPMGR_CONFIG_FILE" standby clone
       # Restore primary_conninfo (may be stale after re-clone)
       sed -i "/^primary_conninfo/d" "$PGDATA/postgresql.auto.conf" 2>/dev/null || true
-      echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER'" \
+      echo "primary_conninfo = 'host=$PEER_NAME user=$REPMGR_USER application_name=$NODE_NAME'" \
         >> "$PGDATA/postgresql.auto.conf"
       echo "==> Re-clone complete, restarting..."
       postgres -D "$PGDATA" &
