@@ -1,23 +1,23 @@
 # Backup Role
 
-> **Status:** COMPLETE — Ready for deployment  
-> **Tool:** Restic 0.16.4  
-> **Target:** SFTP backup server
+> **Status:** COMPLETE — Ready for deployment
+> **Tool:** Restic 0.16.4
+> **Backends:** SFTP or S3-compatible storage (AWS, MinIO, Wasabi, Backblaze B2)
 
 ## Overview
 
-This role deploys Restic backup to SFTP backup server with:
+This role deploys encrypted incremental backups with:
+- **Database:** `pg_dumpall` piped directly to restic (no plaintext on disk)
+- **Files:** All service configs + data under `/opt`
 - Automated daily backups via systemd timer
-- Configurable retention policy
-- Encrypted repository (AES-256)
-- SFTP transport to backup server
-- Per-server backup paths configuration
+- Configurable retention policy (7 daily / 4 weekly / 12 monthly / 2 yearly)
+- Weekly 5% data integrity verification
+- Failure alerting via Gatus + optional webhook/email
+- On-server restore helper script (`/etc/restic/restore.sh`)
 
-**Key features:**
-- ✅ Restic installed from official GitHub releases
-- ✅ Systemd timer for scheduled backups
-- ✅ Retention policy (7 daily, 4 weekly, 12 monthly)
-- ✅ Weekly repository integrity checks
+**Supported backends:**
+- **SFTP** (default) — any SSH/SFTP server (Hetzner Storage Box, rsync.net, etc.)
+- **S3** — any S3-compatible service (AWS S3, MinIO, Wasabi, Backblaze B2, etc.)
 - ✅ Encrypted backups (repository password)
 - ✅ SSH key authentication to backup server
 
