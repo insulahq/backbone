@@ -21,7 +21,7 @@
       - gnupg
       - apt-transport-https
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Create apt keyrings directory
   file:
@@ -34,7 +34,7 @@
     url: https://pkgs.netbird.io/debian/public.key
     dest: /tmp/netbird.asc
     mode: '0644'
-    force: yes
+    force: true
 
 - name: Dearmor NetBird GPG key
   command: gpg --dearmor -o /usr/share/keyrings/netbird.gpg /tmp/netbird.asc
@@ -46,27 +46,27 @@
     repo: "deb [signed-by=/usr/share/keyrings/netbird.gpg] https://pkgs.netbird.io/debian/ stable main"
     state: present
     filename: netbird
-    update_cache: yes
+    update_cache: true
 
 - name: Install NetBird client
   apt:
     name: netbird
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Enable and start NetBird daemon
   systemd:
     name: netbird
     enabled: "{{ netbird_autostart }}"
     state: started
-    daemon_reload: yes
+    daemon_reload: true
 
 - name: Wait for NetBird daemon to be ready
   wait_for:
     path: /var/run/netbird.sock
     state: present
     timeout: 30
-  ignore_errors: yes
+  ignore_errors: true
 
 - name: Check if NetBird is already enrolled
   stat:

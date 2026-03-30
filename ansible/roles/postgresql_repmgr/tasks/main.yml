@@ -29,6 +29,8 @@
     - { name: postgresql_netbird_password, value: "{{ postgresql_netbird_password }}" }
     - { name: postgresql_netbird_dex_password, value: "{{ postgresql_netbird_dex_password }}" }
     - { name: postgresql_netbird_events_password, value: "{{ postgresql_netbird_events_password }}" }
+    - { name: postgresql_gatus_password, value: "{{ postgresql_gatus_password | default('') }}" }
+
 
 - name: Create PostgreSQL installation directory
   file:
@@ -272,9 +274,9 @@
 - name: Enable and start PostgreSQL maintenance timer
   systemd:
     name: pg-maintenance.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   when: postgresql_maintenance_enabled
   tags: [postgresql, maintenance]
 

@@ -85,13 +85,13 @@ See [docs/RECOVERY.md](docs/RECOVERY.md) for 9 detailed disaster recovery scenar
 
 ## Testing
 
-87 automated assertions validate the entire infrastructure:
+Automated assertions validate the entire infrastructure:
 
 ```bash
-# Non-destructive tests (66 checks: DNS, TLS, PostgreSQL, NetBird, services)
+# Non-destructive tests (DNS, TLS, PostgreSQL, NetBird, services)
 ansible-playbook -i inventory/hosts.yml test-suite.yml
 
-# Destructive failover tests (21 checks: promotion, DNS switch, recovery)
+# Destructive failover tests (promotion, DNS switch, recovery)
 ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 ```
 

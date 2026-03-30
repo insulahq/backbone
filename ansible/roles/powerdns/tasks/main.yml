@@ -157,7 +157,10 @@
     dest: "{{ powerdns_install_dir }}/pdns.conf"
     mode: '0640'
     owner: root
-    group: '953'  # pdns user UID inside the container
+    # GID 953 matches the pdns user inside the powerdns-auth container.
+    # This numeric GID is intentional — the group does not exist on the host OS,
+    # but the bind-mounted file must be readable by the container's pdns process.
+    group: '953'
   notify: restart powerdns
 
 - name: Deploy nginx proxy configuration
@@ -211,7 +214,7 @@
     status_code: [201, 409]  # 409 = already exists
   register: zone_create_result
   when: (_pg_is_primary.stdout | default('') | trim) == 't'
-  ignore_errors: yes
+  ignore_errors: true
 
 - name: Increment SOA serial after zone creation (gotcha 33)
   community.docker.docker_container_exec:
@@ -363,6 +366,39 @@
   when:
     - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
+  ignore_errors: true
+  tags: [powerdns, dns]
+
+- name: Create NS glue AAAA records (ns1/ns2 IPv6)
+  uri:
+    url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "ns1.{{ platform_domain }}."
+          type: AAAA
+          ttl: 3600
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars['ns1']['public_ipv6'] }}"
+              disabled: false
+        - name: "ns2.{{ platform_domain }}."
+          type: AAAA
+          ttl: 3600
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars['ns2']['public_ipv6'] }}"
+              disabled: false
+    status_code: [200, 204]
+  when:
+    - (_pg_is_primary.stdout | default('') | trim) == 't'
+    - powerdns_api_key is defined
+    - hostvars['ns1']['public_ipv6'] is defined
+    - hostvars['ns2']['public_ipv6'] is defined
   ignore_errors: true
   tags: [powerdns, dns]
 

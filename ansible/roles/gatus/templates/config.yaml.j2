@@ -8,7 +8,7 @@ storage:
   # Gatus uses lib/pq which doesn't support multi-host DSN (gotcha 119).
   # Connects via pgproxy which always routes to the current PG primary.
   # After failover, the PG entrypoint-wrapper updates pgproxy and restarts Gatus.
-  path: "postgres://{{ gatus_db_user }}:{{ gatus_db_password }}@pgproxy:5432/{{ gatus_db_name }}?sslmode=disable"
+  path: "postgres://{{ gatus_db_user }}:{{ postgresql_gatus_password }}@pgproxy:5432/{{ gatus_db_name }}?sslmode=disable"
 
 ui:
   title: "Hosting Platform"

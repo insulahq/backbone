@@ -59,6 +59,7 @@ postgresql_repmgr_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_dex_password: "<GENERATE: openssl rand -base64 22>"
 postgresql_netbird_events_password: "<GENERATE: openssl rand -base64 22>"
+postgresql_gatus_password: "<GENERATE: openssl rand -base64 22>"
 
 # ============================================================================
 # PowerDNS (both nodes, shared PostgreSQL HA backend)
@@ -142,7 +143,7 @@ gatus_domain: "status.{{ platform_domain }}"
 # Supplements Gatus (infrastructure HA) with a web UI for user-managed monitors.
 # Set to true to deploy on the primary node.
 # uptime_kuma_enabled: true
-# uptime_kuma_domain: "monitor.{{ platform_domain }}"
+uptime_kuma_domain: "monitor.{{ platform_domain }}"
 
 # ============================================================================
 # Backup (Restic to SFTP or S3-compatible storage)

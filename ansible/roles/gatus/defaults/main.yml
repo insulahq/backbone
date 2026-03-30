@@ -25,7 +25,7 @@ gatus_local_port: 8080
 # Database (uses existing PostgreSQL HA cluster via Docker network)
 gatus_db_name: gatus
 gatus_db_user: gatus
-# gatus_db_password: auto-generated and persisted in .generated_secrets/
+# postgresql_gatus_password: set in group_vars/all.yml (persisted in .generated_secrets/)
 
 # External endpoint token — shared by all push endpoints
 # Used by platform-alert.sh and entrypoint-wrapper.sh to authenticate pushes

@@ -25,8 +25,8 @@
 
 - name: Generate Gatus database password if not set
   set_fact:
-    gatus_db_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/gatus_db_password length=32 chars=ascii_letters,digits') }}"
-  when: gatus_db_password is not defined or gatus_db_password | length == 0
+    postgresql_gatus_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/postgresql_gatus_password length=32 chars=ascii_letters,digits') }}"
+  when: postgresql_gatus_password is not defined or postgresql_gatus_password | length == 0
   no_log: true
   tags: [gatus]
 
@@ -65,7 +65,7 @@
     container: postgresql
     command: >
       psql -U postgres -c
-      "CREATE USER {{ gatus_db_user }} WITH PASSWORD '{{ gatus_db_password }}'"
+      "CREATE USER {{ gatus_db_user }} WITH PASSWORD '{{ postgresql_gatus_password }}'"
   when:
     - inventory_hostname == postgresql_primary_node
     - gatus_user_check.stdout | default('') | trim == ""

@@ -23,13 +23,14 @@
   serial: 1
   gather_facts: false
   vars:
-    _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer')) | split(',') }}"
+    _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer,powerdns')) | split(',') }}"
     _service_dirs:
       netbird: /opt/netbird
       gatus: /opt/gatus
       zitadel: /opt/zitadel
       traefik: /opt/traefik
       portainer: /opt/portainer
+      powerdns: /opt/powerdns
     _health_checks:
       netbird:
         url: "https://{{ ansible_host }}/api/instance"
@@ -43,6 +44,9 @@
       traefik:
         url: "https://{{ ansible_host }}/"
         host_header: "{{ platform_domain }}"
+      powerdns:
+        url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost"
+        host_header: "localhost"
   tasks:
 
     # --- Step 1: Drain DNS traffic from this node ---

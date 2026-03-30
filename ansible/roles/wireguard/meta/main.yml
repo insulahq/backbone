@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: wireguard
+  description: WireGuard mesh VPN between cluster nodes for private inter-node communication
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

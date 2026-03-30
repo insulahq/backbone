@@ -10,7 +10,7 @@ Two-node active-passive backbone with full HA:
 - Post-promote hook updates pgproxy + DNS + restarts consumers
 - WAL gap auto-recovery with log-based confirmation
 - Rolling update playbook for zero-downtime container upgrades
-- All tests passing (62 non-destructive + 15 destructive failover)
+- All tests passing (non-destructive + destructive failover)
 
 ### Services Running
 

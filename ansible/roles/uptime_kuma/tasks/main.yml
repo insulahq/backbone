@@ -36,7 +36,7 @@
       community.docker.docker_compose_v2:
         project_src: "{{ uptime_kuma_install_dir }}"
         state: present
-        pull: always
+        pull: missing
       tags: [uptime-kuma]
 
     - name: Wait for Uptime Kuma container to be healthy

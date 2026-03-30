@@ -19,18 +19,18 @@ nginx_image: "nginx:1.27-alpine"
 powerdns_install_dir: /opt/powerdns
 
 # PowerDNS configuration
-powerdns_api_enabled: yes
-powerdns_webserver_enabled: yes
+powerdns_api_enabled: true
+powerdns_webserver_enabled: true
 powerdns_webserver_port: 8081
 powerdns_dns_port: 53
 
 # DNSSEC
-powerdns_dnssec_enabled: yes
+powerdns_dnssec_enabled: true
 
 # LUA records — enables ifurlup()/ifportup() health-checked DNS for active-passive failover.
 # When dns_health_check_enabled is true, static A/AAAA records are replaced
 # with LUA records that check actual service health and prefer dns_failover_primary.
-powerdns_lua_records_enabled: yes
+powerdns_lua_records_enabled: true
 
 # Nginx proxy — exposes API on NetBird interface only
 powerdns_nginx_api_port: 8081
