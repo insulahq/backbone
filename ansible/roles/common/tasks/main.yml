@@ -4,7 +4,7 @@
 
 - name: Update apt cache
   apt:
-    update_cache: yes
+    update_cache: true
   tags: [common, packages]
 
 - name: Install base packages
@@ -58,7 +58,7 @@
   systemd:
     name: fail2ban
     state: started
-    enabled: yes
+    enabled: true
   tags: [common, security, fail2ban]
 
 - name: Deploy simple nftables configuration (NO advanced pre/post-routing)
@@ -73,7 +73,7 @@
   systemd:
     name: nftables
     state: started
-    enabled: yes
+    enabled: true
   tags: [common, security, firewall]
 
 # Docker's iptables-nft rules bypass the nftables FORWARD chain entirely.
@@ -169,7 +169,7 @@
   systemd:
     name: docker
     state: started
-    enabled: yes
+    enabled: true
   tags: [common, docker]
 
 # Shared alert helper — sourced by all maintenance scripts
@@ -227,9 +227,9 @@
 - name: Enable and start Docker cleanup timer
   systemd:
     name: docker-cleanup.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   when: docker_cleanup_enabled
   tags: [common, docker, maintenance]
 
@@ -237,7 +237,7 @@
   user:
     name: root
     groups: docker
-    append: yes
+    append: true
   tags: [common, docker]
 
 - name: Verify Docker installation
@@ -297,9 +297,9 @@
 - name: Enable and start disk monitor timer
   systemd:
     name: disk-monitor.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   when: disk_monitor_enabled
   tags: [common, maintenance]
 
@@ -333,9 +333,9 @@
 - name: Enable and start image monitor timer
   systemd:
     name: image-monitor.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   when: image_monitor_enabled
   tags: [common, docker, maintenance]
 
@@ -398,8 +398,8 @@
 - name: Enable and start unattended-upgrades systemd timer
   systemd:
     name: apt-daily-upgrade.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   when: unattended_upgrades_enabled
   tags: [common, security, unattended_upgrades]

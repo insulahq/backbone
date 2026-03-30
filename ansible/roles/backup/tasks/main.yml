@@ -20,7 +20,7 @@
       - jq
       - bzip2
     state: present
-    update_cache: yes
+    update_cache: true
   tags: [backup]
 
 - name: Check if Restic is already installed
@@ -54,7 +54,7 @@
         src: "/tmp/restic_{{ restic_version }}"
         dest: "{{ restic_install_dir }}/restic"
         mode: '0755'
-        remote_src: yes
+        remote_src: true
       when: restic_download.changed
 
     - name: Clean up downloaded files
@@ -210,9 +210,9 @@
 - name: Enable and start backup timer
   systemd:
     name: restic-backup.timer
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
   tags: [backup]
 
 - name: Create backup paths list for display
