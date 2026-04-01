@@ -11,7 +11,7 @@ log() {
 }
 
 # Alert on unexpected errors
-trap 'platform_alert "critical" "docker" "Docker cleanup failed unexpectedly on line $LINENO"' ERR
+trap 'platform_alert "critical" "Images Up-to-Date" "Docker cleanup failed unexpectedly on line $LINENO"' ERR
 
 log "Starting Docker cleanup"
 

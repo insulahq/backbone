@@ -102,41 +102,42 @@ alerting:
 # External endpoints — receive pushes from infrastructure scripts
 # ============================================================================
 # platform-alert.sh and entrypoint-wrapper.sh push status updates here.
-# Key format: {group}_{name} (e.g., ns1_backup, ns2_disk)
+# Key format: {group}_{name} (e.g., ns1_Backup OK, ns2_Disk Below 80%)
 # Alerts auto-applied from alerting providers with default-alert enabled.
 external-endpoints:
 {% for host in groups['dns_servers'] %}
-  - name: backup
+{% set is_preferred_primary = (host == (postgresql_primary_node | default('ns1'))) %}
+  - name: Backup OK
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: disk
+  - name: "Disk Below {{ disk_monitor_warn_percent }}%"
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: docker
+  - name: Images Up-to-Date
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: postgresql
+  - name: PG Maintenance OK
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: repmgr
+  - name: Repmgr Healthy
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: pg-primary
+  - name: "{{ 'Role: Primary' if is_preferred_primary else 'Role: Standby' }}"
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: pg-writable
+  - name: PG Writable
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
@@ -148,7 +149,7 @@ external-endpoints:
 # ============================================================================
 endpoints:
 {% for host in groups['dns_servers'] %}
-  - name: "DNS"
+  - name: "DNS Resolution"
     group: {{ host }}
     url: "{{ hostvars[host]['ansible_host'] }}"
     dns:
@@ -158,7 +159,7 @@ endpoints:
       - "[DNS_RCODE] == NOERROR"
     interval: 2m
 {% endfor %}
-  - name: "Traefik"
+  - name: "HTTPS and TLS Certificate"
     group: platform
     url: "https://{{ platform_domain }}"
     client:
@@ -168,7 +169,7 @@ endpoints:
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 2m
 {% if zitadel_domain is defined %}
-  - name: "Zitadel"
+  - name: "Zitadel IAM Ready"
     group: platform
     url: "https://{{ zitadel_domain }}/debug/ready"
     client:
@@ -179,7 +180,7 @@ endpoints:
     interval: 2m
 {% endif %}
 {% if netbird_dashboard_domain is defined %}
-  - name: "NetBird"
+  - name: "NetBird VPN Mesh"
     group: platform
     url: "https://{{ netbird_dashboard_domain }}"
     client:
@@ -189,7 +190,7 @@ endpoints:
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 2m
 {% endif %}
-  - name: "Gatus"
+  - name: "Status Dashboard"
     group: platform
     url: "https://{{ gatus_domain }}/health"
     client:

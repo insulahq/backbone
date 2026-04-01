@@ -7,7 +7,7 @@
 set -euo pipefail
 source /usr/local/lib/platform-alert.sh
 
-CONTAINER="postgresql"
+CONTAINER="PG Maintenance OK"
 ERRORS=0
 
 log() {
@@ -15,11 +15,11 @@ log() {
 }
 
 # Alert on unexpected errors
-trap 'platform_alert "critical" "postgresql" "PostgreSQL maintenance failed unexpectedly on line $LINENO"' ERR
+trap 'platform_alert "critical" "PG Maintenance OK" "PostgreSQL maintenance failed unexpectedly on line $LINENO"' ERR
 
 # Check if PostgreSQL is running
 if ! docker exec "$CONTAINER" pg_isready -U postgres -q 2>/dev/null; then
-    platform_alert "warning" "postgresql" "PostgreSQL not ready — skipping maintenance"
+    platform_alert "warning" "PG Maintenance OK" "PostgreSQL not ready — skipping maintenance"
     exit 0
 fi
 
@@ -38,14 +38,14 @@ DATABASES=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT datname FROM 
 for DB in $DATABASES; do
     log "Running VACUUM ANALYZE on database: $DB"
     if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1; then
-        platform_alert "warning" "postgresql" "VACUUM ANALYZE failed on database $DB"
+        platform_alert "warning" "PG Maintenance OK" "VACUUM ANALYZE failed on database $DB"
         ERRORS=$((ERRORS + 1))
     fi
 
     # Reindex system catalogs (prevents index bloat on heavily-written databases like Zitadel)
     log "Running REINDEX SYSTEM on database: $DB"
     if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM" 2>&1; then
-        platform_alert "warning" "postgresql" "REINDEX SYSTEM failed on database $DB"
+        platform_alert "warning" "PG Maintenance OK" "REINDEX SYSTEM failed on database $DB"
         ERRORS=$((ERRORS + 1))
     fi
 done
@@ -65,10 +65,10 @@ if [ -n "$SLOT_INFO" ]; then
             lag_mb=$((${lag:-0} / 1048576))
             log "  Slot: $name | Active: $active | WAL lag: ${lag_mb}MB"
             if [ "${lag_mb}" -gt 5120 ]; then
-                platform_alert "warning" "postgresql" "Replication slot $name has ${lag_mb}MB WAL lag (>5GB). Standby may need re-clone."
+                platform_alert "warning" "PG Maintenance OK" "Replication slot $name has ${lag_mb}MB WAL lag (>5GB). Standby may need re-clone."
             fi
             if [ "$active" = "f" ] && [ "${lag_mb}" -gt 1024 ]; then
-                platform_alert "warning" "postgresql" "Replication slot $name is INACTIVE with ${lag_mb}MB WAL lag. Consider dropping if standby is permanently offline."
+                platform_alert "warning" "PG Maintenance OK" "Replication slot $name is INACTIVE with ${lag_mb}MB WAL lag. Consider dropping if standby is permanently offline."
             fi
         fi
     done
@@ -86,7 +86,7 @@ docker exec "$CONTAINER" psql -U postgres -c "
     ORDER BY pg_database_size(datname) DESC" 2>&1
 
 if [ "$ERRORS" -gt 0 ]; then
-    platform_alert "warning" "postgresql" "PostgreSQL maintenance completed with $ERRORS error(s)"
+    platform_alert "warning" "PG Maintenance OK" "PostgreSQL maintenance completed with $ERRORS error(s)"
 else
     log "PostgreSQL maintenance completed successfully"
 fi

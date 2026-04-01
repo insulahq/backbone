@@ -37,7 +37,7 @@ error() {
 notify_failure() {
     local msg="$1"
     error "$msg"
-    platform_alert "critical" "backup" "Backup FAILED on {{ inventory_hostname }}: $msg"
+    platform_alert "critical" "Backup OK" "Backup FAILED on {{ inventory_hostname }}: $msg"
 {% if restic_healthcheck_url %}
     curl -fsS --retry 3 "{{ restic_healthcheck_url }}/fail" > /dev/null 2>&1 || true
 {% endif %}
@@ -158,7 +158,7 @@ log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"
 log "Repository size: $REPO_SIZE bytes"
 
 # Report success to Gatus dashboard
-platform_alert "info" "backup" "Backup completed: $SNAPSHOT_COUNT snapshots, $REPO_SIZE bytes"
+platform_alert "info" "Backup OK" "Backup completed: $SNAPSHOT_COUNT snapshots, $REPO_SIZE bytes"
 
 # Health check ping (success)
 {% if restic_healthcheck_url %}
