@@ -76,14 +76,67 @@ info "Checking prerequisites..."
 
 MISSING=""
 command -v openssl  >/dev/null 2>&1 || MISSING="$MISSING openssl"
-command -v wg       >/dev/null 2>&1 || MISSING="$MISSING wireguard-tools(wg)"
+command -v wg       >/dev/null 2>&1 || MISSING="$MISSING wireguard-tools"
 command -v ansible  >/dev/null 2>&1 || MISSING="$MISSING ansible"
 command -v python3  >/dev/null 2>&1 || MISSING="$MISSING python3"
 
 if [ -n "$MISSING" ]; then
-    error "Missing required tools:$MISSING"
-    echo "  Install them first. See docs/BOOTSTRAP.md for instructions."
-    exit 1
+    warn "Missing required tools:$MISSING"
+    echo ""
+    echo -en "${BOLD}Install missing dependencies now? (Y/n):${NC} "
+    read -r install_deps
+    if [ "$install_deps" != "n" ] && [ "$install_deps" != "N" ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            info "Installing via apt..."
+            sudo apt-get update -qq
+            # Map tool names to package names
+            PKGS=""
+            for tool in $MISSING; do
+                case "$tool" in
+                    wireguard-tools) PKGS="$PKGS wireguard-tools" ;;
+                    ansible)        PKGS="$PKGS ansible" ;;
+                    openssl)        PKGS="$PKGS openssl" ;;
+                    python3)        PKGS="$PKGS python3" ;;
+                esac
+            done
+            sudo apt-get install -y $PKGS
+        elif command -v brew >/dev/null 2>&1; then
+            info "Installing via Homebrew..."
+            for tool in $MISSING; do
+                brew install "$tool"
+            done
+        elif command -v pacman >/dev/null 2>&1; then
+            info "Installing via pacman..."
+            PKGS=""
+            for tool in $MISSING; do
+                case "$tool" in
+                    python3) PKGS="$PKGS python" ;;
+                    *)       PKGS="$PKGS $tool" ;;
+                esac
+            done
+            sudo pacman -S --noconfirm $PKGS
+        else
+            error "No supported package manager found (apt, brew, pacman)."
+            echo "  Install manually:$MISSING"
+            echo "  See docs/BOOTSTRAP.md for instructions."
+            exit 1
+        fi
+        # Verify installation succeeded
+        STILL_MISSING=""
+        command -v openssl  >/dev/null 2>&1 || STILL_MISSING="$STILL_MISSING openssl"
+        command -v wg       >/dev/null 2>&1 || STILL_MISSING="$STILL_MISSING wireguard-tools"
+        command -v ansible  >/dev/null 2>&1 || STILL_MISSING="$STILL_MISSING ansible"
+        command -v python3  >/dev/null 2>&1 || STILL_MISSING="$STILL_MISSING python3"
+        if [ -n "$STILL_MISSING" ]; then
+            error "Failed to install:$STILL_MISSING"
+            exit 1
+        fi
+        ok "Dependencies installed"
+    else
+        error "Cannot continue without:$MISSING"
+        echo "  See docs/BOOTSTRAP.md for manual installation instructions."
+        exit 1
+    fi
 fi
 ok "All prerequisites found"
 echo ""
@@ -214,6 +267,7 @@ PG_REPMGR_PASS=$(openssl rand -base64 22)
 PG_NETBIRD_PASS=$(openssl rand -base64 22)
 PG_NETBIRD_DEX_PASS=$(openssl rand -base64 22)
 PG_NETBIRD_EVENTS_PASS=$(openssl rand -base64 22)
+PG_GATUS_PASS=$(openssl rand -base64 22)
 PDNS_API_KEY=$(openssl rand -base64 48)
 
 ok "All secrets generated locally"
@@ -301,6 +355,7 @@ postgresql_repmgr_password: "${PG_REPMGR_PASS}"
 postgresql_netbird_password: "${PG_NETBIRD_PASS}"
 postgresql_netbird_dex_password: "${PG_NETBIRD_DEX_PASS}"
 postgresql_netbird_events_password: "${PG_NETBIRD_EVENTS_PASS}"
+postgresql_gatus_password: "${PG_GATUS_PASS}"
 
 # PowerDNS
 powerdns_api_key: "${PDNS_API_KEY}"
@@ -368,6 +423,14 @@ PATHS_EOF
 ok "group_vars/all.yml written"
 
 # ============================================================================
+# Install Ansible Galaxy collections
+# ============================================================================
+
+info "Installing Ansible Galaxy collections..."
+ansible-galaxy install -r requirements.yml --force >/dev/null 2>&1
+ok "Ansible collections installed"
+
+# ============================================================================
 # Summary
 # ============================================================================
 
@@ -390,9 +453,7 @@ echo "      ${DOMAIN} NS -> ns1.${DOMAIN}, ns2.${DOMAIN}"
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
 echo "    1. Set up glue records at your registrar (if not done)"
-echo "    2. Install Ansible collections:"
-echo "       ansible-galaxy install -r requirements.yml"
-echo "    3. Deploy Phase 1 (infrastructure backbone):"
+echo "    2. Deploy Phase 1 (infrastructure backbone):"
 echo "       ansible-playbook -i inventory/hosts.yml site.yml --tags phase1 \\"
 echo "         -e \"ansible_ssh_private_key_file=${SSH_KEY_PATH}\""
 echo ""
