@@ -5,9 +5,9 @@
 #
 # Usage:
 #   source /usr/local/lib/platform-alert.sh
-#   platform_alert "critical" "Backup OK"           "Backup failed with exit code 1"
-#   platform_alert "warning"  "Disk Below 80%"      "/ is 85% full (2.1G available)"
-#   platform_alert "info"     "Repmgr Healthy"      "Standby promoted to primary"
+#   platform_alert "critical" "Backup-OK"                "Backup failed with exit code 1"
+#   platform_alert "warning"  "Disk-Below-80-Percent"    "/ is 85% full (2.1G available)"
+#   platform_alert "info"     "Repmgr-Healthy"           "Standby promoted to primary"
 
 PLATFORM_HOSTNAME="{{ inventory_hostname }}"
 PLATFORM_WEBHOOK_URL="{{ alert_webhook_url }}"
@@ -38,10 +38,8 @@ platform_alert() {
     # Push to local Gatus external endpoint (query-param API, no JSON body needed)
     if [ -n "$PLATFORM_GATUS_TOKEN" ]; then
         local gatus_key="${PLATFORM_HOSTNAME}_${service}"
-        # URL-encode spaces in endpoint key (Gatus uses name as URL path segment)
-        local gatus_key_encoded="${gatus_key// /%20}"
         curl -fsS --retry 2 --max-time 5 -X POST \
-            "${PLATFORM_GATUS_URL}/api/v1/endpoints/${gatus_key_encoded}/external?success=${gatus_success}" \
+            "${PLATFORM_GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \
             -H "Authorization: Bearer ${PLATFORM_GATUS_TOKEN}" \
             > /dev/null 2>&1 || \
             echo "[${timestamp}] WARNING: Failed to push to Gatus (endpoint: ${gatus_key})"

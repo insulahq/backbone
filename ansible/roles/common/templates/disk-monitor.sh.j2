@@ -22,10 +22,10 @@ while IFS= read -r line; do
     AVAIL=$(echo "$line" | awk '{print $4}')
 
     if [ "$USAGE" -ge "$CRIT_PERCENT" ]; then
-        platform_alert "critical" "Disk Below ${WARN_PERCENT}%" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
+        platform_alert "critical" "Disk-Below-${WARN_PERCENT}-Percent" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
         ALERT_COUNT=$((ALERT_COUNT + 1))
     elif [ "$USAGE" -ge "$WARN_PERCENT" ]; then
-        platform_alert "warning" "Disk Below ${WARN_PERCENT}%" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
+        platform_alert "warning" "Disk-Below-${WARN_PERCENT}-Percent" "${MOUNT} is ${USAGE}% full (${AVAIL} available)"
         ALERT_COUNT=$((ALERT_COUNT + 1))
     fi
 done < <(df -h -t ext4 -t xfs -t btrfs -t ext3 2>/dev/null || df -h --exclude-type=tmpfs --exclude-type=devtmpfs --exclude-type=overlay --exclude-type=squashfs 2>/dev/null)
@@ -44,5 +44,5 @@ fi
 if [ "$ALERT_COUNT" -eq 0 ]; then
     log "All filesystems within thresholds (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
     # Report healthy status to Gatus dashboard
-    platform_alert "info" "Disk Below ${WARN_PERCENT}%" "All filesystems OK (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
+    platform_alert "info" "Disk-Below-${WARN_PERCENT}-Percent" "All filesystems OK (warn=${WARN_PERCENT}%, crit=${CRIT_PERCENT}%)"
 fi

@@ -51,8 +51,8 @@ while IFS='|' read -r CONTAINER_NAME IMAGE; do
 done < <(docker ps --format '{% raw %}{{.Names}}|{{.Image}}{% endraw %}')
 
 if [ "$OUTDATED_COUNT" -gt 0 ]; then
-    platform_alert "warning" "Images Up-to-Date" "${OUTDATED_COUNT}/${CHECKED_COUNT} containers have updates: ${OUTDATED}"
+    platform_alert "warning" "Images-Up-to-Date" "${OUTDATED_COUNT}/${CHECKED_COUNT} containers have updates: ${OUTDATED}"
 else
     log "All ${CHECKED_COUNT} containers are up to date"
-    platform_alert "info" "Images Up-to-Date" "All ${CHECKED_COUNT} container images are up to date"
+    platform_alert "info" "Images-Up-to-Date" "All ${CHECKED_COUNT} container images are up to date"
 fi

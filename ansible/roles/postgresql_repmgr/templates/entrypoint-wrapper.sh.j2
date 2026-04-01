@@ -75,7 +75,7 @@ send_alert() {
 
   # Push to Gatus external endpoint (primary path)
   if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
-    local gatus_key="${NODE_NAME}_Repmgr%20Healthy"
+    local gatus_key="${NODE_NAME}_Repmgr-Healthy"
     if command -v curl &>/dev/null; then
       curl -fsS --retry 2 --max-time 5 -X POST \
         "${GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \
@@ -89,7 +89,7 @@ send_alert() {
     if command -v curl &>/dev/null; then
       local json_body
       json_body=$(_WH="${NODE_NAME}" _WL="${level}" _WT="${timestamp}" \
-        python3 -c "import sys,json,os; print(json.dumps({'host':os.environ['_WH'],'service':'Repmgr Healthy','level':os.environ['_WL'],'message':sys.stdin.read().strip(),'timestamp':os.environ['_WT']}))" \
+        python3 -c "import sys,json,os; print(json.dumps({'host':os.environ['_WH'],'service':'Repmgr-Healthy','level':os.environ['_WL'],'message':sys.stdin.read().strip(),'timestamp':os.environ['_WT']}))" \
         <<< "$message" 2>/dev/null || true)
       if [ -n "${json_body:-}" ]; then
         curl -fsS --retry 2 --max-time 10 -X POST \

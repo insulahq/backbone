@@ -102,42 +102,42 @@ alerting:
 # External endpoints — receive pushes from infrastructure scripts
 # ============================================================================
 # platform-alert.sh and entrypoint-wrapper.sh push status updates here.
-# Key format: {group}_{name} (e.g., ns1_Backup OK, ns2_Disk Below 80%)
+# Key format: {group}_{name} (e.g., ns1_Backup-OK, ns2_Disk-Below-80-Percent)
 # Alerts auto-applied from alerting providers with default-alert enabled.
 external-endpoints:
 {% for host in groups['dns_servers'] %}
 {% set is_preferred_primary = (host == (postgresql_primary_node | default('ns1'))) %}
-  - name: Backup OK
+  - name: Backup-OK
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: "Disk Below {{ disk_monitor_warn_percent }}%"
+  - name: Disk-Below-{{ disk_monitor_warn_percent }}-Percent
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: Images Up-to-Date
+  - name: Images-Up-to-Date
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: PG Maintenance OK
+  - name: PG-Maintenance-OK
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: Repmgr Healthy
+  - name: Repmgr-Healthy
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: "{{ 'Role: Primary' if is_preferred_primary else 'Role: Standby' }}"
+  - name: {{ 'Role-Primary' if is_preferred_primary else 'Role-Standby' }}
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: PG Writable
+  - name: PG-Writable
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
