@@ -75,7 +75,7 @@ send_alert() {
 
   # Push to Gatus external endpoint (primary path)
   if [ -n "${GATUS_TOKEN:-}" ] && [ -n "${GATUS_URL:-}" ]; then
-    local gatus_key="${NODE_NAME}_Repmgr-Healthy"
+    local gatus_key="${NODE_NAME}_repmgr-healthy"
     if command -v curl &>/dev/null; then
       curl -fsS --retry 2 --max-time 5 -X POST \
         "${GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \

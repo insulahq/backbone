@@ -37,7 +37,8 @@ platform_alert() {
 
     # Push to local Gatus external endpoint (query-param API, no JSON body needed)
     if [ -n "$PLATFORM_GATUS_TOKEN" ]; then
-        local gatus_key="${PLATFORM_HOSTNAME}_${service}"
+        # Gatus normalizes endpoint keys to lowercase
+        local gatus_key="${PLATFORM_HOSTNAME}_$(echo "${service}" | tr '[:upper:]' '[:lower:]')"
         curl -fsS --retry 2 --max-time 5 -X POST \
             "${PLATFORM_GATUS_URL}/api/v1/endpoints/${gatus_key}/external?success=${gatus_success}" \
             -H "Authorization: Bearer ${PLATFORM_GATUS_TOKEN}" \

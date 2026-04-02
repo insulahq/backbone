@@ -69,11 +69,11 @@ if [ -n "$GATUS_TOKEN" ]; then
 {% if inventory_hostname == (postgresql_primary_node | default('ns1')) %}
   # This is the preferred primary — green when actually primary
   ROLE_OK=$( [ "$PG_ROLE" = "f" ] && echo "true" || echo "false" )
-  ROLE_ENDPOINT="Role-Primary"
+  ROLE_ENDPOINT="role-primary"
 {% else %}
   # This is the preferred standby — green when actually standby
   ROLE_OK=$( [ "$PG_ROLE" = "t" ] && echo "true" || echo "false" )
-  ROLE_ENDPOINT="Role-Standby"
+  ROLE_ENDPOINT="role-standby"
 {% endif %}
   curl -fsS --max-time 3 -X POST \
     "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_${ROLE_ENDPOINT}/external?success=${ROLE_OK}" \
@@ -93,7 +93,7 @@ if [ "$PG_ROLE" = "f" ]; then
   # Push write-health to Gatus
   if [ -n "$GATUS_TOKEN" ]; then
     curl -fsS --max-time 3 -X POST \
-      "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_PG-Writable/external?success=${GATUS_SUCCESS}" \
+      "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-writable/external?success=${GATUS_SUCCESS}" \
       -H "Authorization: Bearer ${GATUS_TOKEN}" \
       >/dev/null 2>&1 || true
   fi
