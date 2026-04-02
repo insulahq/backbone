@@ -84,6 +84,12 @@ log "Running pre-backup hook"
 }
 {% endif %}
 
+# Remove stale locks from previous crashed/killed runs.
+# Restic leaves locks behind on SIGKILL, container restarts, or network timeouts.
+# Without this, every subsequent operation fails until manually unlocked.
+log "Clearing stale repository locks"
+restic "${RESTIC_OPTS[@]}" unlock --remove-all 2>>"$LOG_FILE" || true
+
 # Check if repository exists, initialize if not
 if ! restic "${RESTIC_OPTS[@]}" snapshots > /dev/null 2>&1; then
     log "Repository not found, initializing"
@@ -127,6 +133,7 @@ restic "${RESTIC_OPTS[@]}" forget \
     --keep-monthly {{ restic_keep_monthly }} \
     --keep-yearly {{ restic_keep_yearly }} \
     --prune \
+    --retry-lock 2m \
     --verbose 2>&1 | tee -a "$LOG_FILE"
 
 # Verify repository integrity (weekly only)
