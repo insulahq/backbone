@@ -33,11 +33,11 @@ cmd_list() {
     log "Listing snapshots for ${HOSTNAME}"
     echo ""
     echo "=== File snapshots ==="
-    restic "${RESTIC_OPTS[@]}" snapshots --host "$HOSTNAME" --compact 2>/dev/null || \
-        restic "${RESTIC_OPTS[@]}" snapshots --compact
+    restic "${RESTIC_OPTS[@]}" snapshots --no-lock --host "$HOSTNAME" --compact 2>/dev/null || \
+        restic "${RESTIC_OPTS[@]}" snapshots --no-lock --compact
     echo ""
     echo "=== Database snapshots (pg_dumpall) ==="
-    restic "${RESTIC_OPTS[@]}" snapshots --tag pgdump --compact 2>/dev/null || \
+    restic "${RESTIC_OPTS[@]}" snapshots --no-lock --tag pgdump --compact 2>/dev/null || \
         echo "No database snapshots found"
 }
 

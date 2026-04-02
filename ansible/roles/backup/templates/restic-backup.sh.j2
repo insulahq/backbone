@@ -91,7 +91,7 @@ log "Clearing stale repository locks"
 restic "${RESTIC_OPTS[@]}" unlock --remove-all 2>>"$LOG_FILE" || true
 
 # Check if repository exists, initialize if not
-if ! restic "${RESTIC_OPTS[@]}" snapshots > /dev/null 2>&1; then
+if ! restic "${RESTIC_OPTS[@]}" snapshots --no-lock > /dev/null 2>&1; then
     log "Repository not found, initializing"
     restic "${RESTIC_OPTS[@]}" init || {
         error "Failed to initialize repository"
@@ -139,7 +139,7 @@ restic "${RESTIC_OPTS[@]}" forget \
 # Verify repository integrity (weekly only)
 if [ "$(date +%u)" -eq 7 ]; then
     log "Running weekly repository check"
-    restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"
+    restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% --retry-lock 2m 2>&1 | tee -a "$LOG_FILE"
 
     # Clean up stale Restic cache entries (prevents unbounded cache growth)
     log "Cleaning up Restic cache"
@@ -157,8 +157,8 @@ log "Running post-backup hook"
 {% endif %}
 
 # Get backup statistics
-SNAPSHOT_COUNT=$(restic "${RESTIC_OPTS[@]}" snapshots --host "{{ inventory_hostname }}" --json | jq length)
-REPO_SIZE=$(restic "${RESTIC_OPTS[@]}" stats --host "{{ inventory_hostname }}" --json | jq -r '.total_size')
+SNAPSHOT_COUNT=$(restic "${RESTIC_OPTS[@]}" snapshots --no-lock --host "{{ inventory_hostname }}" --json | jq length)
+REPO_SIZE=$(restic "${RESTIC_OPTS[@]}" stats --no-lock --host "{{ inventory_hostname }}" --json | jq -r '.total_size')
 
 log "Backup completed successfully"
 log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"
