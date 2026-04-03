@@ -20,6 +20,11 @@ db: /openziti/controller/db/ctrl.db
 
 # Edge configuration
 edge:
+  api:
+    address: {{ wireguard_ip }}:{{ openziti_edge_port }}
+    activityUpdateInterval: 90s
+    activityUpdateBatchSize: 250
+    sessionTimeout: 30m
   enrollment:
     signingCert:
       cert: /openziti/pki/edge-signer/certs/edge-signer.cert
@@ -28,10 +33,6 @@ edge:
       duration: 180m
     edgeRouter:
       duration: 180m
-  api:
-    activityUpdateInterval: 90s
-    activityUpdateBatchSize: 250
-    sessionTimeout: 30m
 
 # Web listeners
 web:

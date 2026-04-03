@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # OpenZiti Bootstrap — runs inside the ziti-cli container on first deploy.
 # Generates PKI, initializes controller, creates admin user, enrolls local router.
 # Idempotent: skips steps if artifacts already exist.
@@ -34,10 +34,10 @@ if [ ! -f "${PKI_DIR}/root-ca/certs/root-ca.cert" ]; then
     ziti pki create ca \
         --pki-root "${PKI_DIR}" \
         --ca-file root-ca \
-        --ca-name "OpenZiti Root CA — ${TRUST_DOMAIN}" \
-        --country "{{ openziti_pki_country }}" \
-        --org "{{ openziti_pki_org }}" \
-        --expire {{ openziti_pki_ca_expire_days }}
+        --ca-name "OpenZiti Root CA - ${TRUST_DOMAIN}" \
+        --pki-country "{{ openziti_pki_country }}" \
+        --pki-organization "{{ openziti_pki_org }}" \
+        --expire-limit {{ openziti_pki_ca_expire_days }}
 else
     log "Root CA already exists, skipping"
 fi
@@ -48,8 +48,8 @@ if [ ! -f "${PKI_DIR}/intermediate-ca/certs/intermediate-ca.cert" ]; then
         --pki-root "${PKI_DIR}" \
         --ca-name root-ca \
         --intermediate-file intermediate-ca \
-        --intermediate-name "OpenZiti Intermediate CA — ${TRUST_DOMAIN}" \
-        --expire {{ openziti_pki_ca_expire_days }}
+        --intermediate-name "OpenZiti Intermediate CA - ${TRUST_DOMAIN}" \
+        --expire-limit {{ openziti_pki_ca_expire_days }}
 else
     log "Intermediate CA already exists, skipping"
 fi
@@ -72,7 +72,7 @@ if [ ! -f "${PKI_DIR}/intermediate-ca/certs/controller-server.cert" ]; then
         --server-file controller-server \
         --dns "${SAN_DNS}" \
         --ip "${SAN_IP}" \
-        --expire {{ openziti_pki_cert_expire_days }}
+        --expire-limit {{ openziti_pki_cert_expire_days }}
 else
     log "Controller server cert already exists, skipping"
 fi
@@ -84,8 +84,8 @@ if [ ! -f "${PKI_DIR}/edge-signer/certs/edge-signer.cert" ]; then
         --pki-root "${PKI_DIR}" \
         --ca-name root-ca \
         --intermediate-file edge-signer \
-        --intermediate-name "OpenZiti Edge Signer — ${TRUST_DOMAIN}" \
-        --expire {{ openziti_pki_ca_expire_days }}
+        --intermediate-name "OpenZiti Edge Signer - ${TRUST_DOMAIN}" \
+        --expire-limit {{ openziti_pki_ca_expire_days }}
 else
     log "Edge Signer CA already exists, skipping"
 fi

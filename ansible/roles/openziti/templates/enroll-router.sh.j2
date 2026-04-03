@@ -1,16 +1,14 @@
-#!/bin/bash
+#!/bin/sh
 # Enroll edge router with the OpenZiti controller.
 # Runs inside the ziti-cli container. Idempotent — skips if already enrolled.
 
-set -euo pipefail
+set -eu
 
 CTRL_URL="https://{{ hostvars[openziti_primary_node]['wireguard_ip'] }}:{{ openziti_edge_port }}"
 ADMIN_USER="{{ openziti_admin_user }}"
 ADMIN_PASS="{{ openziti_admin_password }}"
 ROUTER_NAME="router-{{ inventory_hostname }}"
 NODE_NAME="{{ inventory_hostname }}"
-PUBLIC_IP="{{ ansible_host }}"
-WG_IP="{{ wireguard_ip }}"
 
 log() { echo "[$(date -Iseconds)] ENROLL: $*"; }
 
@@ -24,40 +22,30 @@ fi
 log "Waiting for controller at ${CTRL_URL}..."
 for i in $(seq 1 30); do
     if ziti edge login "${CTRL_URL}" -u "${ADMIN_USER}" -p "${ADMIN_PASS}" --yes 2>/dev/null; then
+        log "Controller login successful"
         break
     fi
     sleep 5
 done
 
-# Create edge router identity
+# Delete existing router if present (clean slate for re-enrollment)
+log "Removing existing router identity (if any)"
+ziti edge delete edge-router "${ROUTER_NAME}" 2>/dev/null || true
+
+# Create edge router and capture JWT
 log "Creating edge router: ${ROUTER_NAME}"
-JWT=$(ziti edge create edge-router "${ROUTER_NAME}" \
+ziti edge create edge-router "${ROUTER_NAME}" \
     --jwt-output-file /tmp/router.jwt \
-    --tunneler-enabled \
-    2>/dev/null && cat /tmp/router.jwt || true)
+    --tunneler-enabled
 
-if [ -z "$JWT" ]; then
-    # Router may already exist — try to get its JWT
-    log "Router may already exist, fetching enrollment token"
-    ROUTER_ID=$(ziti edge list edge-routers "name=\"${ROUTER_NAME}\"" -j 2>/dev/null | \
-        python3 -c "import sys,json; data=json.load(sys.stdin); print(data['data'][0]['id'] if data.get('data') else '')" 2>/dev/null || true)
-    if [ -n "$ROUTER_ID" ]; then
-        log "Router exists (ID: ${ROUTER_ID}), re-enrolling"
-        ziti edge re-enroll edge-router "${ROUTER_ID}" --jwt-output-file /tmp/router.jwt 2>/dev/null || true
-        JWT=$(cat /tmp/router.jwt 2>/dev/null || true)
-    fi
-fi
-
-if [ -z "$JWT" ] || [ ! -f /tmp/router.jwt ]; then
-    echo "ERROR: Failed to get enrollment JWT for ${ROUTER_NAME}"
+if [ ! -f /tmp/router.jwt ]; then
+    echo "ERROR: Failed to create router or get enrollment JWT"
     exit 1
 fi
 
 # Enroll the router
 log "Enrolling router with JWT"
-mkdir -p /openziti/router/certs /openziti/router/keys
 ziti router enroll /openziti/router/router.yaml \
-    --jwt /tmp/router.jwt \
-    2>&1
+    --jwt /tmp/router.jwt
 
 log "Router ${ROUTER_NAME} enrolled successfully"

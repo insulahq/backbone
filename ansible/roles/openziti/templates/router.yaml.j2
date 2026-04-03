@@ -37,6 +37,17 @@ listeners:
 # Edge settings
 edge:
   heartbeatIntervalSeconds: 60
+  csr:
+    country: {{ openziti_pki_country }}
+    organization: {{ openziti_pki_org }}
+    sans:
+      dns:
+        - localhost
+        - {{ openziti_domain }}
+      ip:
+        - {{ ansible_host }}
+        - {{ wireguard_ip }}
+        - 127.0.0.1
 
 # Tunneler mode — allows this router to host services
 tunnel:

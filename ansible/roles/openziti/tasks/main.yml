@@ -84,6 +84,12 @@
   tags: [openziti]
 
 # --- Bootstrap PKI and controller (primary node only, first run) ---
+- name: Check if PKI already exists
+  stat:
+    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
+  register: _openziti_pki_exists
+  tags: [openziti]
+
 - name: Deploy bootstrap script
   template:
     src: bootstrap.sh.j2
@@ -94,31 +100,50 @@
 
 - name: Run PKI bootstrap (first deploy only)
   command: >
-    docker run --rm
+    docker run --rm --entrypoint /bin/sh --user root
     -v {{ openziti_pki_dir }}:/openziti/pki
     -v {{ openziti_controller_dir }}:/openziti/controller
     -v {{ openziti_install_dir }}/bootstrap.sh:/bootstrap.sh:ro
     {{ openziti_cli_image }}
-    /bin/bash /bootstrap.sh
+    /bootstrap.sh
   when:
     - inventory_hostname == openziti_primary_node
-    - not _openziti_pki_exists.stat.exists | default(false)
+    - not (_openziti_pki_exists.stat.exists | default(false))
   tags: [openziti]
 
-- name: Check if PKI already exists
-  stat:
-    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
-  register: _openziti_pki_exists
+- name: Fix PKI file permissions (readable by container user)
+  file:
+    path: "{{ openziti_pki_dir }}"
+    recurse: true
+    mode: '0644'
+    state: directory
+  when:
+    - inventory_hostname == openziti_primary_node
+  tags: [openziti]
+
+- name: Fix PKI directory permissions
+  shell: "find {{ openziti_pki_dir }} -type d -exec chmod 755 {} +; chmod -R a+r {{ openziti_pki_dir }}"
+  when:
+    - inventory_hostname == openziti_primary_node
+  changed_when: false
+  tags: [openziti]
+
+- name: Fix controller DB permissions
+  shell: "chmod -R 777 {{ openziti_controller_dir }}/db"
+  when:
+    - inventory_hostname == openziti_primary_node
+  changed_when: false
   tags: [openziti]
 
 # --- Distribute PKI to standby node ---
 - name: Sync PKI to standby node
-  synchronize:
-    src: "{{ openziti_pki_dir }}/"
-    dest: "{{ openziti_pki_dir }}/"
-    mode: push
+  shell: >
+    rsync -az -e "ssh -o StrictHostKeyChecking=no -i /root/.ssh/peer_key"
+    {{ openziti_pki_dir }}/
+    root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
   delegate_to: "{{ openziti_primary_node }}"
   when: inventory_hostname != openziti_primary_node
+  changed_when: true
   tags: [openziti]
 
 # --- Start containers ---
@@ -145,15 +170,20 @@
 
 - name: Enroll edge router (first deploy only)
   command: >
-    docker run --rm
+    docker run --rm --entrypoint /bin/sh --user root
     --network host
     -v {{ openziti_pki_dir }}:/openziti/pki
     -v {{ openziti_router_dir }}:/openziti/router
     -v {{ openziti_install_dir }}/enroll-router.sh:/enroll-router.sh:ro
     {{ openziti_cli_image }}
-    /bin/bash /enroll-router.sh
+    /enroll-router.sh
   when: not (_openziti_router_enrolled.stat.exists | default(false))
   register: _enroll_result
+  tags: [openziti]
+
+- name: Fix router cert/key permissions
+  shell: "chmod -R a+r {{ openziti_router_dir }}; find {{ openziti_router_dir }} -type d -exec chmod 755 {} +"
+  changed_when: false
   tags: [openziti]
 
 - name: Restart router after enrollment

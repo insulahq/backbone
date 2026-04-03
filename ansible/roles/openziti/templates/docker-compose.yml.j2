@@ -58,6 +58,7 @@ services:
   ziti-router:
     image: {{ openziti_router_image }}
     container_name: ziti-router
+    entrypoint: ["ziti", "router"]
     restart: unless-stopped
     networks:
       - ziti_internal
@@ -87,4 +88,4 @@ networks:
     driver: bridge
   traefik_public:
     external: true
-    name: {{ traefik_public_network }}
+    name: {{ traefik_public_network | default('traefik_public') }}
