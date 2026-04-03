@@ -196,10 +196,10 @@ After Phase 2:
 1. Open `https://vpn.<domain>` — redirected to `/setup`
 2. Create admin account (email + password)
 
-**NetBird setup key (required for peer enrollment):**
+**NetBird setup key (for peer enrollment in Phase 4):**
 1. Log in to `https://vpn.<domain>`
 2. Settings > Setup Keys > Add Key (Reusable, no usage limit)
-3. Set `netbird_setup_key` in `group_vars/all.yml`
+3. Copy the key — you'll need it in Phase 4
 
 ## Phase 3: Services on Secondary Node (ns2)
 
@@ -224,13 +224,32 @@ After Phase 3:
 
 ## Phase 4: NetBird Peer Enrollment
 
-Enroll both servers as NetBird peers (requires `netbird_setup_key` from Phase 2).
+Phase 4 installs the NetBird client on both servers. Enrollment is done
+manually after the client is installed.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml site.yml --tags phase4
 ```
 
-Peers resolve as `ns1.netbird`, `ns2.netbird` within the mesh.
+After the playbook completes, **SSH into each server** and enroll manually
+using the setup key from Phase 2:
+
+```bash
+# On ns1:
+netbird up --setup-key <KEY> --management-url https://vpn.<domain> --hostname ns1
+
+# On ns2:
+netbird up --setup-key <KEY> --management-url https://vpn.<domain> --hostname ns2
+```
+
+Verify enrollment:
+
+```bash
+netbird status
+# Expected: Management: Connected, Signal: Connected
+```
+
+Peers resolve as `ns1.netbird.vpn`, `ns2.netbird.vpn` within the mesh.
 
 ## Post-Deployment Verification
 
@@ -248,8 +267,8 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 
 ## Subsequent Runs
 
-After all manual steps are complete and `group_vars/all.yml` has `netbird_setup_key`
-set, you can run `site.yml` without `--tags` to deploy or update everything at once:
+After all manual steps are complete (including NetBird peer enrollment),
+you can run `site.yml` without `--tags` to deploy or update everything at once:
 
 ```bash
 ansible-playbook -i inventory/hosts.yml site.yml
