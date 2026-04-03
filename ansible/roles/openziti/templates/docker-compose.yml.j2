@@ -1,0 +1,90 @@
+services:
+{% if inventory_hostname == _openziti_active_controller %}
+  # Controller — runs on the active node only
+  ziti-controller:
+    image: {{ openziti_controller_image }}
+    container_name: ziti-controller
+    restart: unless-stopped
+    networks:
+      - ziti_internal
+      - traefik_public
+    ports:
+      - '{{ wireguard_ip }}:{{ openziti_ctrl_port }}:{{ openziti_ctrl_port }}'
+      - '{{ wireguard_ip }}:{{ openziti_edge_port }}:{{ openziti_edge_port }}'
+    volumes:
+      - {{ openziti_install_dir }}/pki:/openziti/pki:ro
+      - {{ openziti_controller_dir }}:/openziti/controller
+    command: ["run", "/openziti/controller/controller.yaml"]
+    healthcheck:
+      test: ["CMD", "ziti", "agent", "stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # ZAC Admin Console — behind Traefik
+  ziti-console:
+    image: {{ openziti_console_image }}
+    container_name: ziti-console
+    restart: unless-stopped
+    networks:
+      - traefik_public
+    environment:
+      ZITI_CTRL_EDGE_ADVERTISED_ADDRESS: "{{ openziti_domain }}"
+      ZITI_CTRL_EDGE_ADVERTISED_PORT: "{{ openziti_edge_port }}"
+      PORTTLS: "443"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ziti-console.rule=Host(`{{ openziti_domain }}`)
+      - traefik.http.routers.ziti-console.entrypoints=websecure
+      - traefik.http.routers.ziti-console.tls=true
+      - traefik.http.routers.ziti-console.middlewares=ratelimit@file
+      - traefik.http.routers.ziti-console.priority=1
+      - traefik.http.services.ziti-console.loadbalancer.server.port=8443
+      - traefik.http.services.ziti-console.loadbalancer.server.scheme=https
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+{% endif %}
+
+  # Edge Router — runs on both nodes (active-active)
+  ziti-router:
+    image: {{ openziti_router_image }}
+    container_name: ziti-router
+    restart: unless-stopped
+    networks:
+      - ziti_internal
+      - traefik_public
+    ports:
+      - '0.0.0.0:{{ openziti_router_port }}:{{ openziti_router_port }}'
+      - '[::]:{{ openziti_router_port }}:{{ openziti_router_port }}'
+      - '{{ wireguard_ip }}:6262:6262'
+    volumes:
+      - {{ openziti_pki_dir }}:/openziti/pki:ro
+      - {{ openziti_router_dir }}:/openziti/router
+    command: ["run", "/openziti/router/router.yaml"]
+    healthcheck:
+      test: ["CMD", "ziti", "agent", "stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+networks:
+  ziti_internal:
+    driver: bridge
+  traefik_public:
+    external: true
+    name: {{ traefik_public_network }}

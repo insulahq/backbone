@@ -138,6 +138,14 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_email_to: "admin@example.com"
 
 # ============================================================================
+# OpenZiti — Zero-Trust Network Overlay (Optional)
+# ============================================================================
+# Deploys OpenZiti controller (active-standby) + edge routers (active-active)
+# for tenant-isolated network access. Set to true to deploy.
+# openziti_enabled: true
+# openziti_domain: "ziti.{{ platform_domain }}"
+
+# ============================================================================
 # Uptime Kuma — Optional UI-Based Monitoring
 # ============================================================================
 # Supplements Gatus (infrastructure HA) with a web UI for user-managed monitors.

@@ -218,7 +218,7 @@
 - name: "Phase 2: All services (primary node)"
   hosts: "{{ dns_failover_primary | default('ns1') }}"
   gather_facts: false
-  tags: [phase2, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
+  tags: [phase2, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup, openziti]
   roles:
     - { role: powerdns, tags: [powerdns, dns, phase2] }
     - { role: traefik, tags: [traefik, phase2] }
@@ -227,6 +227,7 @@
     - { role: gatus, tags: [gatus, phase2] }
     - { role: portainer, tags: [portainer, phase2] }
     - { role: uptime_kuma, tags: [uptime-kuma, phase2] }
+    - { role: openziti, tags: [openziti, phase2] }
     - { role: backup, tags: [backup, phase2] }
 
 # ============================================================================
@@ -237,7 +238,7 @@
 - name: "Phase 3: All services (secondary node)"
   hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
   gather_facts: false
-  tags: [phase3, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup]
+  tags: [phase3, powerdns, dns, traefik, zitadel, netbird, netbird_management, gatus, portainer, backup, openziti]
   roles:
     - { role: powerdns, tags: [powerdns, dns, phase3] }
     - { role: traefik, tags: [traefik, phase3] }
@@ -245,6 +246,7 @@
     - { role: netbird_management, tags: [netbird, netbird_management, phase3] }
     - { role: gatus, tags: [gatus, phase3] }
     - { role: portainer, tags: [portainer, phase3] }
+    - { role: openziti, tags: [openziti, phase3] }
     - { role: backup, tags: [backup, phase3] }
 
 # ============================================================================

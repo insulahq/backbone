@@ -1,0 +1,295 @@
+---
+# OpenZiti Role — Main Tasks
+# Deploys OpenZiti zero-trust overlay with active-standby controller
+# and active-active edge routers.
+#
+# Phase 2 (primary): Bootstrap PKI, start controller, enroll router
+# Phase 3 (secondary): Start router, set up DB sync + failover watchdog
+
+- name: Skip OpenZiti (not enabled)
+  debug:
+    msg: "OpenZiti is disabled (set openziti_enabled: true to deploy)"
+  when: not (openziti_enabled | bool)
+  tags: [openziti]
+
+- name: End play for this host if OpenZiti disabled
+  meta: end_host
+  when: not (openziti_enabled | bool)
+  tags: [openziti]
+
+# --- Determine active controller node ---
+# On fresh deploy: preferred primary. After failover: detect actual.
+- name: Detect active controller node
+  set_fact:
+    _openziti_active_controller: "{{ openziti_primary_node }}"
+  tags: [openziti]
+
+# --- Generate admin password if not set ---
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [openziti]
+
+- name: Generate OpenZiti admin password if not set
+  set_fact:
+    openziti_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/openziti_admin_password length=32 chars=ascii_letters,digits') }}"
+  when: openziti_admin_password is not defined or openziti_admin_password | length == 0
+  no_log: true
+  tags: [openziti]
+
+# --- Create directories ---
+- name: Create OpenZiti directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ openziti_install_dir }}"
+    - "{{ openziti_pki_dir }}"
+    - "{{ openziti_controller_dir }}"
+    - "{{ openziti_controller_dir }}/db"
+    - "{{ openziti_router_dir }}"
+    - "{{ openziti_router_dir }}/certs"
+    - "{{ openziti_router_dir }}/keys"
+  tags: [openziti]
+
+# --- Deploy configuration files ---
+- name: Deploy controller configuration
+  template:
+    src: controller.yaml.j2
+    dest: "{{ openziti_controller_dir }}/controller.yaml"
+    mode: '0644'
+  notify: restart openziti
+  tags: [openziti]
+
+- name: Deploy router configuration
+  template:
+    src: router.yaml.j2
+    dest: "{{ openziti_router_dir }}/router.yaml"
+    mode: '0644'
+  notify: restart openziti
+  tags: [openziti]
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ openziti_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: restart openziti
+  tags: [openziti]
+
+# --- Bootstrap PKI and controller (primary node only, first run) ---
+- name: Deploy bootstrap script
+  template:
+    src: bootstrap.sh.j2
+    dest: "{{ openziti_install_dir }}/bootstrap.sh"
+    mode: '0755'
+  when: inventory_hostname == openziti_primary_node
+  tags: [openziti]
+
+- name: Run PKI bootstrap (first deploy only)
+  command: >
+    docker run --rm
+    -v {{ openziti_pki_dir }}:/openziti/pki
+    -v {{ openziti_controller_dir }}:/openziti/controller
+    -v {{ openziti_install_dir }}/bootstrap.sh:/bootstrap.sh:ro
+    {{ openziti_cli_image }}
+    /bin/bash /bootstrap.sh
+  when:
+    - inventory_hostname == openziti_primary_node
+    - not _openziti_pki_exists.stat.exists | default(false)
+  tags: [openziti]
+
+- name: Check if PKI already exists
+  stat:
+    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
+  register: _openziti_pki_exists
+  tags: [openziti]
+
+# --- Distribute PKI to standby node ---
+- name: Sync PKI to standby node
+  synchronize:
+    src: "{{ openziti_pki_dir }}/"
+    dest: "{{ openziti_pki_dir }}/"
+    mode: push
+  delegate_to: "{{ openziti_primary_node }}"
+  when: inventory_hostname != openziti_primary_node
+  tags: [openziti]
+
+# --- Start containers ---
+- name: Start OpenZiti stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ openziti_install_dir }}"
+    pull: missing
+    state: present
+  tags: [openziti]
+
+# --- Enroll router (requires running controller) ---
+- name: Deploy router enrollment script
+  template:
+    src: enroll-router.sh.j2
+    dest: "{{ openziti_install_dir }}/enroll-router.sh"
+    mode: '0755'
+  tags: [openziti]
+
+- name: Check if router is already enrolled
+  stat:
+    path: "{{ openziti_router_dir }}/certs/router-{{ inventory_hostname }}.cert"
+  register: _openziti_router_enrolled
+  tags: [openziti]
+
+- name: Enroll edge router (first deploy only)
+  command: >
+    docker run --rm
+    --network host
+    -v {{ openziti_pki_dir }}:/openziti/pki
+    -v {{ openziti_router_dir }}:/openziti/router
+    -v {{ openziti_install_dir }}/enroll-router.sh:/enroll-router.sh:ro
+    {{ openziti_cli_image }}
+    /bin/bash /enroll-router.sh
+  when: not (_openziti_router_enrolled.stat.exists | default(false))
+  register: _enroll_result
+  tags: [openziti]
+
+- name: Restart router after enrollment
+  community.docker.docker_compose_v2:
+    project_src: "{{ openziti_install_dir }}"
+    services: ["ziti-router"]
+    state: present
+    recreate: always
+  when: _enroll_result.changed | default(false)
+  tags: [openziti]
+
+# --- Deploy failover scripts ---
+- name: Deploy ziti watchdog script
+  template:
+    src: ziti-watchdog.sh.j2
+    dest: /usr/local/bin/ziti-watchdog.sh
+    mode: '0755'
+  tags: [openziti]
+
+- name: Deploy ziti watchdog systemd units
+  template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item | replace('.j2', '') }}"
+    mode: '0644'
+  loop:
+    - ziti-watchdog.service.j2
+    - ziti-watchdog.timer.j2
+  tags: [openziti]
+
+- name: Enable and start ziti watchdog timer
+  systemd:
+    name: ziti-watchdog.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  tags: [openziti]
+
+# --- Deploy DB sync (standby node only) ---
+- name: Deploy DB sync scripts
+  template:
+    src: "{{ item }}"
+    dest: "{{ '/usr/local/bin/' if item == 'ziti-db-sync.sh.j2' else '/etc/systemd/system/' }}{{ item | replace('.j2', '') }}"
+    mode: "{{ '0755' if item == 'ziti-db-sync.sh.j2' else '0644' }}"
+  loop:
+    - ziti-db-sync.sh.j2
+    - ziti-db-sync.service.j2
+    - ziti-db-sync.timer.j2
+  when: inventory_hostname != openziti_primary_node
+  tags: [openziti]
+
+- name: Enable and start DB sync timer (standby only)
+  systemd:
+    name: ziti-db-sync.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: inventory_hostname != openziti_primary_node
+  tags: [openziti]
+
+# --- DNS records ---
+- name: Create DNS A record for OpenZiti console
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ openziti_domain }}."
+          type: A
+          ttl: 30
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['ansible_host'] }}"
+              disabled: false
+    status_code: [200, 204]
+  ignore_errors: true
+  when:
+    - openziti_create_dns_records | bool
+    - powerdns_api_key is defined
+    - inventory_hostname == openziti_primary_node
+  run_once: true
+  tags: [openziti]
+
+- name: Create DNS AAAA record for OpenZiti console
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ openziti_domain }}."
+          type: AAAA
+          ttl: 30
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] }}"
+              disabled: false
+    status_code: [200, 204]
+  ignore_errors: true
+  when:
+    - openziti_create_dns_records | bool
+    - powerdns_api_key is defined
+    - inventory_hostname == openziti_primary_node
+    - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
+  run_once: true
+  tags: [openziti]
+
+- name: Increment SOA serial after DNS record creation
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  changed_when: true
+  ignore_errors: true
+  when:
+    - openziti_create_dns_records | bool
+    - powerdns_api_key is defined
+    - inventory_hostname == openziti_primary_node
+  run_once: true
+  tags: [openziti]
+
+# --- Status display ---
+- name: Display OpenZiti deployment status
+  debug:
+    msg:
+      - "OpenZiti {{ openziti_version }} deployed on {{ inventory_hostname }}"
+      - "Role: {{ 'CONTROLLER + ROUTER' if inventory_hostname == _openziti_active_controller else 'ROUTER (standby controller)' }}"
+      - "Console: https://{{ openziti_domain }}"
+      - "Edge API: https://{{ wireguard_ip }}:{{ openziti_edge_port }} (WireGuard only)"
+      - "Router: {{ ansible_host }}:{{ openziti_router_port }}"
+      - ""
+      - "Admin credentials: {{ openziti_admin_user }} / see .generated_secrets/openziti_admin_password"
+      - ""
+      - "CLI login:"
+      - "  ziti edge login https://{{ wireguard_ip }}:{{ openziti_edge_port }} -u {{ openziti_admin_user }} -p $(cat .generated_secrets/openziti_admin_password) --yes"
+  tags: [openziti]

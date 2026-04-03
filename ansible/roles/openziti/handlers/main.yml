@@ -1,0 +1,8 @@
+---
+# OpenZiti Role — Handlers
+
+- name: restart openziti
+  community.docker.docker_compose_v2:
+    project_src: "{{ openziti_install_dir }}"
+    state: present
+    recreate: always

@@ -31,6 +31,7 @@
       traefik: /opt/traefik
       portainer: /opt/portainer
       powerdns: /opt/powerdns
+      openziti: /opt/openziti
     _health_checks:
       netbird:
         url: "https://{{ ansible_host }}/api/instance"

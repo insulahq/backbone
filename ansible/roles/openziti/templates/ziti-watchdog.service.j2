@@ -1,0 +1,8 @@
+[Unit]
+Description=OpenZiti Controller Watchdog
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ziti-watchdog.sh
+TimeoutStartSec=120

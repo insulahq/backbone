@@ -1,0 +1,157 @@
+#!/bin/bash
+# ==========================================================================
+# OpenZiti Controller Watchdog — Active-Standby Failover
+# ==========================================================================
+# Runs every {{ openziti_failover_check_interval }}s via systemd timer.
+# Monitors the controller health and handles failover/failback.
+#
+# On the PREFERRED PRIMARY ({{ openziti_primary_node }}):
+#   - If controller is running locally: check health, push Gatus status
+#   - If controller is running on peer: wait settling, then failback
+#
+# On the STANDBY:
+#   - If preferred primary's controller is reachable: do nothing
+#   - If unreachable for {{ openziti_failover_threshold }} cycles: promote self
+# ==========================================================================
+
+set -euo pipefail
+
+INSTALL_DIR="{{ openziti_install_dir }}"
+CTRL_DIR="{{ openziti_controller_dir }}"
+PREFERRED_PRIMARY="{{ openziti_primary_node }}"
+PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+LOCAL_WG_IP="{{ wireguard_ip }}"
+EDGE_PORT="{{ openziti_edge_port }}"
+FAILURE_FILE="/tmp/ziti-watchdog-failures"
+PROMOTED_FILE="/tmp/ziti-controller-promoted"
+
+log() { echo "$(date): ZITI-WATCHDOG: $*"; }
+
+# Check if controller is healthy at a given IP
+check_controller() {
+    local ip="$1"
+    curl -fsSk --max-time 5 "https://${ip}:${EDGE_PORT}/edge/client/v1/version" >/dev/null 2>&1
+}
+
+# Get current failure count
+FAILURES=$(cat "$FAILURE_FILE" 2>/dev/null || echo "0")
+
+# Is the local controller running?
+LOCAL_RUNNING=$(docker inspect ziti-controller --format '{% raw %}{{.State.Running}}{% endraw %}' 2>/dev/null || echo "false")
+
+{% if inventory_hostname == (openziti_primary_node | default('ns1')) %}
+# === PREFERRED PRIMARY NODE ===
+
+if [ "$LOCAL_RUNNING" = "true" ] && check_controller "$LOCAL_WG_IP"; then
+    # Controller healthy locally — normal state
+    echo "0" > "$FAILURE_FILE"
+    rm -f "$PROMOTED_FILE"
+    exit 0
+fi
+
+# Controller not running locally — check if peer has it (failover happened)
+if check_controller "$PEER_WG_IP"; then
+    {% if openziti_failback_enabled | default(true) %}
+    # Peer has the controller — attempt failback
+    if [ ! -f "$PROMOTED_FILE" ]; then
+        log "Controller running on peer. Starting failback settling period."
+        touch "$PROMOTED_FILE"
+        exit 0
+    fi
+
+    # Check settling period
+    PROMOTED_AGE=$(( $(date +%s) - $(stat -c %Y "$PROMOTED_FILE") ))
+    if [ "$PROMOTED_AGE" -lt $(( {{ openziti_failback_settling_minutes }} * 60 )) ]; then
+        log "Failback settling: ${PROMOTED_AGE}s / $(( {{ openziti_failback_settling_minutes }} * 60 ))s"
+        exit 0
+    fi
+
+    log "=== FAILBACK: Returning controller to preferred primary ==="
+
+    # 1. Stop DB sync on peer (prevent overwriting during transition)
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        "systemctl stop ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
+
+    # 2. Sync latest DB from peer
+    log "Syncing DB from peer"
+    rsync -az -e "ssh -o ConnectTimeout=5 -i /root/.ssh/peer_key" \
+        "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${CTRL_DIR}/db/" 2>/dev/null || {
+        log "WARNING: DB sync from peer failed, using local copy"
+    }
+
+    # 3. Stop controller on peer
+    log "Stopping controller on peer"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || true
+
+    # 4. Start controller locally
+    log "Starting controller locally"
+    cd "${INSTALL_DIR}" && docker compose up -d ziti-controller ziti-console
+
+    # 5. Wait for controller to be ready
+    for i in $(seq 1 12); do
+        check_controller "$LOCAL_WG_IP" && break
+        sleep 5
+    done
+
+    rm -f "$PROMOTED_FILE"
+    echo "0" > "$FAILURE_FILE"
+
+    # 6. Restart DB sync on peer
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        "systemctl start ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
+
+    log "=== FAILBACK COMPLETE ==="
+    {% endif %}
+fi
+
+{% else %}
+# === STANDBY NODE ===
+
+# Check if preferred primary's controller is reachable
+if check_controller "{{ hostvars[openziti_primary_node]['wireguard_ip'] }}"; then
+    # Primary is healthy — reset failure count
+    echo "0" > "$FAILURE_FILE"
+    rm -f "$PROMOTED_FILE"
+    exit 0
+fi
+
+# Primary unreachable — increment failure count
+FAILURES=$((FAILURES + 1))
+echo "$FAILURES" > "$FAILURE_FILE"
+log "Primary controller unreachable. Failure count: ${FAILURES}/{{ openziti_failover_threshold }}"
+
+if [ "$FAILURES" -lt "{{ openziti_failover_threshold }}" ]; then
+    exit 0
+fi
+
+# Check if we already promoted
+if [ "$LOCAL_RUNNING" = "true" ] && check_controller "$LOCAL_WG_IP"; then
+    log "Already promoted and healthy"
+    exit 0
+fi
+
+log "=== FAILOVER: Promoting standby to active controller ==="
+
+# 1. Stop DB sync (prevent overwriting our DB with stale data)
+systemctl stop ziti-db-sync.timer 2>/dev/null || true
+
+# 2. Start controller using synced DB
+log "Starting controller from synced DB"
+cd "${INSTALL_DIR}" && docker compose up -d ziti-controller ziti-console
+
+# 3. Wait for controller to be ready
+for i in $(seq 1 12); do
+    check_controller "$LOCAL_WG_IP" && break
+    sleep 5
+done
+
+if check_controller "$LOCAL_WG_IP"; then
+    log "=== FAILOVER COMPLETE: Controller active on {{ inventory_hostname }} ==="
+    touch "$PROMOTED_FILE"
+else
+    log "ERROR: Controller failed to start after promotion"
+fi
+
+{% endif %}

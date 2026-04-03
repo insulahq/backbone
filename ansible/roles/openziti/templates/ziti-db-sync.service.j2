@@ -1,0 +1,8 @@
+[Unit]
+Description=OpenZiti DB Sync (standby replication)
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ziti-db-sync.sh
+TimeoutStartSec=60

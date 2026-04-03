@@ -1,0 +1,19 @@
+---
+# Deploy OpenZiti — standalone playbook
+# Usage: ansible-playbook -i inventory/hosts.yml deploy-openziti.yml
+
+- import_playbook: _ssh-keys.yml
+
+- name: "Deploy OpenZiti (primary node first)"
+  hosts: "{{ dns_failover_primary | default('ns1') }}"
+  gather_facts: true
+  tags: [openziti]
+  roles:
+    - openziti
+
+- name: "Deploy OpenZiti (secondary node)"
+  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
+  gather_facts: true
+  tags: [openziti]
+  roles:
+    - openziti

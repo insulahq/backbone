@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenZiti Controller Watchdog Timer
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec={{ openziti_failover_check_interval }}s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

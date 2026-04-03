@@ -95,7 +95,7 @@ case "$MODE" in
 esac
 
 # Service domains to update
-DOMAINS="vpn.${PLATFORM_DOMAIN} auth.${PLATFORM_DOMAIN} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+DOMAINS="vpn.${PLATFORM_DOMAIN} auth.${PLATFORM_DOMAIN} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} {{ openziti_domain | default('ziti.' + platform_domain) }} ${PLATFORM_DOMAIN}"
 
 # Build rrsets payload — delete any LUA records first, then set A/AAAA
 RRSETS="["

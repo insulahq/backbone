@@ -1,0 +1,9 @@
+[Unit]
+Description=OpenZiti DB Sync Timer
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec={{ openziti_db_sync_interval }}
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,67 @@
+---
+# OpenZiti Role — Default Variables
+# Deploys OpenZiti zero-trust network overlay with active-standby controller
+# and active-active edge routers on both nodes.
+#
+# Controller runs on the preferred primary (openziti_primary_node).
+# Edge routers run on both nodes and connect to whichever controller is active.
+# Standby node syncs controller DB for failover.
+
+# Enable/disable OpenZiti deployment
+openziti_enabled: false
+
+# Version pins
+openziti_version: "1.4.1"
+openziti_controller_image: "openziti/ziti-controller:{{ openziti_version }}"
+openziti_router_image: "openziti/ziti-router:{{ openziti_version }}"
+openziti_cli_image: "openziti/ziti-cli:{{ openziti_version }}"
+openziti_console_image: "openziti/zac:latest"
+
+# Installation directories
+openziti_install_dir: /opt/openziti
+openziti_pki_dir: "{{ openziti_install_dir }}/pki"
+openziti_controller_dir: "{{ openziti_install_dir }}/controller"
+openziti_router_dir: "{{ openziti_install_dir }}/router"
+openziti_console_dir: "{{ openziti_install_dir }}/console"
+
+# Primary node — runs the active controller (matches dns_failover_primary)
+openziti_primary_node: "{{ dns_failover_primary | default('ns1') }}"
+
+# Domain (behind Traefik)
+openziti_domain: "ziti.{{ platform_domain }}"
+
+# Controller ports (WireGuard interface only)
+openziti_ctrl_port: 8440          # Fabric control channel (router-to-controller)
+openziti_edge_port: 8441          # Edge management API + client sessions
+openziti_console_port: 8443       # ZAC web console (internal, behind Traefik)
+
+# Edge router port (public-facing for tunneler clients)
+openziti_router_port: 3022
+
+# Controller admin credentials
+openziti_admin_user: admin
+openziti_admin_password: ""       # Auto-generated if empty
+
+# Network trust domain
+openziti_trust_domain: "{{ platform_domain }}"
+
+# PKI settings
+openziti_pki_country: "US"
+openziti_pki_org: "{{ zitadel_org_name | default('Hosting Platform') }}"
+openziti_pki_ca_expire_days: 3650   # 10 years for root CA
+openziti_pki_cert_expire_days: 825  # ~2.25 years for server certs
+
+# DB sync interval (standby replicates controller DB)
+openziti_db_sync_interval: "5min"
+
+# Failover settings
+openziti_failover_check_interval: 30        # seconds between health checks
+openziti_failover_threshold: 3              # consecutive failures before promote
+openziti_failback_settling_minutes: 10      # wait before failback to preferred node
+openziti_failback_enabled: true             # auto-return controller to preferred node
+
+# DNS record management
+openziti_create_dns_records: true
+
+# Logging
+openziti_log_level: "INFO"

@@ -1,0 +1,34 @@
+#!/bin/bash
+# OpenZiti DB Sync — replicates controller bbolt DB from active to standby.
+# Runs every {{ openziti_db_sync_interval }} via systemd timer on the STANDBY node.
+# Uses ziti controller snapshot for consistent backup (not raw file copy).
+
+set -euo pipefail
+
+CTRL_DIR="{{ openziti_controller_dir }}"
+PEER_WG_IP="{{ hostvars[openziti_primary_node]['wireguard_ip'] }}"
+EDGE_PORT="{{ openziti_edge_port }}"
+SYNC_DIR="${CTRL_DIR}/db"
+
+log() { echo "$(date): ZITI-DB-SYNC: $*"; }
+
+# Only sync if we are NOT the active controller
+if docker inspect ziti-controller --format '{% raw %}{{.State.Running}}{% endraw %}' 2>/dev/null | grep -q "true"; then
+    log "Local controller is running — skipping sync (we are the active node)"
+    exit 0
+fi
+
+# Check if primary controller is reachable
+if ! curl -fsSk --max-time 5 "https://${PEER_WG_IP}:${EDGE_PORT}/edge/client/v1/version" >/dev/null 2>&1; then
+    log "Primary controller unreachable — skipping sync"
+    exit 0
+fi
+
+# Sync the controller DB directory from the primary
+log "Syncing controller DB from ${PEER_WG_IP}"
+mkdir -p "${SYNC_DIR}"
+rsync -az --delete \
+    -e "ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key" \
+    "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${SYNC_DIR}/"
+
+log "DB sync complete ($(du -sh "${SYNC_DIR}" | cut -f1))"

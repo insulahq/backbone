@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: openziti
+  description: OpenZiti zero-trust overlay network with active-standby controller and active-active edge routers
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

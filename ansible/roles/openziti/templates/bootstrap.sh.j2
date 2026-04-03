@@ -1,0 +1,114 @@
+#!/bin/bash
+# OpenZiti Bootstrap — runs inside the ziti-cli container on first deploy.
+# Generates PKI, initializes controller, creates admin user, enrolls local router.
+# Idempotent: skips steps if artifacts already exist.
+
+set -euo pipefail
+
+ZITI_HOME="/openziti"
+PKI_DIR="${ZITI_HOME}/pki"
+CTRL_DIR="${ZITI_HOME}/controller"
+ROUTER_DIR="${ZITI_HOME}/router"
+
+CTRL_HOSTNAME="{{ wireguard_ip }}"
+CTRL_PORT="{{ openziti_ctrl_port }}"
+EDGE_PORT="{{ openziti_edge_port }}"
+ROUTER_PORT="{{ openziti_router_port }}"
+PUBLIC_IP="{{ ansible_host }}"
+PUBLIC_IPV6="{{ public_ipv6 | default('') }}"
+DOMAIN="{{ openziti_domain }}"
+ADMIN_USER="{{ openziti_admin_user }}"
+ADMIN_PASS="{{ openziti_admin_password }}"
+NODE_NAME="{{ inventory_hostname }}"
+TRUST_DOMAIN="{{ openziti_trust_domain }}"
+
+log() { echo "[$(date -Iseconds)] BOOTSTRAP: $*"; }
+error() { echo "[$(date -Iseconds)] BOOTSTRAP ERROR: $*" >&2; }
+
+# ============================================================================
+# Step 1: Generate PKI (Root CA → Intermediate CA → Server/Client certs)
+# ============================================================================
+
+if [ ! -f "${PKI_DIR}/root-ca/certs/root-ca.cert" ]; then
+    log "Generating Root CA"
+    ziti pki create ca \
+        --pki-root "${PKI_DIR}" \
+        --ca-file root-ca \
+        --ca-name "OpenZiti Root CA — ${TRUST_DOMAIN}" \
+        --country "{{ openziti_pki_country }}" \
+        --org "{{ openziti_pki_org }}" \
+        --expire {{ openziti_pki_ca_expire_days }}
+else
+    log "Root CA already exists, skipping"
+fi
+
+if [ ! -f "${PKI_DIR}/intermediate-ca/certs/intermediate-ca.cert" ]; then
+    log "Generating Intermediate CA (signing CA)"
+    ziti pki create intermediate \
+        --pki-root "${PKI_DIR}" \
+        --ca-name root-ca \
+        --intermediate-file intermediate-ca \
+        --intermediate-name "OpenZiti Intermediate CA — ${TRUST_DOMAIN}" \
+        --expire {{ openziti_pki_ca_expire_days }}
+else
+    log "Intermediate CA already exists, skipping"
+fi
+
+# Controller server certificate
+if [ ! -f "${PKI_DIR}/intermediate-ca/certs/controller-server.cert" ]; then
+    log "Generating controller server certificate"
+    # SAN includes: WireGuard IPs of both nodes, public IPs, domain name, localhost
+    SAN_DNS="localhost,${DOMAIN}"
+    SAN_IP="${CTRL_HOSTNAME},${PUBLIC_IP},127.0.0.1"
+{% for host in groups['dns_servers'] %}
+    SAN_IP="${SAN_IP},{{ hostvars[host]['wireguard_ip'] }},{{ hostvars[host]['ansible_host'] }}"
+{% endfor %}
+{% if public_ipv6 | default('') | length > 0 %}
+    SAN_IP="${SAN_IP},{{ public_ipv6 }}"
+{% endif %}
+    ziti pki create server \
+        --pki-root "${PKI_DIR}" \
+        --ca-name intermediate-ca \
+        --server-file controller-server \
+        --dns "${SAN_DNS}" \
+        --ip "${SAN_IP}" \
+        --expire {{ openziti_pki_cert_expire_days }}
+else
+    log "Controller server cert already exists, skipping"
+fi
+
+# Edge signer CA (for identity enrollment)
+if [ ! -f "${PKI_DIR}/edge-signer/certs/edge-signer.cert" ]; then
+    log "Generating Edge Signer CA"
+    ziti pki create intermediate \
+        --pki-root "${PKI_DIR}" \
+        --ca-name root-ca \
+        --intermediate-file edge-signer \
+        --intermediate-name "OpenZiti Edge Signer — ${TRUST_DOMAIN}" \
+        --expire {{ openziti_pki_ca_expire_days }}
+else
+    log "Edge Signer CA already exists, skipping"
+fi
+
+# Build combined CA bundle
+log "Building CA bundle"
+cat "${PKI_DIR}/root-ca/certs/root-ca.cert" \
+    "${PKI_DIR}/intermediate-ca/certs/intermediate-ca.cert" \
+    > "${PKI_DIR}/cas.pem"
+
+# ============================================================================
+# Step 2: Initialize controller database
+# ============================================================================
+
+if [ ! -f "${CTRL_DIR}/db/ctrl.db" ]; then
+    log "Initializing controller database"
+    mkdir -p "${CTRL_DIR}/db"
+    ziti controller edge init "${CTRL_DIR}/controller.yaml" \
+        -u "${ADMIN_USER}" \
+        -p "${ADMIN_PASS}"
+    log "Controller database initialized with admin user: ${ADMIN_USER}"
+else
+    log "Controller database already exists, skipping init"
+fi
+
+log "Bootstrap complete"
