@@ -250,6 +250,22 @@ case "$BACKUP_CHOICE" in
 esac
 echo ""
 
+echo -e "${BOLD}--- OpenZiti Zero-Trust Overlay (Optional) ---${NC}"
+echo ""
+echo "  Provides tenant-isolated network access via zero-trust tunneling."
+echo "  Can be enabled later in group_vars/all.yml."
+echo ""
+echo -en "${BOLD}Enable OpenZiti? (y/N):${NC} "
+read -r OPENZITI_CHOICE
+if [ "$OPENZITI_CHOICE" = "y" ] || [ "$OPENZITI_CHOICE" = "Y" ]; then
+    OPENZITI_ENABLED="true"
+    prompt OPENZITI_DOMAIN "OpenZiti console domain" "ziti.${DOMAIN}"
+else
+    OPENZITI_ENABLED="false"
+    OPENZITI_DOMAIN="ziti.${DOMAIN}"
+fi
+echo ""
+
 echo -e "${BOLD}--- Organization ---${NC}"
 echo ""
 prompt ORG_NAME "Organization name (shown in Zitadel console)" "Hosting Platform"
@@ -372,6 +388,10 @@ netbird_management_url: "https://vpn.{{ platform_domain }}"
 
 # Gatus Monitoring
 gatus_domain: "status.{{ platform_domain }}"
+
+# OpenZiti Zero-Trust Overlay
+openziti_enabled: ${OPENZITI_ENABLED}
+openziti_domain: "${OPENZITI_DOMAIN}"
 
 # Backup
 backup_enabled: ${BACKUP_ENABLED}
