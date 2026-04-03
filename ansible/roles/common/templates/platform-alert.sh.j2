@@ -13,9 +13,11 @@ PLATFORM_HOSTNAME="{{ inventory_hostname }}"
 PLATFORM_WEBHOOK_URL="{{ alert_webhook_url }}"
 
 # Gatus external endpoint configuration
-# Set after gatus role deploys — empty until then (graceful fallback)
+# Read token from file (deployed by gatus role) instead of hardcoding it.
+# This prevents the token from being wiped when common role re-deploys
+# this script without the gatus role in scope.
 PLATFORM_GATUS_URL="http://127.0.0.1:{{ gatus_local_port | default('8080') }}"
-PLATFORM_GATUS_TOKEN="{{ gatus_external_token | default('') }}"
+PLATFORM_GATUS_TOKEN="$(cat /etc/gatus-token 2>/dev/null || echo '')"
 
 # Send an alert via Gatus external endpoint and/or raw webhook.
 # Args: $1=level (info|warning|critical), $2=service, $3=message
