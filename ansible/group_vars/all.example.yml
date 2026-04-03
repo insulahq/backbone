@@ -103,9 +103,9 @@ zitadel_admin_email: "admin@{{ platform_domain }}"
 # Management URL (vpn.<domain>, served via Traefik)
 netbird_management_url: "https://vpn.{{ platform_domain }}"
 
-# Reusable setup key for peer enrollment — created in Step 8 via the dashboard.
-# Create via dashboard (Settings > Setup Keys) after Zitadel + NetBird are deployed.
-netbird_setup_key: ""
+# Peer enrollment is done manually after deployment:
+#   netbird up --setup-key <KEY> --management-url https://vpn.<domain> --hostname <hostname>
+# Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key
 
 # Internal peer DNS domain — peers resolve as <hostname>.<domain>
 # e.g., with "netbird": ns1.netbird, ns2.netbird

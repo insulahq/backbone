@@ -368,7 +368,7 @@ zitadel_admin_email: "${ADMIN_EMAIL}"
 
 # NetBird VPN Mesh
 netbird_management_url: "https://vpn.{{ platform_domain }}"
-netbird_setup_key: ""
+# Peer enrollment is done manually after deployment (see docs/BOOTSTRAP.md)
 
 # Gatus Monitoring
 gatus_domain: "status.{{ platform_domain }}"

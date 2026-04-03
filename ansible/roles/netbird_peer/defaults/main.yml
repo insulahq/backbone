@@ -10,9 +10,6 @@ netbird_peer_hostname: "{{ inventory_hostname }}"
 # Management server URL (set in group_vars/all.yml)
 # netbird_management_url: defined in group_vars/all.yml
 
-# Setup key for initial enrollment (set in group_vars/all.yml)
-# netbird_setup_key: defined in group_vars/all.yml
-
 # Auto-start on boot
 netbird_autostart: true
 

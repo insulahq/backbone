@@ -1,18 +1,8 @@
 ---
 # NetBird Peer Role — Main Tasks
-# Installs NetBird peer client via official apt repository and enrolls with management server.
-# Compatible with NetBird v0.66+ combined server architecture.
-
-- name: Validate netbird_setup_key is set
-  assert:
-    that:
-      - netbird_setup_key is defined
-      - netbird_setup_key | length > 0
-    fail_msg: >-
-      netbird_setup_key is empty. Create a setup key in the NetBird dashboard
-      (Settings > Setup Keys > Add Key) and set it in group_vars/all.yml
-      before running peer enrollment. See docs/BOOTSTRAP.md Phase 2 manual steps.
-  tags: [netbird, netbird_peer]
+# Installs NetBird peer client via official apt repository.
+# Enrollment is done manually after deployment:
+#   netbird up --setup-key <KEY> --management-url https://vpn.<domain> --hostname <hostname>
 
 - name: Install apt dependencies for NetBird repo
   apt:
@@ -73,40 +63,25 @@
     path: "{{ netbird_config_dir }}/config.json"
   register: netbird_config
 
-- name: Enroll NetBird peer with management server
+- name: Display enrollment instructions
+  debug:
+    msg:
+      - "NetBird client installed on {{ inventory_hostname }}"
+      - ""
+      - "To enroll this peer, run manually on the server:"
+      - "  netbird up --setup-key <KEY> --management-url {{ netbird_management_url }} --hostname {{ netbird_peer_hostname }}"
+      - ""
+      - "Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key"
   when: not netbird_config.stat.exists
-  block:
-    - name: Assert setup key is defined
-      assert:
-        that:
-          - netbird_setup_key is defined
-          - netbird_setup_key | length > 0
-        fail_msg: "netbird_setup_key must be defined in group_vars/all.yml"
-
-    - name: Run netbird up to enroll peer
-      command: >
-        netbird up
-        --setup-key {{ netbird_setup_key }}
-        --management-url {{ netbird_management_url }}
-        --hostname {{ netbird_peer_hostname }}
-        --log-level {{ netbird_log_level }}
-      register: netbird_enroll_result
-      changed_when: true
-      no_log: true
-
-    - name: Show enrollment result
-      debug:
-        msg: "NetBird peer enrolled as {{ netbird_peer_hostname }}"
-
-- name: Wait for NetBird to reach Connected state
-  command: netbird status
-  register: netbird_status
-  until: "'Connected' in netbird_status.stdout"
-  retries: 15
-  delay: 3
-  changed_when: false
-  failed_when: false
 
 - name: Display NetBird peer status
+  command: netbird status
+  register: netbird_status
+  changed_when: false
+  failed_when: false
+  when: netbird_config.stat.exists
+
+- name: Show peer status
   debug:
     msg: "{{ netbird_status.stdout_lines }}"
+  when: netbird_config.stat.exists and netbird_status.stdout_lines is defined
