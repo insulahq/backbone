@@ -12,6 +12,8 @@ services:
       # Fabric port — public, mTLS-secured (not HTTP, can't go through Traefik)
       - '0.0.0.0:{{ openziti_ctrl_port }}:{{ openziti_ctrl_port }}'
       - '[::]:{{ openziti_ctrl_port }}:{{ openziti_ctrl_port }}'
+      # Edge API on WireGuard — for internal router enrollment and CLI access
+      - '{{ wireguard_ip }}:{{ openziti_edge_port }}:{{ openziti_edge_port }}'
     volumes:
       - {{ openziti_install_dir }}/pki:/openziti/pki:ro
       - {{ openziti_controller_dir }}:/openziti/controller
