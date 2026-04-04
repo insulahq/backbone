@@ -22,8 +22,8 @@ iptables -A DOCKER-USER -p tcp --dport 8081 -j DROP
 # Port 8180→8080: PowerDNS Admin (host 8180 → container 8080 via powerdns_internal bridge)
 iptables -A DOCKER-USER -p tcp --dport 8180 -j DROP
 iptables -A DOCKER-USER -p tcp --dport 8080 -j DROP
-# OpenZiti: 8440 (controller fabric), 8441 (edge API) — WireGuard only
-iptables -A DOCKER-USER -p tcp --dport 8440 -j DROP
+# OpenZiti: 8441 (edge API) — WireGuard only (public access via Traefik on :443)
+# Port 8440 (fabric) is public — mTLS-secured, routers/tunnelers connect directly
 iptables -A DOCKER-USER -p tcp --dport 8441 -j DROP
 # Portainer: 9000 (UI), 8000 (edge agent tunnel), 9443 (HTTPS UI)
 iptables -A DOCKER-USER -p tcp --dport 9000 -j DROP

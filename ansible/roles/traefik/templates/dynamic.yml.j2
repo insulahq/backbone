@@ -12,6 +12,10 @@ http:
         average: {{ traefik_ratelimit_average }}
         burst: {{ traefik_ratelimit_burst }}
 
+  serversTransports:
+    insecureTransport:
+      insecureSkipVerify: true
+
 tls:
   stores:
     default:

@@ -13,7 +13,7 @@ identity:
 ctrl:
   endpoints:
 {% for host in groups['dns_servers'] %}
-    - tls:{{ hostvars[host]['wireguard_ip'] }}:{{ openziti_ctrl_port }}
+    - tls:{{ hostvars[host]['ansible_host'] }}:{{ openziti_ctrl_port }}
 {% endfor %}
   heartbeatIntervalSeconds: 10
 

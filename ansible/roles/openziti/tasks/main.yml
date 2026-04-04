@@ -84,12 +84,6 @@
   tags: [openziti]
 
 # --- Bootstrap PKI and controller (primary node only, first run) ---
-- name: Check if PKI already exists
-  stat:
-    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
-  register: _openziti_pki_exists
-  tags: [openziti]
-
 - name: Deploy bootstrap script
   template:
     src: bootstrap.sh.j2
@@ -98,7 +92,7 @@
   when: inventory_hostname == openziti_primary_node
   tags: [openziti]
 
-- name: Run PKI bootstrap (first deploy only)
+- name: Run PKI bootstrap (idempotent — skips existing artifacts)
   command: >
     docker run --rm --entrypoint /bin/sh --user root
     -v {{ openziti_pki_dir }}:/openziti/pki
@@ -106,9 +100,8 @@
     -v {{ openziti_install_dir }}/bootstrap.sh:/bootstrap.sh:ro
     {{ openziti_cli_image }}
     /bootstrap.sh
-  when:
-    - inventory_hostname == openziti_primary_node
-    - not (_openziti_pki_exists.stat.exists | default(false))
+  when: inventory_hostname == openziti_primary_node
+  changed_when: false
   tags: [openziti]
 
 - name: Fix PKI file permissions (readable by container user)
