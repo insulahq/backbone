@@ -35,9 +35,7 @@ services:
     networks:
       - traefik_public
     environment:
-      ZITI_CTRL_EDGE_ADVERTISED_ADDRESS: "{{ openziti_domain }}"
-      ZITI_CTRL_EDGE_ADVERTISED_PORT: "{{ openziti_edge_port }}"
-      PORTTLS: "443"
+      ZAC_CONTROLLER_URLS: "https://{{ wireguard_ip }}:{{ openziti_edge_port }}"
     labels:
       - traefik.enable=true
       - traefik.http.routers.ziti-console.rule=Host(`{{ openziti_domain }}`)
