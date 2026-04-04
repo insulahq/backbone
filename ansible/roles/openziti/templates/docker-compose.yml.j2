@@ -45,8 +45,7 @@ services:
       - traefik.http.routers.ziti-console.tls=true
       - traefik.http.routers.ziti-console.middlewares=ratelimit@file
       - traefik.http.routers.ziti-console.priority=1
-      - traefik.http.services.ziti-console.loadbalancer.server.port=8443
-      - traefik.http.services.ziti-console.loadbalancer.server.scheme=https
+      - traefik.http.services.ziti-console.loadbalancer.server.port=1408
     logging:
       driver: "json-file"
       options:
