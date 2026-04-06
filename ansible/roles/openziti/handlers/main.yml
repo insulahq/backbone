@@ -1,11 +1,25 @@
 ---
 # OpenZiti Role — Handlers
 
-# Restart all services on primary, only router on standby.
-# The standby's controller stays stopped until the watchdog promotes it.
-- name: restart openziti
+- name: clear router endpoints cache
+  file:
+    path: "{{ openziti_router_dir }}/endpoints"
+    state: absent
+  listen: restart openziti
+
+- name: restart openziti (primary - all services)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
-    services: "{{ (inventory_hostname == openziti_primary_node) | ternary(omit, ['ziti-router']) }}"
     state: present
     recreate: always
+  when: inventory_hostname == openziti_primary_node
+  listen: restart openziti
+
+- name: restart openziti (standby - router only)
+  community.docker.docker_compose_v2:
+    project_src: "{{ openziti_install_dir }}"
+    services: ["ziti-router"]
+    state: present
+    recreate: always
+  when: inventory_hostname != openziti_primary_node
+  listen: restart openziti

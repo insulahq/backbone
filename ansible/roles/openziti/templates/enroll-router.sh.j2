@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Enroll edge router with the OpenZiti controller.
 # Runs inside the ziti-cli container. Idempotent — skips if already enrolled.
 #
@@ -9,8 +9,15 @@
 
 set -eu
 
-# Direct controller URL (WireGuard, OpenZiti PKI cert)
-CTRL_DIRECT="https://{{ hostvars[openziti_primary_node]['wireguard_ip'] }}:{{ openziti_edge_port }}"
+# Controller endpoints — try all WireGuard IPs (primary first)
+CTRL_ENDPOINTS=(
+    "https://{{ hostvars[openziti_primary_node]['wireguard_ip'] }}:{{ openziti_edge_port }}"
+{% for host in groups['dns_servers'] %}
+{% if host != openziti_primary_node %}
+    "https://{{ hostvars[host]['wireguard_ip'] }}:{{ openziti_edge_port }}"
+{% endif %}
+{% endfor %}
+)
 ADMIN_USER="{{ openziti_admin_user }}"
 ADMIN_PASS="{{ openziti_admin_password }}"
 ROUTER_NAME="router-{{ inventory_hostname }}"
@@ -24,15 +31,24 @@ if [ -f "/openziti/router/certs/router-${NODE_NAME}.cert" ]; then
     exit 0
 fi
 
-# Wait for controller to be ready (direct connection)
-log "Waiting for controller at ${CTRL_DIRECT}..."
+# Wait for controller to be ready (try all endpoints)
+log "Waiting for controller..."
+LOGGED_IN=false
 for i in $(seq 1 30); do
-    if ziti edge login "${CTRL_DIRECT}" -u "${ADMIN_USER}" -p "${ADMIN_PASS}" --yes 2>/dev/null; then
-        log "Controller login successful"
-        break
-    fi
+    for CTRL in "${CTRL_ENDPOINTS[@]}"; do
+        if ziti edge login "${CTRL}" -u "${ADMIN_USER}" -p "${ADMIN_PASS}" --yes 2>/dev/null; then
+            log "Controller login successful at ${CTRL}"
+            LOGGED_IN=true
+            break 2
+        fi
+    done
     sleep 5
 done
+
+if [ "$LOGGED_IN" != "true" ]; then
+    log "ERROR: Could not login to any controller endpoint"
+    exit 1
+fi
 
 # Delete existing router if present (clean slate for re-enrollment)
 log "Removing existing router identity (if any)"
@@ -53,5 +69,7 @@ fi
 log "Enrolling router with JWT"
 ziti router enroll /openziti/router/router.yaml \
     --jwt /tmp/router.jwt
+
+rm -f /tmp/router.jwt
 
 log "Router ${ROUTER_NAME} enrolled successfully"

@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+log() { echo "$(date): ZITI-WATCHDOG: $*"; }
+
+exec 200>/var/lock/ziti-watchdog.lock
+flock -n 200 || { log "Another watchdog instance is running — skipping"; exit 0; }
+
 INSTALL_DIR="{{ openziti_install_dir }}"
 CTRL_DIR="{{ openziti_controller_dir }}"
 PREFERRED_PRIMARY="{{ openziti_primary_node }}"
@@ -23,10 +28,10 @@ PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }
 PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
 LOCAL_WG_IP="{{ wireguard_ip }}"
 EDGE_PORT="{{ openziti_edge_port }}"
-FAILURE_FILE="/tmp/ziti-watchdog-failures"
-PROMOTED_FILE="/tmp/ziti-controller-promoted"
-
-log() { echo "$(date): ZITI-WATCHDOG: $*"; }
+STATE_DIR="/var/lib/openziti"
+mkdir -p "$STATE_DIR"
+FAILURE_FILE="${STATE_DIR}/watchdog-failures"
+PROMOTED_FILE="${STATE_DIR}/controller-promoted"
 
 # Check if controller is healthy at a given IP
 check_controller() {
@@ -77,13 +82,20 @@ if check_controller "$PEER_WG_IP"; then
     log "Syncing DB from peer"
     rsync -az -e "ssh -o ConnectTimeout=5 -i /root/.ssh/peer_key" \
         "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${CTRL_DIR}/db/" 2>/dev/null || {
-        log "WARNING: DB sync from peer failed, using local copy"
+        log "ERROR: DB sync from peer failed — aborting failback to prevent data loss"
+        # Restart DB sync on peer since we stopped it
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+            "systemctl start ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
+        exit 1
     }
 
     # 3. Stop controller on peer
     log "Stopping controller on peer"
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
-        "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || true
+        "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || {
+        log "ERROR: Could not stop controller on peer — aborting failback to prevent split-brain"
+        exit 1
+    }
 
     # 4. Start controller locally
     log "Starting controller locally"
@@ -113,6 +125,22 @@ if check_controller "$PEER_WG_IP"; then
 
     log "=== FAILBACK COMPLETE ==="
     {% endif %}
+fi
+
+# Neither local nor peer controller is running — self-heal
+if [ "$LOCAL_RUNNING" != "true" ]; then
+    log "WARNING: No controller running anywhere — attempting self-heal on preferred primary"
+    cd "${INSTALL_DIR}" && docker compose up -d --force-recreate ziti-controller ziti-console
+    sleep 10
+    if check_controller "$LOCAL_WG_IP"; then
+        log "Self-heal successful — controller running on preferred primary"
+        rm -f "${STATE_DIR}/watchdog-failures" "${STATE_DIR}/controller-promoted" 2>/dev/null
+        # Restart local router to connect to local controller
+        rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true
+        cd "${INSTALL_DIR}" && docker compose restart ziti-router
+    else
+        log "ERROR: Self-heal failed — controller could not start"
+    fi
 fi
 
 {% else %}

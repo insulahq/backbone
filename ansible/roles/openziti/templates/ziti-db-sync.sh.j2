@@ -24,11 +24,26 @@ if ! curl -fsSk --max-time 5 "https://${PEER_WG_IP}:${EDGE_PORT}/edge/client/v1/
     exit 0
 fi
 
+# Verify source DB is non-empty before syncing
+REMOTE_SIZE=$(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key \
+    "root@${PEER_WG_IP}" "stat -c%s ${CTRL_DIR}/db/ctrl.db 2>/dev/null || echo 0")
+if [ "$REMOTE_SIZE" -lt 1000 ]; then
+    log "ERROR: Source DB is empty or missing (${REMOTE_SIZE} bytes) — skipping sync"
+    exit 1
+fi
+
 # Sync the controller DB directory from the primary
-log "Syncing controller DB from ${PEER_WG_IP}"
+log "Syncing controller DB from ${PEER_WG_IP} (source size: ${REMOTE_SIZE} bytes)"
 mkdir -p "${SYNC_DIR}"
 rsync -az --delete \
     -e "ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key" \
     "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${SYNC_DIR}/"
+
+# Verify local copy is non-empty after sync
+LOCAL_SIZE=$(stat -c%s "${SYNC_DIR}/ctrl.db" 2>/dev/null || echo 0)
+if [ "$LOCAL_SIZE" -lt 1000 ]; then
+    log "ERROR: Local DB is empty after sync (${LOCAL_SIZE} bytes) — sync may have failed"
+    exit 1
+fi
 
 log "DB sync complete ($(du -sh "${SYNC_DIR}" | cut -f1))"

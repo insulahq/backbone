@@ -15,7 +15,7 @@ openziti_version: "1.4.1"
 openziti_controller_image: "openziti/ziti-controller:{{ openziti_version }}"
 openziti_router_image: "openziti/ziti-router:{{ openziti_version }}"
 openziti_cli_image: "openziti/ziti-cli:{{ openziti_version }}"
-openziti_console_image: "openziti/zac:latest"
+openziti_console_image: "openziti/zac:latest"  # ZAC only publishes :latest (no version tags)
 
 # Installation directories
 openziti_install_dir: /opt/openziti
