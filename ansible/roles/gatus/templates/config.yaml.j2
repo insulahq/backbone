@@ -199,3 +199,23 @@ endpoints:
       - "[STATUS] == 200"
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 5m
+{% if openziti_enabled | default(false) | bool %}
+  - name: "OpenZiti Edge API"
+    group: platform
+    url: "https://{{ openziti_domain | default('ziti.' + platform_domain) }}/edge/client/v1/version"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 2m
+  - name: "OpenZiti Console"
+    group: platform
+    url: "https://{{ openziti_domain | default('ziti.' + platform_domain) }}"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] < 500"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 5m
+{% endif %}

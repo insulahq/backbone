@@ -7,7 +7,8 @@
 set -euo pipefail
 source /usr/local/lib/platform-alert.sh
 
-CONTAINER="PG-Maintenance-OK"
+PG_CONTAINER="postgresql"
+ALERT_NAME="PG-Maintenance-OK"
 ERRORS=0
 
 log() {
@@ -18,13 +19,13 @@ log() {
 trap 'platform_alert "critical" "PG-Maintenance-OK" "PostgreSQL maintenance failed unexpectedly on line $LINENO"' ERR
 
 # Check if PostgreSQL is running
-if ! docker exec "$CONTAINER" pg_isready -U postgres -q 2>/dev/null; then
+if ! docker exec "$PG_CONTAINER" pg_isready -U postgres -q 2>/dev/null; then
     platform_alert "warning" "PG-Maintenance-OK" "PostgreSQL not ready — skipping maintenance"
     exit 0
 fi
 
 # Only run on primary (not in recovery mode)
-IS_RECOVERY=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
+IS_RECOVERY=$(docker exec "$PG_CONTAINER" psql -U postgres -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
 if [ "$IS_RECOVERY" != "f" ]; then
     log "This node is standby (in recovery) — skipping maintenance"
     exit 0
@@ -33,18 +34,18 @@ fi
 log "Starting PostgreSQL maintenance on primary"
 
 # Get list of all non-template databases
-DATABASES=$(docker exec "$CONTAINER" psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true" 2>/dev/null)
+DATABASES=$(docker exec "$PG_CONTAINER" psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true" 2>/dev/null)
 
 for DB in $DATABASES; do
     log "Running VACUUM ANALYZE on database: $DB"
-    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1; then
+    if ! docker exec "$PG_CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1; then
         platform_alert "warning" "PG-Maintenance-OK" "VACUUM ANALYZE failed on database $DB"
         ERRORS=$((ERRORS + 1))
     fi
 
     # Reindex system catalogs (prevents index bloat on heavily-written databases like Zitadel)
     log "Running REINDEX SYSTEM on database: $DB"
-    if ! docker exec "$CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM" 2>&1; then
+    if ! docker exec "$PG_CONTAINER" psql -U postgres -d "$DB" -c "REINDEX (VERBOSE) SYSTEM" 2>&1; then
         platform_alert "warning" "PG-Maintenance-OK" "REINDEX SYSTEM failed on database $DB"
         ERRORS=$((ERRORS + 1))
     fi
@@ -52,7 +53,7 @@ done
 
 # Check and report replication slot status (warn about lagging slots)
 log "Checking replication slot status:"
-SLOT_INFO=$(docker exec "$CONTAINER" psql -U postgres -tAc "
+SLOT_INFO=$(docker exec "$PG_CONTAINER" psql -U postgres -tAc "
     SELECT slot_name, active,
            pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS lag_bytes
     FROM pg_replication_slots" 2>/dev/null || echo "")
@@ -78,7 +79,7 @@ fi
 
 # Report database sizes
 log "Database sizes:"
-docker exec "$CONTAINER" psql -U postgres -c "
+docker exec "$PG_CONTAINER" psql -U postgres -c "
     SELECT datname,
            pg_size_pretty(pg_database_size(datname)) AS size
     FROM pg_database

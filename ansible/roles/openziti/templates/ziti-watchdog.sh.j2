@@ -87,7 +87,7 @@ if check_controller "$PEER_WG_IP"; then
 
     # 4. Start controller locally
     log "Starting controller locally"
-    cd "${INSTALL_DIR}" && docker compose up -d ziti-controller ziti-console
+    cd "${INSTALL_DIR}" && docker compose up -d --force-recreate ziti-controller ziti-console
 
     # 5. Wait for controller to be ready
     for i in $(seq 1 12); do
@@ -98,7 +98,16 @@ if check_controller "$PEER_WG_IP"; then
     rm -f "$PROMOTED_FILE"
     echo "0" > "$FAILURE_FILE"
 
-    # 6. Restart DB sync on peer
+    # 6. Restart local router to discover the local controller
+    log "Restarting local router to connect to failback controller"
+    rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true
+    cd "${INSTALL_DIR}" && docker compose restart ziti-router
+
+    # 7. Restart peer router to discover the failback controller
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        "rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true; cd ${INSTALL_DIR} && docker compose restart ziti-router 2>/dev/null || true" 2>/dev/null || true
+
+    # 8. Restart DB sync on peer
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "systemctl start ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
 
@@ -139,7 +148,7 @@ systemctl stop ziti-db-sync.timer 2>/dev/null || true
 
 # 2. Start controller using synced DB
 log "Starting controller from synced DB"
-cd "${INSTALL_DIR}" && docker compose up -d ziti-controller ziti-console
+cd "${INSTALL_DIR}" && docker compose up -d --force-recreate ziti-controller ziti-console
 
 # 3. Wait for controller to be ready
 for i in $(seq 1 12); do
@@ -150,6 +159,15 @@ done
 if check_controller "$LOCAL_WG_IP"; then
     log "=== FAILOVER COMPLETE: Controller active on {{ inventory_hostname }} ==="
     touch "$PROMOTED_FILE"
+
+    # 4. Restart local router so it discovers the local controller.
+    # The router caches controller endpoints in /openziti/router/endpoints
+    # (from the controller's advertiseAddress). After failover, the cached
+    # endpoint points to the dead node. Clear it so the router falls back
+    # to ctrl.endpoints from config (which includes 127.0.0.1).
+    log "Restarting local router to connect to promoted controller"
+    rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true
+    cd "${INSTALL_DIR}" && docker compose restart ziti-router
 else
     log "ERROR: Controller failed to start after promotion"
 fi

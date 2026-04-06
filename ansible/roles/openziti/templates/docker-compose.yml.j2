@@ -1,6 +1,6 @@
 services:
-{% if inventory_hostname == _openziti_active_controller %}
-  # Controller — runs on the active node only
+  # Controller — present on both nodes; only started on the active node.
+  # The standby's controller stays stopped until the watchdog promotes it.
   ziti-controller:
     image: {{ openziti_controller_image }}
     container_name: ziti-controller
@@ -43,6 +43,7 @@ services:
         max-file: "3"
 
   # ZAC Admin Console — behind Traefik (catch-all for ziti.<domain>)
+  # Present on both nodes; only started on the active controller node.
   ziti-console:
     image: {{ openziti_console_image }}
     container_name: ziti-console
@@ -65,23 +66,17 @@ services:
       options:
         max-size: "50m"
         max-file: "2"
-{% endif %}
 
   # Edge Router — runs on both nodes (active-active, public-facing)
+  # Uses host network so it can reach the local controller via 127.0.0.1
+  # (avoids hairpin NAT when router and controller are on the same host).
+  # Ports 3022 (edge) and 6262 (link mesh) bind directly on the host.
   ziti-router:
     image: {{ openziti_router_image }}
     container_name: ziti-router
     entrypoint: ["ziti", "router"]
     restart: unless-stopped
-    networks:
-      - ziti_internal
-      - traefik_public
-    ports:
-      # Edge listener — tenant tunnelers connect here
-      - '0.0.0.0:{{ openziti_router_port }}:{{ openziti_router_port }}'
-      - '[::]:{{ openziti_router_port }}:{{ openziti_router_port }}'
-      # Link listener — router-to-router mesh (WireGuard only)
-      - '{{ wireguard_ip }}:6262:6262'
+    network_mode: host
     volumes:
       - {{ openziti_pki_dir }}:/openziti/pki:ro
       - {{ openziti_router_dir }}:/openziti/router

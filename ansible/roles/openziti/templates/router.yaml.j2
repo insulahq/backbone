@@ -9,11 +9,19 @@ identity:
   key: /openziti/router/keys/router-{{ inventory_hostname }}.key
   ca: /openziti/pki/cas.pem
 
-# Controller endpoints — lists both nodes for failover
+# Controller endpoints — local first, then remote for failover.
+# Local endpoint (127.0.0.1) is listed FIRST so the router tries it first:
+#   - Normal operation: instant success (local controller running)
+#   - Failover: fast failure (connection refused), then tries remote endpoint
+# If local were second, the router's exponential backoff on the remote
+# endpoint would delay discovering the local controller for minutes.
 ctrl:
   endpoints:
+    - tls:127.0.0.1:{{ openziti_ctrl_port }}
 {% for host in groups['dns_servers'] %}
+{% if host != inventory_hostname %}
     - tls:{{ hostvars[host]['ansible_host'] }}:{{ openziti_ctrl_port }}
+{% endif %}
 {% endfor %}
   heartbeatIntervalSeconds: 10
 

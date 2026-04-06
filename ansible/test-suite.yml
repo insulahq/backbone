@@ -17,7 +17,7 @@
 #
 # Available tags:
 #   dns, tls, postgresql, netbird, zitadel, gatus, portainer,
-#   backup, maintenance, cross_node, failover, summary
+#   openziti, backup, maintenance, cross_node, failover, summary
 #
 # The playbook collects results into _test_results and prints a summary table.
 # Failed tests are reported as Ansible failures for CI integration.
@@ -392,6 +392,74 @@
         _test_results: "{{ _test_results + [{'name': 'backup server connection (' + (backup_backend | default('sftp')) + ')', 'host': inventory_hostname, 'passed': _t_backup_conn.rc | default(1) == 0}] }}"
       when: backup_enabled | default(false) | bool
       tags: [backup]
+
+    # ------------------------------------------------------------------
+    # OpenZiti Tests
+    # ------------------------------------------------------------------
+    - name: "OpenZiti | Router container running and healthy"
+      community.docker.docker_container_info:
+        name: ziti-router
+      register: _t_ziti_router
+      ignore_errors: true
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — router container"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti router healthy', 'host': inventory_hostname, 'passed': (_t_ziti_router.container.State.Health.Status | default('')) == 'healthy'}] }}"
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Controller container running (primary only)"
+      community.docker.docker_container_info:
+        name: ziti-controller
+      register: _t_ziti_ctrl
+      ignore_errors: true
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname == (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — controller container"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti controller healthy', 'host': inventory_hostname, 'passed': (_t_ziti_ctrl.container.State.Health.Status | default('')) == 'healthy'}] }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname == (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Edge API reachable (via WireGuard)"
+      uri:
+        url: "https://{{ hostvars[openziti_primary_node | default(dns_failover_primary | default('ns1'))]['wireguard_ip'] }}:{{ openziti_edge_port | default(8441) }}/edge/client/v1/version"
+        validate_certs: false
+        status_code: 200
+        timeout: 10
+      register: _t_ziti_api
+      ignore_errors: true
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — Edge API"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti Edge API reachable', 'host': inventory_hostname, 'passed': _t_ziti_api is success}] }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Watchdog timer active"
+      command: systemctl is-active ziti-watchdog.timer
+      register: _t_ziti_watchdog
+      changed_when: false
+      ignore_errors: true
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — watchdog timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti watchdog timer active', 'host': inventory_hostname, 'passed': _t_ziti_watchdog.rc | default(1) == 0}] }}"
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
 
     # ------------------------------------------------------------------
     # Platform DNS Switch Tests
@@ -1074,6 +1142,7 @@
         - /opt/zitadel
         - /opt/gatus
         - /opt/portainer
+        - /opt/openziti
         - /opt/powerdns
       when: inventory_hostname == _test_node
       ignore_errors: true
@@ -1133,6 +1202,7 @@
         - /opt/zitadel
         - /opt/gatus
         - /opt/portainer
+        - /opt/openziti
       when: inventory_hostname == _test_node
       ignore_errors: true
       tags: [failover, never]
@@ -1221,6 +1291,74 @@
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'NetBird healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_netbird is success}] }}"
       run_once: true
+      tags: [failover, never]
+
+    # --- OpenZiti failover: verify router reconnects to surviving node ---
+    - name: "Failover | Verify OpenZiti router healthy on surviving node"
+      community.docker.docker_container_info:
+        name: ziti-router
+      register: _t_fo_ziti_router
+      ignore_errors: true
+      retries: 6
+      delay: 10
+      until: (_t_fo_ziti_router.container.State.Health.Status | default('')) == 'healthy'
+      delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — OpenZiti router on surviving node"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'OpenZiti router healthy on surviving node', 'host': 'cluster', 'passed': (_t_fo_ziti_router.container.State.Health.Status | default('')) == 'healthy'}] }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Verify OpenZiti Edge API available after recovery"
+      uri:
+        url: "https://{{ hostvars[item]['wireguard_ip'] }}:{{ openziti_edge_port | default(8441) }}/edge/client/v1/version"
+        validate_certs: false
+        status_code: 200
+        timeout: 10
+      register: _t_fo_ziti_api
+      ignore_errors: true
+      retries: 6
+      delay: 10
+      until: _t_fo_ziti_api is success
+      loop: "{{ groups['dns_servers'] }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — OpenZiti Edge API after recovery"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'OpenZiti Edge API available (at least one node)', 'host': 'cluster', 'passed': _t_fo_ziti_api.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'eq', 200) | list | length > 0}] }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Verify OpenZiti router healthy on recovered node"
+      community.docker.docker_container_info:
+        name: ziti-router
+      register: _t_fo_ziti_recovery
+      ignore_errors: true
+      retries: 6
+      delay: 10
+      until: (_t_fo_ziti_recovery.container.State.Health.Status | default('')) == 'healthy'
+      delegate_to: "{{ _test_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — OpenZiti recovery"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'OpenZiti router healthy on recovered node', 'host': 'cluster', 'passed': (_t_fo_ziti_recovery.container.State.Health.Status | default('')) == 'healthy'}] }}"
+      run_once: true
+      when: openziti_enabled | default(false) | bool
       tags: [failover, never]
 
     # ------------------------------------------------------------------

@@ -140,11 +140,24 @@
   tags: [openziti]
 
 # --- Start containers ---
-- name: Start OpenZiti stack
+# Controller + console are defined on both nodes (for failover) but only
+# started on the primary. The standby's controller stays stopped until
+# the watchdog promotes it.
+- name: Start OpenZiti stack (controller + console + router on primary)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
     pull: missing
     state: present
+  when: inventory_hostname == openziti_primary_node
+  tags: [openziti]
+
+- name: Start OpenZiti router only (standby node)
+  community.docker.docker_compose_v2:
+    project_src: "{{ openziti_install_dir }}"
+    services: ["ziti-router"]
+    pull: missing
+    state: present
+  when: inventory_hostname != openziti_primary_node
   tags: [openziti]
 
 # --- Enroll router (requires running controller) ---
