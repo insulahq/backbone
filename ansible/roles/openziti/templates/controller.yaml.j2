@@ -34,9 +34,9 @@ edge:
       cert: /openziti/pki/edge-signer/certs/edge-signer.cert
       key: /openziti/pki/edge-signer/keys/edge-signer.key
     edgeIdentity:
-      duration: 180m
+      duration: 30m
     edgeRouter:
-      duration: 180m
+      duration: 30m
 
 # Web listeners — edge API (proxied by Traefik on :443)
 web:
@@ -53,7 +53,7 @@ web:
       idleTimeout: 5000ms
       readTimeout: 5000ms
       writeTimeout: 100000ms
-      minTLSVersion: TLS1.2
+      minTLSVersion: TLS1.3
     apis:
       - binding: edge-management
         options: {}

@@ -1,10 +1,13 @@
 services:
   # Controller — present on both nodes; only started on the active node.
   # The standby's controller stays stopped until the watchdog promotes it.
+  # restart: "no" — lifecycle managed exclusively by the watchdog and Ansible.
+  # Using "unless-stopped" would auto-start the standby's controller on Docker
+  # daemon restart, causing split-brain.
   ziti-controller:
     image: {{ openziti_controller_image }}
     container_name: ziti-controller
-    restart: unless-stopped
+    restart: "no"
     networks:
       - ziti_internal
       - traefik_public
@@ -18,6 +21,8 @@ services:
       - {{ openziti_install_dir }}/pki:/openziti/pki:ro
       - {{ openziti_controller_dir }}:/openziti/controller
     command: ["run", "/openziti/controller/controller.yaml"]
+    mem_limit: 512m
+    memswap_limit: 512m
     labels:
       - traefik.enable=true
       # Edge API — proxied through Traefik with Let's Encrypt cert
@@ -47,12 +52,14 @@ services:
   ziti-console:
     image: {{ openziti_console_image }}
     container_name: ziti-console
-    restart: unless-stopped
+    restart: "no"
     networks:
       - traefik_public
     environment:
       # Public URL — ZAC JavaScript calls the controller API from the browser
       ZAC_CONTROLLER_URLS: "https://{{ openziti_domain }}"
+    mem_limit: 128m
+    memswap_limit: 128m
     labels:
       - traefik.enable=true
       - traefik.http.routers.ziti-console.rule=Host(`{{ openziti_domain }}`)
@@ -77,6 +84,8 @@ services:
     entrypoint: ["ziti", "router"]
     restart: unless-stopped
     network_mode: host
+    mem_limit: 256m
+    memswap_limit: 256m
     volumes:
       - {{ openziti_pki_dir }}:/openziti/pki:ro
       - {{ openziti_router_dir }}:/openziti/router

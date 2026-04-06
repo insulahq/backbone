@@ -45,17 +45,19 @@
 # --- Create directories ---
 - name: Create OpenZiti directories
   file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    mode: '0755'
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('2171') }}"
+    mode: "{{ item.mode | default('0750') }}"
   loop:
-    - "{{ openziti_install_dir }}"
-    - "{{ openziti_pki_dir }}"
-    - "{{ openziti_controller_dir }}"
-    - "{{ openziti_controller_dir }}/db"
-    - "{{ openziti_router_dir }}"
-    - "{{ openziti_router_dir }}/certs"
-    - "{{ openziti_router_dir }}/keys"
+    - { path: "{{ openziti_install_dir }}", group: root, mode: '0755' }
+    - { path: "{{ openziti_pki_dir }}" }
+    - { path: "{{ openziti_controller_dir }}" }
+    - { path: "{{ openziti_controller_dir }}/db", owner: '2171' }
+    - { path: "{{ openziti_router_dir }}" }
+    - { path: "{{ openziti_router_dir }}/certs" }
+    - { path: "{{ openziti_router_dir }}/keys" }
   tags: [openziti]
 
 # --- Deploy configuration files ---
@@ -63,7 +65,9 @@
   template:
     src: controller.yaml.j2
     dest: "{{ openziti_controller_dir }}/controller.yaml"
-    mode: '0644'
+    owner: root
+    group: '2171'
+    mode: '0640'
   notify: restart openziti
   tags: [openziti]
 
@@ -71,7 +75,9 @@
   template:
     src: router.yaml.j2
     dest: "{{ openziti_router_dir }}/router.yaml"
-    mode: '0644'
+    owner: root
+    group: '2171'
+    mode: '0640'
   notify: restart openziti
   tags: [openziti]
 
@@ -88,7 +94,8 @@
   template:
     src: bootstrap.sh.j2
     dest: "{{ openziti_install_dir }}/bootstrap.sh"
-    mode: '0755'
+    mode: '0700'
+  no_log: true
   when: inventory_hostname == openziti_primary_node
   tags: [openziti]
 
@@ -104,27 +111,22 @@
   changed_when: false
   tags: [openziti]
 
-- name: Fix PKI file permissions (readable by container user)
-  file:
-    path: "{{ openziti_pki_dir }}"
-    recurse: true
-    mode: '0644'
-    state: directory
-  when:
-    - inventory_hostname == openziti_primary_node
-  tags: [openziti]
-
+# Container runs as uid=2171 (ziggy). Certs are public material (0644),
+# private keys must be restricted (0640 readable by ziggy via group).
 - name: Fix PKI directory permissions
-  shell: "find {{ openziti_pki_dir }} -type d -exec chmod 755 {} +; chmod -R a+r {{ openziti_pki_dir }}"
-  when:
-    - inventory_hostname == openziti_primary_node
+  shell: >
+    find {{ openziti_pki_dir }} -type d -exec chmod 755 {} +;
+    find {{ openziti_pki_dir }} -type f -name '*.cert' -exec chmod 644 {} +;
+    find {{ openziti_pki_dir }} -type f -name '*.pem' -exec chmod 644 {} +;
+    find {{ openziti_pki_dir }} -type f -name '*.key' -exec chmod 640 {} +;
+    chown -R root:2171 {{ openziti_pki_dir }}
+  when: inventory_hostname == openziti_primary_node
   changed_when: false
   tags: [openziti]
 
-- name: Fix controller DB permissions
-  shell: "chmod -R 777 {{ openziti_controller_dir }}/db"
-  when:
-    - inventory_hostname == openziti_primary_node
+- name: Fix controller DB permissions (owned by container user, not world-writable)
+  shell: "chown -R 2171:2171 {{ openziti_controller_dir }}/db && chmod 750 {{ openziti_controller_dir }}/db && chmod 640 {{ openziti_controller_dir }}/db/*"
+  when: inventory_hostname == openziti_primary_node
   changed_when: false
   tags: [openziti]
 
@@ -165,7 +167,8 @@
   template:
     src: enroll-router.sh.j2
     dest: "{{ openziti_install_dir }}/enroll-router.sh"
-    mode: '0755'
+    mode: '0700'
+  no_log: true
   tags: [openziti]
 
 - name: Check if router is already enrolled
@@ -188,7 +191,11 @@
   tags: [openziti]
 
 - name: Fix router cert/key permissions
-  shell: "chmod -R a+r {{ openziti_router_dir }}; find {{ openziti_router_dir }} -type d -exec chmod 755 {} +"
+  shell: >
+    find {{ openziti_router_dir }} -type d -exec chmod 755 {} +;
+    find {{ openziti_router_dir }} -type f -name '*.cert' -exec chmod 644 {} +;
+    find {{ openziti_router_dir }} -type f -name '*.key' -exec chmod 640 {} +;
+    chown -R root:2171 {{ openziti_router_dir }}
   changed_when: false
   tags: [openziti]
 
@@ -324,8 +331,5 @@
       - "Edge API: https://{{ wireguard_ip }}:{{ openziti_edge_port }} (WireGuard only)"
       - "Router: {{ ansible_host }}:{{ openziti_router_port }}"
       - ""
-      - "Admin credentials: {{ openziti_admin_user }} / see .generated_secrets/openziti_admin_password"
-      - ""
-      - "CLI login:"
-      - "  ziti edge login https://{{ wireguard_ip }}:{{ openziti_edge_port }} -u {{ openziti_admin_user }} -p $(cat .generated_secrets/openziti_admin_password) --yes"
+      - "Admin: {{ openziti_admin_user }} (password in .generated_secrets/openziti_admin_password)"
   tags: [openziti]
