@@ -35,6 +35,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 | NetBird | 0.67.0 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS |
 | Zitadel | 4.12.3 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
+| OpenZiti | 1.4.1 | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | Portainer | 2.39.0 | Docker management UI, WireGuard + NetBird access |
 | Restic | 0.16.4 | Incremental backup to SFTP backup server |
 
@@ -191,6 +192,23 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 72 | Encryption key: 32 alphanumeric chars base64-decode to only 24 bytes | `openssl rand -base64 32` (44 chars → 32 bytes) |
 | 82 | Health check uses DNS domain before record exists | Use `ansible_host` with `Host` header (same as Zitadel) |
 | 84 | `config.yaml` templated before OIDC client_id created | Re-template task after OIDC app creation triggers restart handler |
+
+### OpenZiti
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 136 | VPS hairpin NAT: router can't reach controller via own public IP | Router uses `network_mode: host` with `127.0.0.1` as first controller endpoint |
+| 137 | Enrollment JWTs embed `edge.api.address` — if set to Traefik URL, verification fails | `edge.api.address` uses WireGuard IP:8441 (OpenZiti PKI). Traefik proxies public API separately |
+| 138 | ZAC serves HTTP on port 1408, not HTTPS on 8443 | Traefik handles TLS. `ZAC_CONTROLLER_URLS` set to public domain for browser API calls |
+| 139 | Router caches controller endpoint in `/openziti/router/endpoints` after enrollment | Watchdog clears file + restarts router after failover/failback so it falls back to config |
+| 140 | `docker compose up -d` on standby starts stale controller container (Docker DNAT cache) | Watchdog uses `--force-recreate` to rebuild from scratch |
+| 141 | `restart: unless-stopped` auto-starts standby controller on Docker daemon restart | Controller + console use `restart: "no"`. Watchdog is sole authority for lifecycle |
+| 142 | OpenZiti reconnect dialer has exponential backoff — takes minutes to try second endpoint | `127.0.0.1` listed FIRST in `ctrl.endpoints`. Connection refused (fast) vs i/o timeout (slow) |
+| 143 | `chmod -R 777` on controller DB dir / `chmod -R a+r` on PKI | Container UID 2171 (ziggy). Keys `0640 root:2171`, DB `0750 2171:2171`, configs `0640 root:2171` |
+| 144 | Admin password baked into bootstrap.sh and enroll-router.sh | Scripts deployed mode 0700, template tasks have `no_log: true` |
+| 145 | Failback synced DB while peer controller still writing (TOCTOU) | Stop peer controller FIRST, then rsync. Controller quiesced = safe copy |
+| 146 | `openziti/zac` has no version-specific tags | Pinned to `:latest` with comment. All other images use `{{ openziti_version }}` |
+| 147 | pg-maintenance.sh `CONTAINER` var was Gatus alert name, not Docker container | Renamed to `PG_CONTAINER="postgresql"` and `ALERT_NAME="PG-Maintenance-OK"` |
 
 ### Backup
 

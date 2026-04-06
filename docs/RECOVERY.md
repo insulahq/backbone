@@ -1,6 +1,6 @@
 # Disaster Recovery Runbook
 
-**Last Updated:** 2026-03-29
+**Last Updated:** 2026-04-06
 **Audience:** Operators responding to infrastructure failures
 
 ---
@@ -21,6 +21,7 @@
 | 10 | [Database-only restore](#scenario-10-database-only-restore) | Manual | 10-30 min | Up to 24h |
 | 11 | [Backup repository issues](#scenario-11-backup-issues) | Manual | Varies | Previous backup |
 | 12 | [Control machine lost](#scenario-12-control-machine-lost) | Manual | 1-4 hours | 0 (if servers up) |
+| 13 | [OpenZiti controller down](#scenario-13-openziti-controller-down) | Automatic | ~90s | 0 (DB synced) |
 
 ---
 
@@ -52,6 +53,9 @@ Before any recovery, ensure you have:
 - DNS: Other node continues serving (both are authoritative NS)
 - PostgreSQL: Write unavailability for ~80s (detection + promotion + DNS switch)
 - Services: Brief restart on the surviving node (PowerDNS, NetBird, Zitadel, Gatus)
+- OpenZiti: Router on surviving node stays healthy. If controller was on the failed node,
+  the watchdog on the surviving node promotes itself (~90s). Routers reconnect via
+  `127.0.0.1` (host network). Edge API and ZAC console resume on the surviving node.
 
 **When the failed node returns:**
 The entrypoint automatically detects the role change, uses `pg_rewind` to rejoin as standby, and resumes streaming replication. No manual action needed.
@@ -392,6 +396,45 @@ curl -I https://vpn.<DOMAIN>
 # Backup timer
 ssh root@<NODE> "systemctl status restic-backup.timer"
 ```
+
+---
+
+## Scenario 13: OpenZiti Controller Down
+
+**Symptoms:** ZAC console unreachable, tunneler clients can't authenticate, Gatus reports "OpenZiti Edge API" down.
+
+**What happens automatically:**
+1. The `ziti-watchdog` on the standby node detects the controller is unreachable (3 cycles x 30s = ~90s)
+2. Watchdog promotes itself: starts controller + console from synced DB copy
+3. Clears router endpoints cache and restarts local router
+4. Router reconnects to local controller via `127.0.0.1:8440`
+
+**Verify promotion:**
+```bash
+# On surviving node
+docker ps --filter name=ziti-controller  # Should be running
+docker logs ziti-controller --tail 5     # Should show startup
+journalctl -u ziti-watchdog.service -n 20  # Should show "FAILOVER COMPLETE"
+```
+
+**If watchdog did NOT promote (e.g., both nodes were down):**
+```bash
+# On the preferred primary, manually start
+cd /opt/openziti
+docker compose up -d --force-recreate ziti-controller ziti-console
+rm -f /opt/openziti/router/endpoints
+docker compose restart ziti-router
+```
+
+**After the failed node returns:**
+The watchdog on the preferred primary will detect the controller running on the peer. After a 10-minute settling period, it performs automatic failback: stops peer controller, syncs latest DB, starts locally.
+
+**OpenZiti PKI:**
+If the PKI directory (`/opt/openziti/pki/`) is lost on both nodes, a full re-bootstrap is required:
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-openziti.yml
+```
+This regenerates all certificates and re-enrolls routers. Existing enrolled tunneler identities will need re-enrollment.
 
 ---
 

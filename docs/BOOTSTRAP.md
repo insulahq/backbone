@@ -143,6 +143,7 @@ After Phase 2:
 - NetBird: management server at `vpn.<domain>` with embedded Dex IdP
 - Gatus: monitoring dashboard at `status.<domain>`
 - Portainer: Docker management at `http://10.100.0.1:9000` (admin user auto-created)
+- OpenZiti: controller + edge router + ZAC console at `ziti.<domain>` (if `openziti_enabled: true`)
 - Backup: Restic timer configured (with nightly pg_dumpall)
 
 > **Verify** (wait ~2 minutes for Let's Encrypt):
@@ -215,6 +216,8 @@ After Phase 3:
 - DNS active-passive: ns1 preferred, ns2 is failover
 - Zitadel and Gatus use multi-host PG connections (`target_session_attrs=read-write`)
   to always reach the current PG primary, regardless of failover state
+- OpenZiti: edge router on ns2, controller DB synced from ns1 every 5 minutes,
+  watchdog timer active for automatic controller failover (~90s detection)
 
 > **Note:** The NetBird embedded Dex IdP stores user credentials and OIDC
 > connector config in PostgreSQL via the `authStore` config (since v0.66.1).

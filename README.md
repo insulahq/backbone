@@ -16,6 +16,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 | **Zitadel** | Central IAM (OIDC/OAuth2) for service authentication |
 | **Gatus** | HA monitoring dashboard, active health checks, multi-channel alerting |
 | **Portainer** | Docker management UI (VPN-only access) |
+| **OpenZiti 1.4.1** | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | **Uptime Kuma** | Optional UI-based monitoring for user-managed checks (supplements Gatus) |
 | **Restic** | Encrypted incremental backups to SFTP or S3-compatible storage |
 | **OS hardening** | nftables firewall, fail2ban, SSH hardening, Docker CE |
@@ -36,6 +37,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
    │ PostgreSQL (HA) │  │ PostgreSQL (HA)  │
    │ NetBird mgmt    │  │ NetBird mgmt     │
    │ Zitadel IAM     │  │ Zitadel IAM      │
+   │ OpenZiti overlay │  │ OpenZiti overlay  │
    │ Gatus monitor   │  │ Gatus monitor    │
    │ Restic backup   │  │ Restic backup    │
    └────────┬────────┘  └─────────┬────────┘
@@ -53,6 +55,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 | Scenario | Recovery | Data Loss |
 |----------|----------|-----------|
 | Single node failure | Automatic (~80s) | None (streaming replication) |
+| OpenZiti controller failure | Automatic (~90s, watchdog) | None (DB synced to standby) |
 | PostgreSQL crash | Automatic (Docker restart + repmgr) | None |
 | Both nodes down, one reboots | Automatic (self-promotion after 300s) | None |
 | Full disaster (both nodes lost) | Manual rebuild from backup | Up to 24h (daily backup RPO) |
@@ -79,7 +82,7 @@ Restic backs up to **SFTP** or **S3-compatible storage** (AWS, MinIO, Wasabi, Ba
 ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1
 ```
 
-See [docs/RECOVERY.md](docs/RECOVERY.md) for 9 detailed disaster recovery scenarios.
+See [docs/RECOVERY.md](docs/RECOVERY.md) for 13 detailed disaster recovery scenarios.
 
 > **CRITICAL:** Back up `ansible/.generated_secrets/` offline — it contains the restic password and Zitadel masterkey (both irrecoverable if lost). See the [Offline Secrets Procedure](docs/RECOVERY.md#offline-secrets-procedure).
 
@@ -101,7 +104,7 @@ Failover tests include pre-flight health gates and post-flight verification on b
 
 Gatus provides active monitoring with multi-channel alerts:
 
-- **Active probes:** DNS resolution, TLS certificates, Traefik, Zitadel, NetBird health
+- **Active probes:** DNS resolution, TLS certificates, Traefik, Zitadel, NetBird, OpenZiti Edge API + console
 - **External endpoints:** Backup status, disk space, Docker health, PostgreSQL, repmgr, write-health
 - **Alert channels:** Slack, Discord, ntfy, Email, Telegram, PagerDuty, custom webhooks
 - **Dashboard:** HTTPS at `status.<domain>` behind Traefik
@@ -142,6 +145,7 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird manag
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml         # Gatus monitoring
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer UI
+ansible-playbook -i inventory/hosts.yml deploy-openziti.yml       # OpenZiti overlay
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup (SFTP or S3)
 
 # Zero-downtime container updates
@@ -169,11 +173,12 @@ ansible/
     ├── netbird_management/  # NetBird server (mgmt + signal + relay + embedded Dex)
     ├── netbird_peer/        # NetBird peer enrollment
     ├── gatus/               # Gatus HA monitoring + alerting
+    ├── openziti/            # OpenZiti zero-trust overlay (active-standby controller + routers)
     ├── portainer/           # Portainer CE (VPN-only)
     └── backup/              # Restic backup (SFTP or S3)
 docs/
 ├── BOOTSTRAP.md             # Fresh deployment procedure
-├── RECOVERY.md              # Disaster recovery runbook (9 scenarios)
+├── RECOVERY.md              # Disaster recovery runbook (13 scenarios)
 └── DISPERSED_DNS_ARCHITECTURE.md  # PowerDNS architecture
 ```
 
@@ -195,7 +200,7 @@ Copy to non-example counterparts and fill in your values, or run `setup.sh` for 
 | [AGENTS.md](AGENTS.md) | Developer handoff guide with 135+ gotchas and decision log |
 | [ROADMAP.md](ROADMAP.md) | v1.0 status and 5 future phases (CDN, edge nodes, geo-DNS) |
 | [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) | Step-by-step fresh deployment |
-| [docs/RECOVERY.md](docs/RECOVERY.md) | Disaster recovery (9 scenarios + offline secrets) |
+| [docs/RECOVERY.md](docs/RECOVERY.md) | Disaster recovery (13 scenarios + offline secrets) |
 | [docs/DISPERSED_DNS_ARCHITECTURE.md](docs/DISPERSED_DNS_ARCHITECTURE.md) | PowerDNS dual-primary Native mode |
 
 ## License
