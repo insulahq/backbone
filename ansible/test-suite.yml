@@ -461,6 +461,41 @@
       when: openziti_enabled | default(false) | bool
       tags: [openziti]
 
+    - name: "OpenZiti | DB sync timer active (standby only)"
+      command: systemctl is-active ziti-db-sync.timer
+      register: _t_ziti_dbsync
+      changed_when: false
+      ignore_errors: true
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — DB sync timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti DB sync timer active', 'host': inventory_hostname, 'passed': _t_ziti_dbsync.rc | default(1) == 0}] }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Standby has synced DB copy"
+      stat:
+        path: "{{ openziti_controller_dir | default('/opt/openziti/controller') }}/db/ctrl.db"
+      register: _t_ziti_dbfile
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — standby DB exists"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti standby DB exists (' + ((_t_ziti_dbfile.stat.size | default(0)) | string) + ' bytes)', 'host': inventory_hostname, 'passed': (_t_ziti_dbfile.stat.exists | default(false)) and ((_t_ziti_dbfile.stat.size | default(0)) | int > 1000)}] }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
     # ------------------------------------------------------------------
     # Platform DNS Switch Tests
     # ------------------------------------------------------------------

@@ -1,7 +1,10 @@
 #!/bin/bash
 # OpenZiti DB Sync — replicates controller bbolt DB from active to standby.
 # Runs every {{ openziti_db_sync_interval }} via systemd timer on the STANDBY node.
-# Uses ziti controller snapshot for consistent backup (not raw file copy).
+# NOTE: Uses rsync of the live DB file. bbolt uses mmap with exclusive write
+# locks, so reads during write may produce a slightly stale but structurally
+# valid copy. For guaranteed consistency, the failback path stops the controller
+# before syncing (see ziti-watchdog.sh).
 
 set -euo pipefail
 

@@ -131,6 +131,9 @@
   tags: [openziti]
 
 # --- Distribute PKI to standby node ---
+# Note: delegate_to runs on the primary, but inventory_hostname retains the
+# standby's identity — so hostvars[inventory_hostname] correctly resolves to
+# the standby's WireGuard IP as the rsync destination.
 - name: Sync PKI to standby node
   shell: >
     rsync -az -e "ssh -o StrictHostKeyChecking=no -i /root/.ssh/peer_key"
@@ -138,7 +141,7 @@
     root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
   delegate_to: "{{ openziti_primary_node }}"
   when: inventory_hostname != openziti_primary_node
-  changed_when: true
+  changed_when: false
   tags: [openziti]
 
 # --- Start containers ---
@@ -187,6 +190,7 @@
     {{ openziti_cli_image }}
     /enroll-router.sh
   when: not (_openziti_router_enrolled.stat.exists | default(false))
+  no_log: true
   register: _enroll_result
   tags: [openziti]
 
@@ -213,7 +217,7 @@
   template:
     src: ziti-watchdog.sh.j2
     dest: /usr/local/bin/ziti-watchdog.sh
-    mode: '0755'
+    mode: '0700'
   tags: [openziti]
 
 - name: Deploy ziti watchdog systemd units

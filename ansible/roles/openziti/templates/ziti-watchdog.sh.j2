@@ -78,22 +78,22 @@ if check_controller "$PEER_WG_IP"; then
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "systemctl stop ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
 
-    # 2. Sync latest DB from peer
-    log "Syncing DB from peer"
-    rsync -az -e "ssh -o ConnectTimeout=5 -i /root/.ssh/peer_key" \
-        "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${CTRL_DIR}/db/" 2>/dev/null || {
-        log "ERROR: DB sync from peer failed — aborting failback to prevent data loss"
-        # Restart DB sync on peer since we stopped it
-        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
-            "systemctl start ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
-        exit 1
-    }
-
-    # 3. Stop controller on peer
+    # 2. Stop controller on peer FIRST (must quiesce writes before DB copy)
     log "Stopping controller on peer"
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || {
         log "ERROR: Could not stop controller on peer — aborting failback to prevent split-brain"
+        exit 1
+    }
+
+    # 3. Sync DB from peer (controller is stopped — safe to copy)
+    log "Syncing DB from peer (controller quiesced)"
+    rsync -az -e "ssh -o ConnectTimeout=5 -i /root/.ssh/peer_key" \
+        "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${CTRL_DIR}/db/" 2>/dev/null || {
+        log "ERROR: DB sync from peer failed — restarting peer controller"
+        # Restart peer controller since we stopped it but can't proceed
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+            "cd ${INSTALL_DIR} && docker compose up -d --force-recreate ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || true
         exit 1
     }
 
