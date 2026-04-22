@@ -74,6 +74,35 @@
       - "Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key"
   when: not netbird_config.stat.exists
 
+# Signal server failback guard — hourly check that restarts the peer client
+# if it's connected to the wrong signal server after failover/failback (gotcha 136).
+- name: Deploy NetBird signal check script
+  template:
+    src: netbird-signal-check.sh.j2
+    dest: /usr/local/bin/netbird-signal-check.sh
+    mode: '0755'
+
+- name: Deploy NetBird signal check timer
+  template:
+    src: netbird-signal-check.timer.j2
+    dest: /etc/systemd/system/netbird-signal-check.timer
+    mode: '0644'
+  notify: reload systemd
+
+- name: Deploy NetBird signal check service
+  template:
+    src: netbird-signal-check.service.j2
+    dest: /etc/systemd/system/netbird-signal-check.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: Enable and start NetBird signal check timer
+  systemd:
+    name: netbird-signal-check.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+
 - name: Display NetBird peer status
   command: netbird status
   register: netbird_status

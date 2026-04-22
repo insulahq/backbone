@@ -1,0 +1,8 @@
+[Unit]
+Description=NetBird Signal Server Check
+After=docker.service netbird.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60
+ExecStart=/usr/local/bin/netbird-signal-check.sh

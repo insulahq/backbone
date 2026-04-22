@@ -118,14 +118,22 @@ if ! docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --
   echo "$(date): WARNING — one or more service restarts failed after PG role change"
 fi
 
-# 4. Wait for PowerDNS to be healthy (needed for DNS switch API call)
+# 4. Restart NetBird peer client — forces reconnection to the current primary's signal
+#    server. Without this, the peer holds a stale gRPC connection to the old signal
+#    server, causing split-signal mesh isolation (gotcha 136).
+if systemctl is-active netbird &>/dev/null; then
+  echo "$(date): Restarting NetBird peer client (force signal server reconnection)"
+  systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
+fi
+
+# 5. Wait for PowerDNS to be healthy (needed for DNS switch API call)
 for _i in $(seq 1 12); do
   PDNS_HEALTH=$(docker inspect powerdns-auth --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "")
   [ "$PDNS_HEALTH" = "healthy" ] && break
   sleep 5
 done
 
-# 5. Switch DNS (PowerDNS is now healthy and connected to correct PG)
+# 6. Switch DNS (PowerDNS is now healthy and connected to correct PG)
 for _i in 1 2 3; do
   /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
   sleep 5

@@ -1,0 +1,102 @@
+#!/bin/bash
+# ==========================================================================
+# NetBird Signal Server Check — Hourly Failback Guard
+# ==========================================================================
+# Verifies the local NetBird peer client is connected to the current
+# primary node's signal server. If connected to the wrong server
+# (stale connection after failover/failback), restarts the peer service
+# to force reconnection via DNS.
+#
+# Uses the PostgreSQL role (pg_is_in_recovery) as the authoritative
+# source of truth for which node is primary — not DNS resolution.
+#
+# See AGENTS.md gotcha 136 for the split-signal failure mode this prevents.
+# ==========================================================================
+
+set -euo pipefail
+
+LOG_TAG="netbird-signal-check"
+
+log() { echo "$(date): $1"; logger -t "$LOG_TAG" "$1" 2>/dev/null || true; }
+
+# Check if NetBird peer is running and enrolled
+if ! systemctl is-active netbird &>/dev/null; then
+  exit 0  # Not running, nothing to check
+fi
+
+if [ ! -f "{{ netbird_config_dir }}/state.json" ] && [ ! -f /var/lib/netbird/state.json ]; then
+  exit 0  # Not enrolled yet
+fi
+
+# Determine the current primary node's public IP using PG role (authoritative source)
+PG_HEALTH=$(docker inspect postgresql --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+if [ "$PG_HEALTH" != "healthy" ]; then
+  exit 0  # PG not ready, skip this cycle
+fi
+
+PG_ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+if [ "$PG_ROLE" = "error" ]; then
+  exit 0  # Can't query PG, skip this cycle
+fi
+
+# Determine expected signal server IP based on PG role
+if [ "$PG_ROLE" = "f" ]; then
+  # We are primary — peer client should connect to our own IP
+  EXPECTED_SIGNAL_IP="{{ ansible_host }}"
+else
+  # We are standby — peer client should connect to the primary's IP
+  EXPECTED_SIGNAL_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['ansible_host'] }}"
+fi
+
+# Get the IP the NetBird client is actually connected to (management/signal gRPC)
+# NetBird connects to port 443 via Traefik — check established TCP connections
+CONNECTED_IPS=$(ss -tnp 2>/dev/null | grep "netbird" | grep ":443" | grep "ESTAB" | awk '{print $5}' | sed 's/\[//;s/\]//;s/:443$//' | sort -u)
+
+if [ -z "$CONNECTED_IPS" ]; then
+  log "WARNING — NetBird has no established connections to port 443 (signal server)"
+  # NetBird might be reconnecting — let it settle, check next cycle
+  exit 0
+fi
+
+# Check if any connection goes to the expected primary IP (IPv4 or IPv6)
+# Also resolve expected IP's IPv6 if we have it configured
+EXPECTED_IPV6="{{ hostvars[inventory_hostname]['public_ipv6'] | default('') }}"
+if [ "$PG_ROLE" = "f" ]; then
+  EXPECTED_IPV6="{{ hostvars[inventory_hostname]['public_ipv6'] | default('') }}"
+else
+  EXPECTED_IPV6="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['public_ipv6'] | default('') }}"
+fi
+
+SIGNAL_OK=false
+for ip in $CONNECTED_IPS; do
+  if [ "$ip" = "$EXPECTED_SIGNAL_IP" ] || [ "$ip" = "$EXPECTED_IPV6" ]; then
+    SIGNAL_OK=true
+    break
+  fi
+done
+
+if [ "$SIGNAL_OK" = true ]; then
+  exit 0  # Connected to correct signal server
+fi
+
+# === MISMATCH DETECTED ===
+log "MISMATCH — NetBird connected to [$CONNECTED_IPS] but primary is $EXPECTED_SIGNAL_IP. Restarting peer client."
+
+systemctl restart netbird 2>&1
+RESTART_RC=$?
+
+if [ $RESTART_RC -eq 0 ]; then
+  log "NetBird peer client restarted successfully (signal failback)"
+else
+  log "WARNING — NetBird peer restart failed (rc=$RESTART_RC)"
+fi
+
+# Push status to Gatus if token available
+GATUS_TOKEN=$(cat /etc/gatus-token 2>/dev/null || true)
+if [ -n "$GATUS_TOKEN" ]; then
+  GATUS_SUCCESS=$( [ $RESTART_RC -eq 0 ] && echo "true" || echo "false" )
+  curl -fsS --max-time 3 -X POST \
+    "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_netbird-signal-check/external?success=${GATUS_SUCCESS}" \
+    -H "Authorization: Bearer ${GATUS_TOKEN}" \
+    >/dev/null 2>&1 || true
+fi

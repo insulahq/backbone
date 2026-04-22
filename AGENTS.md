@@ -376,6 +376,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 |---|-------|-----|
 | 134 | External IdP (Zitadel OIDC) login creates new orphan account — NetBird matches by IdP user ID, not email | Must invite user via NetBird Team settings before OIDC login; or enable "Check authorization on authentication" in Zitadel project |
 | 135 | `idp.db` sync via raw SSH from controller fails — controller not on WireGuard network | **Obsolete**: idp.db sync removed — embedded Dex now uses PostgreSQL HA via `authStore` config |
+| 136 | **Split-signal mesh isolation** — after management container restart + DNS failover, NetBird peer clients reconnect to the standby's signal server while external peers stay on the primary's signal server. Signal state is per-instance (not replicated), so peers on different signal servers cannot exchange ICE offers. Symptoms: `SentOffer` count climbs to thousands, `RemoteOffer` stays near zero, peers stuck in `Connecting` forever. | `pg-role-watchdog.sh` now restarts `netbird.service` (peer client) on every role change. Hourly `netbird-signal-check.timer` compares actual signal connection IP against PG-derived primary IP and restarts on mismatch. The watchdog also restarts `netbird-server` (management container) on the standby, flushing stale external peer sessions. |
 
 ---
 

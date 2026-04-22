@@ -1,0 +1,12 @@
+[Unit]
+Description=NetBird Signal Server Check (hourly failback guard)
+After=docker.service netbird.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+AccuracySec=60
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target multi-user.target
