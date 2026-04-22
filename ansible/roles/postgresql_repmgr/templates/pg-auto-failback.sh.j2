@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+# platform-alert is non-critical — failback must proceed even if the lib file
+# is missing (e.g., role deployment order issue).
+# shellcheck disable=SC1091
+source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
+
 PREFERRED_PRIMARY="{{ dns_failover_primary | default('ns1') }}"
 NODE_NAME="{{ inventory_hostname }}"
 COOLDOWN_FILE="/tmp/pg-failback-cooldown"
@@ -87,6 +92,8 @@ touch "$COOLDOWN_FILE"
 PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
 
+platform_alert "info" "Repmgr-Healthy" "Auto-failback initiating: promoting $NODE_NAME from standby to primary"
+
 if docker exec postgresql psql -U postgres -c "SELECT pg_promote(true, 60);" 2>&1; then
   echo "$(date): AUTO-FAILBACK: $NODE_NAME promoted via pg_promote()."
   # Update pgproxy target immediately
@@ -101,12 +108,18 @@ if docker exec postgresql psql -U postgres -c "SELECT pg_promote(true, 60);" 2>&
   PEER_SSH_KEY="/root/.ssh/peer_key"
   if [ -f "$PEER_SSH_KEY" ]; then
     echo "$(date): AUTO-FAILBACK: Restarting peer ($PEER_NAME) PG via SSH..."
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
-      "root@${PEER_WG_IP}" "cd /opt/postgresql && docker compose restart postgresql" 2>&1 || \
+    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
+      "root@${PEER_WG_IP}" "cd /opt/postgresql && docker compose restart postgresql" 2>&1; then
+      platform_alert "info" "Repmgr-Healthy" "Auto-failback succeeded on $NODE_NAME (peer PG restarted to rejoin as standby)"
+    else
       echo "$(date): AUTO-FAILBACK: WARNING — could not restart peer PG via SSH. Peer will rejoin on next restart."
+      platform_alert "warning" "Repmgr-Healthy" "Auto-failback: $NODE_NAME promoted but peer SSH restart failed — peer will rejoin on next restart"
+    fi
   else
     echo "$(date): AUTO-FAILBACK: No peer SSH key at $PEER_SSH_KEY. Peer must be restarted manually."
+    platform_alert "warning" "Repmgr-Healthy" "Auto-failback: $NODE_NAME promoted but no peer SSH key — peer must be restarted manually"
   fi
 else
   echo "$(date): AUTO-FAILBACK: pg_promote() FAILED. Cooldown active for ${COOLDOWN_MIN}s."
+  platform_alert "warning" "Repmgr-Healthy" "Auto-failback pg_promote() FAILED on $NODE_NAME — cooldown ${COOLDOWN_MIN}s"
 fi

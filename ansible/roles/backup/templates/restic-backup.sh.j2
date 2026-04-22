@@ -136,10 +136,16 @@ restic "${RESTIC_OPTS[@]}" forget \
     --retry-lock 2m \
     --verbose 2>&1 | tee -a "$LOG_FILE"
 
-# Verify repository integrity (weekly only)
+# Verify repository integrity (weekly only).
+# A check failure here must NOT kill the script before the success ping at end —
+# the backup data itself succeeded; only the integrity subset test had an issue.
+# Post a warning alert but continue so Backup-OK flips green on subsequent runs.
 if [ "$(date +%u)" -eq 7 ]; then
     log "Running weekly repository check"
-    restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% --retry-lock 2m 2>&1 | tee -a "$LOG_FILE"
+    if ! restic "${RESTIC_OPTS[@]}" check --read-data-subset=5% --retry-lock 2m 2>&1 | tee -a "$LOG_FILE"; then
+        platform_alert "warning" "Backup-OK" "Weekly restic check reported errors on {{ inventory_hostname }} — backup data itself succeeded"
+        log "WARNING: weekly restic check failed (continuing)"
+    fi
 
     # Clean up stale Restic cache entries (prevents unbounded cache growth)
     log "Cleaning up Restic cache"

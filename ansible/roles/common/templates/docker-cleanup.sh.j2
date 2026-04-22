@@ -41,3 +41,8 @@ log "Current Docker disk usage:"
 docker system df 2>&1
 
 log "Docker cleanup completed"
+
+# Post success to Gatus so the shared Images-Up-to-Date endpoint stays CONNECTED
+# between image-monitor runs. Without this, a single ERR-trap failure in history
+# leaves the endpoint stuck red (same bug class as pg-maintenance fix).
+platform_alert "info" "Images-Up-to-Date" "Docker cleanup completed on {{ inventory_hostname }}"

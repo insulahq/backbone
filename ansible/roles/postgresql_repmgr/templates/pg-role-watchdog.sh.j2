@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# Concurrency guard — only one invocation at a time.
+# The timer fires every ~30s; a single run can exceed that when PowerDNS or
+# services are slow to restart. Two concurrent runs race on pgproxy-target
+# and on service restart cycles.
+exec 9>/var/run/pg-role-watchdog.lock
+flock -n 9 || exit 0
+
 # Self-heal: ensure our timer is enabled and running
 if ! systemctl is-active pg-role-watchdog.timer &>/dev/null; then
   systemctl start pg-role-watchdog.timer 2>/dev/null || true
@@ -81,7 +88,11 @@ if [ -n "$GATUS_TOKEN" ]; then
     >/dev/null 2>&1 || true
 fi
 
-# Write-health probe (primary only) — detect disk-full or read-only state
+# Write-health probe — ensures every node's PG-Writable endpoint has known state.
+# Primary: test actual INSERT; success=true iff writable.
+# Standby: post success=true because the node is correctly in its expected role
+# (read-only-by-design). Without this, the standby's PG-Writable endpoint goes
+# DISCONNECTED in Gatus because nothing ever pushes to it.
 if [ "$PG_ROLE" = "f" ]; then
   docker exec postgresql psql -U postgres -qc "CREATE TABLE IF NOT EXISTS _watchdog_heartbeat(id int PRIMARY KEY DEFAULT 1 CHECK(id=1), ts timestamptz NOT NULL)" 2>/dev/null || true
   if docker exec postgresql psql -U postgres -qc "INSERT INTO _watchdog_heartbeat VALUES(1,now()) ON CONFLICT(id) DO UPDATE SET ts=now()" 2>/dev/null; then
@@ -90,53 +101,71 @@ if [ "$PG_ROLE" = "f" ]; then
     GATUS_SUCCESS=false
     echo "$(date): WARNING — Primary cannot write to PostgreSQL (disk full / read-only?)"
   fi
-  # Push write-health to Gatus
-  if [ -n "$GATUS_TOKEN" ]; then
-    curl -fsS --max-time 3 -X POST \
-      "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-writable/external?success=${GATUS_SUCCESS}" \
-      -H "Authorization: Bearer ${GATUS_TOKEN}" \
-      >/dev/null 2>&1 || true
+else
+  # Standby in its expected state — node-is-healthy signal.
+  GATUS_SUCCESS=true
+fi
+if [ -n "$GATUS_TOKEN" ]; then
+  curl -fsS --max-time 3 -X POST \
+    "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-writable/external?success=${GATUS_SUCCESS}" \
+    -H "Authorization: Bearer ${GATUS_TOKEN}" \
+    >/dev/null 2>&1 || true
+fi
+
+# Decompose the cascade: pgproxy-target change vs. DNS-only drift.
+# Previously, any DNS mismatch re-triggered the full cascade (service restarts +
+# netbird restart) every cycle while DNS stayed bad, causing continuous flapping.
+PGPROXY_NEEDS_UPDATE=false
+[ "$CORRECT_TARGET" != "$CURRENT_TARGET" ] && PGPROXY_NEEDS_UPDATE=true
+
+DNS_NEEDS_UPDATE=false
+[ "$DNS_OK" != "true" ] && DNS_NEEDS_UPDATE=true
+
+if ! $PGPROXY_NEEDS_UPDATE && ! $DNS_NEEDS_UPDATE; then
+  exit 0  # Everything already correct
+fi
+
+# === Branch A: pgproxy target changed → role transition, full cascade ===
+if $PGPROXY_NEEDS_UPDATE; then
+  echo "$(date): PG role change detected (recovery=$PG_ROLE). Fixing pgproxy: $CURRENT_TARGET → $CORRECT_TARGET"
+
+  # 1. Update pgproxy target
+  echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
+
+  # 2. Wait for pgproxy to pick up new target (self-updating every 5s)
+  sleep 7
+
+  # 3. Restart PG-dependent services (they need fresh connections via new pgproxy target)
+  if ! docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --timeout 5 2>&1; then
+    echo "$(date): WARNING — one or more service restarts failed after PG role change"
   fi
+
+  # 4. Restart NetBird peer client — forces reconnection to the current primary's signal
+  #    server. Without this, the peer holds a stale gRPC connection (gotcha 136).
+  #    ONLY runs when the role actually transitioned — not on every DNS-retry cycle.
+  if systemctl is-active netbird &>/dev/null; then
+    echo "$(date): Restarting NetBird peer client (force signal server reconnection)"
+    systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
+  fi
+
+  # 5. Wait for PowerDNS to be healthy (needed for DNS switch API call)
+  for _i in $(seq 1 12); do
+    PDNS_HEALTH=$(docker inspect powerdns-auth --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "")
+    [ "$PDNS_HEALTH" = "healthy" ] && break
+    sleep 5
+  done
 fi
 
-# If pgproxy target AND DNS are both correct, nothing to do
-if [ "$CORRECT_TARGET" = "$CURRENT_TARGET" ] && [ "$DNS_OK" = true ]; then
-  exit 0
+# === Branch B: DNS drift (may run alone OR as a follow-up to branch A) ===
+if $DNS_NEEDS_UPDATE; then
+  for _i in 1 2 3; do
+    /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
+    sleep 5
+  done
 fi
 
-# === ROLE CHANGE DETECTED ===
-echo "$(date): PG role change detected (recovery=$PG_ROLE). Fixing pgproxy: $CURRENT_TARGET → $CORRECT_TARGET"
-
-# 1. Update pgproxy target
-echo "$CORRECT_TARGET" > "$PGPROXY_TARGET_FILE"
-
-# 2. Wait for pgproxy to pick up new target (self-updating every 5s)
-sleep 7
-
-# 3. Restart PG-dependent services FIRST (they need fresh connections via new pgproxy target)
-if ! docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --timeout 5 2>&1; then
-  echo "$(date): WARNING — one or more service restarts failed after PG role change"
+if $PGPROXY_NEEDS_UPDATE; then
+  echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE"
+else
+  echo "$(date): Fixed DNS only. DNS=$DNS_MODE (pgproxy already correct)"
 fi
-
-# 4. Restart NetBird peer client — forces reconnection to the current primary's signal
-#    server. Without this, the peer holds a stale gRPC connection to the old signal
-#    server, causing split-signal mesh isolation (gotcha 136).
-if systemctl is-active netbird &>/dev/null; then
-  echo "$(date): Restarting NetBird peer client (force signal server reconnection)"
-  systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
-fi
-
-# 5. Wait for PowerDNS to be healthy (needed for DNS switch API call)
-for _i in $(seq 1 12); do
-  PDNS_HEALTH=$(docker inspect powerdns-auth --format "{% raw %}{{.State.Health.Status}}{% endraw %}" 2>/dev/null || echo "")
-  [ "$PDNS_HEALTH" = "healthy" ] && break
-  sleep 5
-done
-
-# 6. Switch DNS (PowerDNS is now healthy and connected to correct PG)
-for _i in 1 2 3; do
-  /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
-  sleep 5
-done
-
-echo "$(date): Fixed. pgproxy=$CORRECT_TARGET, DNS=$DNS_MODE"

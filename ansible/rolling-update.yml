@@ -22,6 +22,19 @@
   hosts: dns_servers
   serial: 1
   gather_facts: false
+  pre_tasks:
+    - name: "Detect PG role for this host"
+      command: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();"
+      register: _is_recovery
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      tags: [rolling-update]
+
+    - name: "Set _is_primary flag (active-passive DNS only applies to primary)"
+      set_fact:
+        _is_primary: "{{ (_is_recovery.stdout | default('') | trim) == 'f' }}"
+      tags: [rolling-update]
   vars:
     _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer,powerdns')) | split(',') }}"
     _service_dirs:
@@ -50,15 +63,17 @@
         host_header: "localhost"
   tasks:
 
-    # --- Step 1: Drain DNS traffic from this node ---
+    # --- Step 1: Drain DNS traffic from this node (primary only; standby doesn't own DNS) ---
     - name: "Drain | Switch DNS away from {{ inventory_hostname }}"
       command: /usr/local/bin/platform-dns-switch drain-self
       changed_when: true
+      when: _is_primary
       tags: [rolling-update]
 
     - name: "Drain | Wait for DNS TTL expiry + grace (45s)"
       pause:
         seconds: 45
+      when: _is_primary
       tags: [rolling-update]
 
     # --- Step 2: Pull and recreate containers ---
@@ -92,13 +107,15 @@
       loop: "{{ _update_services | select('in', _health_checks.keys()) | list }}"
       tags: [rolling-update]
 
-    # --- Step 4: Restore DNS ---
+    # --- Step 4: Restore DNS (primary only; standby must NOT redirect DNS to itself) ---
     - name: "Restore | Point DNS back to {{ inventory_hostname }}"
       command: /usr/local/bin/platform-dns-switch primary-only
       changed_when: true
+      when: _is_primary
       tags: [rolling-update]
 
     - name: "Restore | Wait for DNS propagation (35s) before updating next node"
       pause:
         seconds: 35
+      when: _is_primary
       tags: [rolling-update]
