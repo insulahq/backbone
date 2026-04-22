@@ -108,7 +108,7 @@ if docker exec postgresql psql -U postgres -c "SELECT pg_promote(true, 60);" 2>&
   PEER_SSH_KEY="/root/.ssh/peer_key"
   if [ -f "$PEER_SSH_KEY" ]; then
     echo "$(date): AUTO-FAILBACK: Restarting peer ($PEER_NAME) PG via SSH..."
-    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
+    if ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
       "root@${PEER_WG_IP}" "cd /opt/postgresql && docker compose restart postgresql" 2>&1; then
       platform_alert "info" "Repmgr-Healthy" "Auto-failback succeeded on $NODE_NAME (peer PG restarted to rejoin as standby)"
     else

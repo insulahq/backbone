@@ -75,12 +75,12 @@ if check_controller "$PEER_WG_IP"; then
     log "=== FAILBACK: Returning controller to preferred primary ==="
 
     # 1. Stop DB sync on peer (prevent overwriting during transition)
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "systemctl stop ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
 
     # 2. Stop controller on peer FIRST (must quiesce writes before DB copy)
     log "Stopping controller on peer"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || {
         log "ERROR: Could not stop controller on peer — aborting failback to prevent split-brain"
         exit 1
@@ -92,7 +92,7 @@ if check_controller "$PEER_WG_IP"; then
         "root@${PEER_WG_IP}:${CTRL_DIR}/db/" "${CTRL_DIR}/db/" 2>/dev/null || {
         log "ERROR: DB sync from peer failed — restarting peer controller"
         # Restart peer controller since we stopped it but can't proceed
-        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
             "cd ${INSTALL_DIR} && docker compose up -d --force-recreate ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || true
         exit 1
     }
@@ -116,11 +116,11 @@ if check_controller "$PEER_WG_IP"; then
     cd "${INSTALL_DIR}" && docker compose restart ziti-router
 
     # 7. Restart peer router to discover the failback controller
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true; cd ${INSTALL_DIR} && docker compose restart ziti-router 2>/dev/null || true" 2>/dev/null || true
 
     # 8. Restart DB sync on peer
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "systemctl start ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
 
     log "=== FAILBACK COMPLETE ==="

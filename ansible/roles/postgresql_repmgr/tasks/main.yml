@@ -142,6 +142,32 @@
     mode: '0644'
   when: postgresql_auto_failback | bool
 
+- name: Ensure /root/.ssh exists
+  file:
+    path: /root/.ssh
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+# Pre-populate peer's SSH host key so scripts can use StrictHostKeyChecking=yes.
+# Without this, scripts must accept-new (TOFU) which opens a MITM window on the
+# WireGuard tunnel during the first connection after any re-key.
+- name: Check if peer SSH host key is already in known_hosts
+  shell: >
+    grep -F "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }} "
+    /root/.ssh/known_hosts 2>/dev/null
+  register: _peer_host_key_present
+  changed_when: false
+  failed_when: false
+
+- name: Scan peer SSH host key into root known_hosts
+  shell: |
+    ssh-keyscan -t ed25519,ecdsa,rsa -T 10 "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}" 2>/dev/null >> /root/.ssh/known_hosts
+    chmod 600 /root/.ssh/known_hosts
+  when: _peer_host_key_present.rc != 0
+  changed_when: true
+
 - name: Deploy peer SSH key for auto-failback (allows cross-node PG restart)
   copy:
     src: "{{ playbook_dir }}/.generated_secrets/ssh/{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"

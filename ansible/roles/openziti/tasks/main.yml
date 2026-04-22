@@ -136,7 +136,7 @@
 # the standby's WireGuard IP as the rsync destination.
 - name: Sync PKI to standby node
   shell: >
-    rsync -az -e "ssh -o StrictHostKeyChecking=no -i /root/.ssh/peer_key"
+    rsync -az -e "ssh -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key"
     {{ openziti_pki_dir }}/
     root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
   delegate_to: "{{ openziti_primary_node }}"
