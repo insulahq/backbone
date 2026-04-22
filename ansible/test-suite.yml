@@ -1527,8 +1527,10 @@
     - name: "Aggregate all test results"
       set_fact:
         _all_results: >-
-          {{ (hostvars[groups['dns_servers'][0]]['_host_test_results'] | default([])) +
-             (hostvars[groups['dns_servers'][1]]['_host_test_results'] | default([])) +
+          {{ (groups['dns_servers']
+              | map('extract', hostvars, '_host_test_results')
+              | map('default', [])
+              | list | flatten) +
              (hostvars[groups['dns_servers'][0]]['_cluster_test_results'] | default([])) +
              (hostvars[groups['dns_servers'][0]]['_failover_test_results'] | default([])) }}
       run_once: true

@@ -10,6 +10,17 @@
   no_log: true
   tags: [traefik]
 
+- name: Assert PowerDNS API key is set (ACME would silently fail without it)
+  assert:
+    that:
+      - powerdns_api_key is defined
+      - powerdns_api_key | length > 0
+    fail_msg: >-
+      powerdns_api_key is empty — Traefik would deploy but every DNS-01 ACME
+      challenge would fail. Run the PowerDNS role first (it generates the key),
+      or set powerdns_api_key explicitly.
+  tags: [traefik]
+
 - name: Create Traefik installation directory
   file:
     path: "{{ traefik_install_dir }}"

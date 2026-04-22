@@ -31,7 +31,6 @@ jobs:
 
       - name: Run yamllint
         run: yamllint -c ansible/.yamllint ansible/
-        continue-on-error: true
 
       - name: Run ansible syntax check
         run: |

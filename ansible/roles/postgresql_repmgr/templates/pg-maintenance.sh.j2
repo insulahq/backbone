@@ -34,10 +34,12 @@ fi
 
 log "Starting PostgreSQL maintenance on primary"
 
-# Get list of all non-template databases
-DATABASES=$(docker exec "$PG_CONTAINER" psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true" 2>/dev/null)
+# Get list of all non-template databases.
+# Read into an array to tolerate any name a superuser might create.
+mapfile -t DATABASES < <(docker exec "$PG_CONTAINER" psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true" 2>/dev/null)
 
-for DB in $DATABASES; do
+for DB in "${DATABASES[@]}"; do
+    [ -z "$DB" ] && continue
     log "Running VACUUM ANALYZE on database: $DB"
     if ! docker exec "$PG_CONTAINER" psql -U postgres -d "$DB" -c "VACUUM ANALYZE" 2>&1; then
         platform_alert "warning" "$ALERT_NAME" "VACUUM ANALYZE failed on database $DB"

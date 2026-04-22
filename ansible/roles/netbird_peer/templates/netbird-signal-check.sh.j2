@@ -59,8 +59,6 @@ if [ -z "$CONNECTED_IPS" ]; then
 fi
 
 # Check if any connection goes to the expected primary IP (IPv4 or IPv6)
-# Also resolve expected IP's IPv6 if we have it configured
-EXPECTED_IPV6="{{ hostvars[inventory_hostname]['public_ipv6'] | default('') }}"
 if [ "$PG_ROLE" = "f" ]; then
   EXPECTED_IPV6="{{ hostvars[inventory_hostname]['public_ipv6'] | default('') }}"
 else
