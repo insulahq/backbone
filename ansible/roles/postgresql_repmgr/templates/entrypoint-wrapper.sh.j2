@@ -335,7 +335,11 @@ determine_role() {
     elif [ "$peer_recovery" = "t" ]; then
       echo "==> Peer ($PEER_NAME) is running as STANDBY" >&2
     else
-      echo "==> Cannot determine peer role (result: $peer_recovery)" >&2
+      # Unknown result (auth failure, unexpected output, driver error, etc.).
+      # Treat as unreachable rather than assuming the peer is standby — the
+      # previous behavior silently chose primary here, a split-brain path.
+      echo "==> Cannot determine peer role (result: $peer_recovery) — treating as UNREACHABLE" >&2
+      peer_reachable=false
     fi
   else
     echo "==> Peer ($PEER_NAME) is UNREACHABLE" >&2
@@ -351,8 +355,8 @@ determine_role() {
   fi
 
   if $peer_reachable && ! $peer_is_primary; then
-    # Peer is standby or unknown → we should be primary
-    echo "==> Decision: PRIMARY (peer is standby or undetermined)" >&2
+    # Peer is reachable and confirmed standby → we should be primary
+    echo "==> Decision: PRIMARY (peer confirmed as STANDBY)" >&2
     echo "primary"
     return
   fi
@@ -521,7 +525,19 @@ start_as_standby() {
   until pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; do
     waited=$((waited + 5))
     if [ "$waited" -ge "$max_wait" ]; then
+      # Before self-promoting, validate external connectivity — if both nodes
+      # lost internet (upstream outage), promoting creates split-brain when
+      # connectivity returns. Reuse the promote-check script that repmgrd
+      # uses for its own failover_validation_command.
       echo "==> Primary ($PEER_NAME) did not become ready after ${max_wait}s" >&2
+      if [ -x "$PROMOTE_CHECK" ] && ! "$PROMOTE_CHECK"; then
+        echo "==> SELF-PROMOTE ABORTED: external connectivity check failed — refusing to promote" >&2
+        send_alert "critical" "Standby ${NODE_NAME} refusing self-promotion — no external connectivity after ${max_wait}s"
+        # Reset the timer and keep waiting rather than split-brain
+        waited=0
+        sleep 30
+        continue
+      fi
       echo "==> SELF-PROMOTING: standby taking over as primary (peer permanently gone)" >&2
       send_alert "warning" "Standby ${NODE_NAME} self-promoting after ${max_wait}s — primary ${PEER_NAME} unreachable"
       # Remove standby.signal so PG starts as primary
@@ -592,9 +608,10 @@ start_as_standby() {
     sleep 1
     STARTUP_WAIT=$((STARTUP_WAIT + 1))
     if [ "$STARTUP_WAIT" -ge "$STARTUP_MAX" ]; then
-      # Check if PG is stuck replaying removed WAL (look in PG logs or container stderr)
-      if grep -q "has already been removed" "$PGDATA"/log/postgresql*.log 2>/dev/null || \
-         grep -q "has already been removed" /proc/$PG_PID/fd/2 2>/dev/null; then
+      # Check if PG is stuck replaying removed WAL.
+      # Only inspect the PG log file on disk — in Docker, PID 1's stderr goes
+      # to the Docker log driver, not a readable /proc fd.
+      if grep -q "has already been removed" "$PGDATA"/log/postgresql*.log 2>/dev/null; then
         echo "==> STARTUP TIMEOUT: WAL segment removed on primary — performing full re-clone..."
         send_alert "warning" "WAL gap on ${NODE_NAME}: standby stuck in startup, performing full re-clone"
         kill "$PG_PID" 2>/dev/null || true

@@ -97,9 +97,18 @@ if check_controller "$PEER_WG_IP"; then
         exit 1
     }
 
-    # 4. Start controller locally
+    # 4. Start controller locally.
+    # CRITICAL: peer controller is already stopped. If the local start fails
+    # (image pull error, Docker daemon glitch, disk full), `set -e` would exit
+    # and leave BOTH controllers stopped — a complete OpenZiti outage. Restart
+    # the peer controller so at least one side is serving clients.
     log "Starting controller locally"
-    cd "${INSTALL_DIR}" && docker compose up -d --force-recreate ziti-controller ziti-console
+    if ! (cd "${INSTALL_DIR}" && docker compose up -d --force-recreate ziti-controller ziti-console); then
+        log "ERROR: local controller start failed — restarting peer controller to avoid outage"
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+            "cd ${INSTALL_DIR} && docker compose up -d --force-recreate ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || true
+        exit 1
+    fi
 
     # 5. Wait for controller to be ready
     for i in $(seq 1 12); do
