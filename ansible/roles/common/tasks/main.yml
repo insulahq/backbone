@@ -177,7 +177,7 @@
   template:
     src: platform-alert.sh.j2
     dest: /usr/local/lib/platform-alert.sh
-    mode: '0644'
+    mode: '0640'  # sourced by host root scripts only
   tags: [common, maintenance]
 
 # Platform DNS switch — used by PG failover and rolling-update playbook

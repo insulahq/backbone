@@ -87,7 +87,7 @@
   template:
     src: config.yaml.j2
     dest: "{{ gatus_install_dir }}/config.yaml"
-    mode: '0644'  # Gatus container runs as non-root — must be readable (same as Zitadel, gotcha 98)
+    mode: '0640'  # contains DB DSN with password; Gatus container runs as root (UID 0), so root:root 0640 is readable
   notify: restart gatus
   tags: [gatus]
 
@@ -95,7 +95,7 @@
   template:
     src: docker-compose.yml.j2
     dest: "{{ gatus_install_dir }}/docker-compose.yml"
-    mode: '0644'
+    mode: '0640'
   notify: restart gatus
   tags: [gatus]
 
@@ -250,7 +250,7 @@
   template:
     src: "{{ playbook_dir }}/roles/common/templates/platform-alert.sh.j2"
     dest: /usr/local/lib/platform-alert.sh
-    mode: '0644'
+    mode: '0640'  # sourced by host root scripts only; contains Gatus webhook URL
   tags: [gatus]
 
 # --- Restart PostgreSQL so it can deliver alerts to Gatus ---

@@ -62,7 +62,9 @@
   template:
     src: config.yaml.j2
     dest: "{{ zitadel_install_dir }}/config.yaml"
-    mode: '0644'  # Zitadel runs as non-root inside container — must be readable
+    owner: root
+    group: '1000'  # Zitadel container UID=1000 (verified via /proc/<pid>/status)
+    mode: '0640'  # root:1000 0640 — container reads via group; host non-root cannot
   notify: restart zitadel
   tags: [zitadel]
 
@@ -70,14 +72,16 @@
   template:
     src: steps.yaml.j2
     dest: "{{ zitadel_install_dir }}/steps.yaml"
-    mode: '0644'  # Same as above — non-root container user
+    owner: root
+    group: '1000'  # Zitadel container UID=1000
+    mode: '0640'  # root:1000 0640 — contains admin password
   tags: [zitadel]
 
 - name: Deploy docker-compose.yml
   template:
     src: docker-compose.yml.j2
     dest: "{{ zitadel_install_dir }}/docker-compose.yml"
-    mode: '0644'
+    mode: '0640'  # contains ZITADEL_MASTERKEY env — only docker CLI (root) reads
   notify: restart zitadel
   tags: [zitadel]
 

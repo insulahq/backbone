@@ -174,7 +174,7 @@
   template:
     src: docker-compose.yml.j2
     dest: "{{ powerdns_install_dir }}/docker-compose.yml"
-    mode: '0644'
+    mode: '0640'  # contains PDNS_API_KEY and PDA SQLALCHEMY_DATABASE_URI
   notify: restart powerdns
 
 - name: Start PowerDNS services
@@ -193,6 +193,7 @@
   delay: 2
   register: pdns_ready
   until: pdns_ready.status == 200
+  no_log: true  # request headers include API key at verbosity ≥ -v
 
 # --- Platform zone creation (on PG primary only — writes need read-write DB) ---
 
@@ -215,6 +216,7 @@
   register: zone_create_result
   when: (_pg_is_primary.stdout | default('') | trim) == 't'
   ignore_errors: true
+  no_log: true  # request headers include API key
 
 - name: Increment SOA serial after zone creation (gotcha 33)
   community.docker.docker_container_exec:
@@ -260,6 +262,7 @@
     - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - dns_health_check_enabled | default(false) | bool
+  no_log: true  # request headers include API key
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -289,6 +292,7 @@
     - (_pg_is_primary.stdout | default('') | trim) == 't'
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
+  no_log: true  # request headers include API key
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -318,6 +322,7 @@
     - powerdns_api_key is defined
     - not (dns_health_check_enabled | default(false) | bool)
     - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
+  no_log: true  # request headers include API key
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -339,6 +344,7 @@
   tags: [powerdns, dns]
 
 - name: Create NS glue records (ns1/ns2 A records)
+  no_log: true  # request headers include API key
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
@@ -370,6 +376,7 @@
   tags: [powerdns, dns]
 
 - name: Create NS glue AAAA records (ns1/ns2 IPv6)
+  no_log: true  # request headers include API key
   uri:
     url: "http://{{ powerdns_bind_interface }}:{{ powerdns_nginx_api_port }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
     method: PATCH
