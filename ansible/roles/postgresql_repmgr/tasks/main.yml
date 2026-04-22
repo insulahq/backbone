@@ -61,18 +61,19 @@
     mode: '0644'
   notify: restart postgresql
 
-- name: Write initial pgproxy target (points to current primary via WireGuard IP)
-  copy:
-    # Both Docker containers (pgproxy) and host-level services (PowerDNS socat)
-    # can reach the WireGuard IP, so we use it for both.
-    # On the primary: own WireGuard IP (local PG). On the standby: peer's WireGuard IP.
-    # Local primary: use Docker DNS 'postgresql' (WireGuard IP unreachable from Docker bridge).
-    # Remote primary (standby node): use peer hostname (resolved via extra_hosts in pgproxy container).
-    content: "{{ 'postgresql' if postgresql_is_primary else groups['dns_servers'] | difference([inventory_hostname]) | first }}"
-    dest: "{{ postgresql_install_dir }}/pgproxy-target"
-    owner: '999'
-    group: '999'
-    mode: '0644'
+- name: Ensure pgproxy target file exists (idempotent — initial content only)
+  # IMPORTANT: this file is bind-mounted AS A SINGLE FILE into the pgproxy
+  # container (docker-compose.yml). If we re-create it with `copy:` on each
+  # deploy, the atomic temp+rename changes the inode and silently breaks the
+  # bind mount — the container keeps seeing the pre-deploy content forever.
+  # Use truncate-in-place via `shell`, gated by `creates:` so the watchdog
+  # remains the sole source of truth once the file exists.
+  shell: |
+    printf '%s\n' '{{ "postgresql" if postgresql_is_primary else groups["dns_servers"] | difference([inventory_hostname]) | first }}' > {{ postgresql_install_dir }}/pgproxy-target
+    chmod 0644 {{ postgresql_install_dir }}/pgproxy-target
+    chown 999:999 {{ postgresql_install_dir }}/pgproxy-target
+  args:
+    creates: "{{ postgresql_install_dir }}/pgproxy-target"
 
 # PG Role Watchdog — polls PG role every 10s and self-heals pgproxy/DNS/consumers.
 # Replaces the unreliable signal-file mechanism that had race conditions.
