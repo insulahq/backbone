@@ -27,9 +27,28 @@ COOLDOWN_FILE="/tmp/pg-failback-cooldown"
 SETTLING_MIN=1800  # 30 minutes
 COOLDOWN_MIN=1800  # 30 minutes
 
+# Skip auto-failback during fresh installs or explicit maintenance windows.
+FRESH_INSTALL_GRACE_SEC={{ (postgresql_failback_fresh_install_grace_hours | default(2)) * 3600 }}
+MAINTENANCE_MARKER="/etc/platform-maintenance-mode"
+MAINTENANCE_MARKER_MAX_AGE_SEC=86400  # 24h — self-clean if operator forgets
+
 # Only run on the preferred primary node
 if [ "$NODE_NAME" != "$PREFERRED_PRIMARY" ]; then
   exit 0
+fi
+
+# Guard 0a: explicit maintenance-mode marker (operator opted out of auto-actions)
+# Self-cleans if the marker is older than MAINTENANCE_MARKER_MAX_AGE_SEC so a
+# forgotten marker doesn't disable auto-failback forever.
+if [ -f "$MAINTENANCE_MARKER" ]; then
+  MARKER_AGE=$(( $(date +%s) - $(stat -c %Y "$MAINTENANCE_MARKER") ))
+  if [ "$MARKER_AGE" -lt "$MAINTENANCE_MARKER_MAX_AGE_SEC" ]; then
+    echo "$(date): AUTO-FAILBACK: /etc/platform-maintenance-mode present — skipping"
+    exit 0
+  fi
+  echo "$(date): AUTO-FAILBACK: stale maintenance marker (${MARKER_AGE}s old) — removing and resuming"
+  platform_alert "warning" "Repmgr-Healthy" "Stale /etc/platform-maintenance-mode auto-removed on $NODE_NAME after ${MARKER_AGE}s"
+  rm -f "$MAINTENANCE_MARKER"
 fi
 
 # Check if PG container is running and healthy
@@ -54,6 +73,21 @@ if [ -f "$COOLDOWN_FILE" ]; then
     exit 0  # Too soon after last failover/switchover
   fi
   rm -f "$COOLDOWN_FILE"
+fi
+
+# Guard 1b: Fresh-install grace — if the container was CREATED (not just started)
+# within the grace window, operator likely just re-imaged / redeployed. Don't
+# race auto-failback against the deploy — let things settle first.
+# .Created resets only on `docker compose up --force-recreate`, not on
+# `docker restart`, which is the right signal for "fresh install".
+CONTAINER_CREATED=$(docker inspect postgresql --format "{% raw %}{{.Created}}{% endraw %}" 2>/dev/null || echo "")
+if [ -n "$CONTAINER_CREATED" ]; then
+  CREATED_EPOCH=$(date -d "$CONTAINER_CREATED" +%s 2>/dev/null || echo "0")
+  CREATED_AGE=$(( $(date +%s) - CREATED_EPOCH ))
+  if [ "$CREATED_EPOCH" -gt 0 ] && [ "$CREATED_AGE" -lt "$FRESH_INSTALL_GRACE_SEC" ]; then
+    echo "$(date): AUTO-FAILBACK: PG container created ${CREATED_AGE}s ago (<${FRESH_INSTALL_GRACE_SEC}s grace) — skipping"
+    exit 0
+  fi
 fi
 
 # Guard 2: Settling delay — check PG container uptime

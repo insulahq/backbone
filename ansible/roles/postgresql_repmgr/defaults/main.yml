@@ -35,6 +35,13 @@ postgresql_node_ids:
 # a coordinated repmgr switchover returns the primary role automatically.
 postgresql_auto_failback: true
 
+# Fresh-install grace — auto-failback is suppressed for this many hours after
+# the PG container's `Created` timestamp. A `docker compose up --force-recreate`
+# (i.e., a genuine rebuild; not a mere `docker restart`) resets the timestamp.
+# Prevents auto-failback from racing against an in-flight Ansible redeploy or
+# re-image drill without requiring the operator to disable the timer.
+postgresql_failback_fresh_install_grace_hours: 2
+
 # Credentials -- set in group_vars/all.yml
 # postgresql_superuser_password: ""
 # postgresql_repmgr_password: ""
