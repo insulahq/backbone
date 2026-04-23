@@ -94,6 +94,24 @@
   no_log: true
   tags: [wireguard]
 
+# When running with --limit (e.g. node-replacement per RECOVERY.md Scenario 3),
+# peers outside the limit scope never run set_fact above, so their
+# wireguard_public_key is missing and wg0.conf.j2 rendering fails. Read each
+# peer's private key from the controller's secrets dir and derive the pubkey
+# locally, then attach it to the peer's hostvars via delegate_facts.
+- name: Pre-populate peer wireguard_public_key from controller secrets (for --limit compatibility)
+  delegate_to: "{{ peer_item }}"
+  delegate_facts: true
+  connection: local
+  ansible.builtin.set_fact:
+    wireguard_public_key: "{{ lookup('pipe', 'cat ' + wireguard_secrets_dir + '/' + peer_item + '.key | wg pubkey') | trim }}"
+  loop: "{{ groups['dns_servers'] | difference([inventory_hostname]) }}"
+  loop_control:
+    loop_var: peer_item
+  when: hostvars[peer_item].wireguard_public_key is not defined
+  no_log: true
+  tags: [wireguard]
+
 - name: Ensure WireGuard configuration directory exists
   ansible.builtin.file:
     path: "{{ wireguard_install_dir }}"

@@ -154,6 +154,31 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml
 - No certificate transfer (Traefik re-issues via ACME)
 - No WireGuard key regeneration (reuses existing keys from `.generated_secrets/`)
 
+### Known pitfalls (surfaced by 2026-04-23 node-replacement drill)
+
+1. **SSH host key on the surviving node.** After re-imaging, the peer gets a new SSH host key. Remove the stale entry on the surviving node and re-scan **before** running `site.yml`:
+   ```bash
+   ssh-keygen -R <NEW_NODE_WG_IP> -f /root/.ssh/known_hosts   # on surviving node
+   ssh-keyscan -t ed25519 <NEW_NODE_WG_IP> >> /root/.ssh/known_hosts
+   ```
+   Otherwise `openziti PKI rsync` (delegated to surviving node) fails with "REMOTE HOST IDENTIFICATION HAS CHANGED".
+
+2. **Zitadel DB password may not be in `.generated_secrets/`.** On clusters set up before this drill fix, `.generated_secrets/zitadel_db_password` is missing — Ansible will generate a *new* password and ns2's Zitadel will fail to authenticate against the existing PG user. Before running `site.yml`, extract the real password from the surviving node:
+   ```bash
+   # On surviving node (ns1):
+   grep '^      Password:' /opt/zitadel/config.yaml | head -1 | sed 's/^ *Password: *//;s/"//g'
+   # Then on controller:
+   printf '%s' '<THE_PASSWORD>' > ansible/.generated_secrets/zitadel_db_password
+   chmod 600 ansible/.generated_secrets/zitadel_db_password
+   ```
+
+3. **NetBird peer enrollment is manual.** `deploy-netbird-peers.yml` installs the client but does not auto-enroll. Create a setup key in the dashboard, then on the new node:
+   ```bash
+   netbird up --setup-key <KEY> --management-url https://vpn.<domain> --hostname <HOSTNAME>
+   ```
+
+4. **`--start-at-task` resume is dangerous.** If `site.yml` fails mid-run, resume with a full re-run of `site.yml --limit NEW_NODE` instead of `--start-at-task=...`. Skipping earlier systemd unit installs leaves the node half-provisioned (OpenZiti standby timers were missed in the drill using `--start-at-task`).
+
 ---
 
 ## Scenario 4: Both Nodes Down
