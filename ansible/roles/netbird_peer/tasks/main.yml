@@ -63,16 +63,44 @@
     path: "{{ netbird_config_dir }}/config.json"
   register: netbird_config
 
-- name: Display enrollment instructions
+# Auto-enroll when a setup key is provided (recovery / node-replacement drills).
+# Skips silently if already enrolled OR if no key is configured — manual
+# enrollment instructions still print in that case.
+- name: Enroll NetBird peer automatically (if setup key provided + not yet enrolled)
+  # argv list form avoids shell interpolation of the setup key (no leak to
+  # process table via /proc/*/cmdline shell expansion; no metachar issues).
+  ansible.builtin.command:
+    argv:
+      - netbird
+      - up
+      - --setup-key
+      - "{{ netbird_setup_key }}"
+      - --management-url
+      - "{{ netbird_management_url }}"
+      - --hostname
+      - "{{ netbird_peer_hostname }}"
+  when:
+    - not netbird_config.stat.exists
+    - netbird_setup_key is defined
+    - netbird_setup_key | length > 0
+  register: _netbird_enroll
+  changed_when: _netbird_enroll.rc == 0
+  no_log: true  # setup key is a single-use credential — do not log
+
+- name: Display enrollment instructions (when no setup key was provided)
   debug:
     msg:
       - "NetBird client installed on {{ inventory_hostname }}"
       - ""
-      - "To enroll this peer, run manually on the server:"
-      - "  netbird up --setup-key <KEY> --management-url {{ netbird_management_url }} --hostname {{ netbird_peer_hostname }}"
+      - "To enroll this peer, either:"
+      - "  (a) re-run with -e netbird_setup_key=<KEY> to auto-enroll, OR"
+      - "  (b) run manually on the server:"
+      - "      netbird up --setup-key <KEY> --management-url {{ netbird_management_url }} --hostname {{ netbird_peer_hostname }}"
       - ""
       - "Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key"
-  when: not netbird_config.stat.exists
+  when:
+    - not netbird_config.stat.exists
+    - netbird_setup_key is not defined or netbird_setup_key | length == 0
 
 # Signal server failback guard — hourly check that restarts the peer client
 # if it's connected to the wrong signal server after failover/failback (gotcha 136).
