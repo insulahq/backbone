@@ -260,6 +260,7 @@
   changed_when: false
   loop: "{{ postgresql_databases }}"
   when: postgresql_is_primary
+  no_log: true  # loop items contain per-db passwords (Ansible prints item dict at -v)
 
 - name: Create database user if not exists
   community.docker.docker_container_exec:
@@ -282,6 +283,7 @@
   loop: "{{ postgresql_databases }}"
   when: postgresql_is_primary
   changed_when: false
+  no_log: true  # loop items contain per-db passwords
 
 - name: Wait extra time for standby to complete initial sync
   pause:
