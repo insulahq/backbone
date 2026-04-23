@@ -59,6 +59,7 @@ openziti_failover_check_interval: 30        # seconds between health checks
 openziti_failover_threshold: 3              # consecutive failures before promote
 openziti_failback_settling_minutes: 10      # wait before failback to preferred node
 openziti_failback_enabled: true             # auto-return controller to preferred node
+openziti_failback_fresh_install_grace_hours: 2  # suppress failback for N hours after ziti-controller container was recreated (drill / redeploy safety)
 
 # DNS record management
 openziti_create_dns_records: true

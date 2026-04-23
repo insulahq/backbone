@@ -21,6 +21,22 @@ log() { echo "$(date): ZITI-WATCHDOG: $*"; }
 exec 200>/var/lock/ziti-watchdog.lock
 flock -n 200 || { log "Another watchdog instance is running — skipping"; exit 0; }
 
+# Skip auto-failback during explicit maintenance windows. Self-cleans if the
+# marker is stale (>24h) so a forgotten marker doesn't freeze the HA stack.
+MAINTENANCE_MARKER="/etc/platform-maintenance-mode"
+MAINTENANCE_MARKER_MAX_AGE_SEC=86400
+FRESH_INSTALL_GRACE_SEC={{ (openziti_failback_fresh_install_grace_hours | default(2)) * 3600 }}
+
+if [ -f "$MAINTENANCE_MARKER" ]; then
+    MARKER_AGE=$(( $(date +%s) - $(stat -c %Y "$MAINTENANCE_MARKER") ))
+    if [ "$MARKER_AGE" -lt "$MAINTENANCE_MARKER_MAX_AGE_SEC" ]; then
+        log "/etc/platform-maintenance-mode present — skipping"
+        exit 0
+    fi
+    log "stale maintenance marker (${MARKER_AGE}s old) — removing and resuming"
+    rm -f "$MAINTENANCE_MARKER"
+fi
+
 INSTALL_DIR="{{ openziti_install_dir }}"
 CTRL_DIR="{{ openziti_controller_dir }}"
 PREFERRED_PRIMARY="{{ openziti_primary_node }}"
@@ -70,6 +86,20 @@ if check_controller "$PEER_WG_IP"; then
     if [ "$PROMOTED_AGE" -lt $(( {{ openziti_failback_settling_minutes }} * 60 )) ]; then
         log "Failback settling: ${PROMOTED_AGE}s / $(( {{ openziti_failback_settling_minutes }} * 60 ))s"
         exit 0
+    fi
+
+    # Fresh-install grace — if the local ziti-controller container was created
+    # within the grace window, the node is likely mid-deploy. Let Ansible finish
+    # before racing to failback. Detected via `.Created` (reset only on
+    # `--force-recreate`, not on plain `docker restart`).
+    CTRL_CREATED=$(docker inspect ziti-controller --format '{% raw %}{{.Created}}{% endraw %}' 2>/dev/null || echo "")
+    if [ -n "$CTRL_CREATED" ]; then
+        CREATED_EPOCH=$(date -d "$CTRL_CREATED" +%s 2>/dev/null || echo "0")
+        CREATED_AGE=$(( $(date +%s) - CREATED_EPOCH ))
+        if [ "$CREATED_EPOCH" -gt 0 ] && [ "$CREATED_AGE" -lt "$FRESH_INSTALL_GRACE_SEC" ]; then
+            log "Controller created ${CREATED_AGE}s ago (<${FRESH_INSTALL_GRACE_SEC}s grace) — skipping failback"
+            exit 0
+        fi
     fi
 
     log "=== FAILBACK: Returning controller to preferred primary ==="
