@@ -286,6 +286,25 @@ PG_NETBIRD_EVENTS_PASS=$(openssl rand -base64 22)
 PG_GATUS_PASS=$(openssl rand -base64 22)
 PDNS_API_KEY=$(openssl rand -base64 48)
 
+# Zitadel secrets — written as files in .generated_secrets/ because the
+# zitadel role loads them directly (fails fast if missing — never silently
+# regenerates; see 2026-04-23 drill finding).
+#   - zitadel_masterkey: EXACTLY 32 chars; CANNOT be rotated after init.
+#   - zitadel_db_password: 32 chars alphanumeric; PG user `zitadel` password.
+#   - zitadel_admin_password: left for the role to create on first deploy
+#     (so setup.sh stays idempotent for reruns).
+mkdir -p .generated_secrets
+chmod 0700 .generated_secrets
+
+if [ ! -s .generated_secrets/zitadel_masterkey ]; then
+    { openssl rand -base64 48 | tr -d '=+/' | head -c 32; echo; } > .generated_secrets/zitadel_masterkey
+    chmod 0600 .generated_secrets/zitadel_masterkey
+fi
+if [ ! -s .generated_secrets/zitadel_db_password ]; then
+    { openssl rand -base64 48 | tr -d '=+/' | head -c 32; echo; } > .generated_secrets/zitadel_db_password
+    chmod 0600 .generated_secrets/zitadel_db_password
+fi
+
 ok "All secrets generated locally"
 echo ""
 
