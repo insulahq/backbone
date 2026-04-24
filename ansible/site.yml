@@ -119,6 +119,11 @@
 # Skipped on fresh bootstrap (no containers running yet).
 
 - name: "Pre-flight: Auto-detect PostgreSQL primary node"
+  # NOTE: this pre-task respects --limit. When bootstrapping a fresh NEW_NODE
+  # with `--limit NEW_NODE`, detection sees only the standby and keeps the
+  # default primary, causing UPDATE-against-local-PG failures downstream.
+  # Workaround: pass `-e postgresql_primary_node=<ACTUAL> dns_failover_primary=<ACTUAL>`.
+  # Documented in RECOVERY.md Scenario 3 pitfalls.
   hosts: dns_servers
   gather_facts: false
   tags: [always]

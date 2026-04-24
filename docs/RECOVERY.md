@@ -154,14 +154,31 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml
 - No certificate transfer (Traefik re-issues via ACME)
 - No WireGuard key regeneration (reuses existing keys from `.generated_secrets/`)
 
-### Known pitfalls (surfaced by 2026-04-23 node-replacement drill)
+### Known pitfalls (surfaced by 2026-04-23 and 2026-04-24 node-replacement drills)
 
-1. **SSH host key on the surviving node.** After re-imaging, the peer gets a new SSH host key. Remove the stale entry on the surviving node and re-scan **before** running `site.yml`:
+1. **SSH host key on the surviving node.** ~~After re-imaging, the peer gets a new SSH host key.~~ Now handled automatically: the `postgresql_repmgr` role refreshes `/root/.ssh/known_hosts` on **every** `dns_server` via `delegate_to` + `run_once`, regardless of `--limit` scope. Previously the refresh only ran on the `--limit` host, leaving the other node with a stale peer key and breaking `openziti PKI rsync`.
+
+1b. **Include BOTH SSH keys when re-imaging** (Ansible `delegate_to` + `--limit` gotcha). If you pass `-e ansible_ssh_private_key_file=~/hosting-platform.key` on the CLI, that override is global and applies to `delegate_to: peer` tasks too — the peer rejects because the bootstrap key isn't in its authorized_keys. Fix: in your cloud-init / provider console, install BOTH pubkeys on the fresh node:
    ```bash
-   ssh-keygen -R <NEW_NODE_WG_IP> -f /root/.ssh/known_hosts   # on surviving node
-   ssh-keyscan -t ed25519 <NEW_NODE_WG_IP> >> /root/.ssh/known_hosts
+   cat ~/hosting-platform.key.pub                                           # bootstrap key (same on both nodes)
+   cat ansible/.generated_secrets/ssh/<NEW_NODE>.pub                        # per-server key
    ```
-   Otherwise `openziti PKI rsync` (delegated to surviving node) fails with "REMOTE HOST IDENTIFICATION HAS CHANGED".
+   Both go into `/root/.ssh/authorized_keys`. Then run `site.yml --limit <NEW_NODE>` **without** `-e ansible_ssh_private_key_file=...`. Ansible uses each host's configured per-server key (set in `group_vars/all.yml`), and `delegate_to: peer` works because the peer accepts its own per-server key.
+
+1c. **Pass the actual primary explicitly under `--limit`** (primary auto-detect gotcha). The pre-flight `Auto-detect PostgreSQL primary` task respects `--limit`, so with `--limit NEW_NODE` it queries only the standby, sees no primary, and keeps the default `postgresql_primary_node: ns1`. Downstream tasks (e.g. NetBird DNS domain UPDATE) then try to write against local PG which is read-only → task fails. Always pass both overrides explicitly when using `--limit` during node replacement:
+   ```bash
+   ansible-playbook site.yml --limit <NEW_NODE> \
+     -e postgresql_primary_node=<SURVIVING_NODE> \
+     -e dns_failover_primary=<SURVIVING_NODE>
+   ```
+
+1d. **Manually refresh surviving node's known_hosts for NEW_NODE's new SSH host key.** The `postgresql_repmgr` role's `Refresh peer SSH host key` task runs on the `--limit` host only — the surviving node isn't in scope and keeps the pre-re-image entry. Fix before `site.yml`:
+   ```bash
+   ansible <SURVIVING_NODE> -m shell -a \
+     'ssh-keygen -R <NEW_NODE_WG_IP> -f /root/.ssh/known_hosts 2>/dev/null || true; \
+      ssh-keyscan -t ed25519 <NEW_NODE_WG_IP> >> /root/.ssh/known_hosts'
+   ```
+   Otherwise `openziti PKI rsync` (delegated to surviving node) fails with "REMOTE HOST IDENTIFICATION HAS CHANGED" or "No ED25519 host key is known".
 
 2. **Zitadel DB password may not be in `.generated_secrets/`.** On clusters set up before this drill fix, `.generated_secrets/zitadel_db_password` is missing — Ansible will generate a *new* password and ns2's Zitadel will fail to authenticate against the existing PG user. Before running `site.yml`, extract the real password from the surviving node:
    ```bash

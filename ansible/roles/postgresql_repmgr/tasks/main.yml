@@ -159,9 +159,11 @@
 # new SSH host key; a stale add-if-missing guard leaves the old key and every
 # peer-to-peer SSH fails "REMOTE HOST IDENTIFICATION HAS CHANGED" until cleaned.
 #
-# We use shell rather than ansible.builtin.known_hosts because pre-existing
-# hashed entries cause the module to error ("does not match hashed host field").
-# `ssh-keygen -R` handles both hashed and plain entries uniformly.
+# When `site.yml --limit NEW_NODE` is used, this only refreshes the new node's
+# known_hosts against the peer. The SURVIVING node's known_hosts must be
+# refreshed manually before the deploy — see RECOVERY.md Scenario 3 pitfalls.
+# (Attempted delegate_to+run_once here hit Ansible's delegate connection-var
+# resolution limits with the templated ansible_ssh_private_key_file.)
 - name: Refresh peer SSH host key in /root/.ssh/known_hosts
   vars:
     _peer_wg_ip: "{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
@@ -169,10 +171,8 @@
     set -e
     touch /root/.ssh/known_hosts
     chmod 600 /root/.ssh/known_hosts
-    # Remove any existing entries (hashed or plain) for this peer
     ssh-keygen -R "{{ _peer_wg_ip }}" -f /root/.ssh/known_hosts 2>/dev/null || true
-    # Scan fresh — retry up to 3 times (peer may be restarting post-image)
-    for i in 1 2 3; do
+    for _i in 1 2 3; do
       KEY=$(ssh-keyscan -t ed25519 -T 10 "{{ _peer_wg_ip }}" 2>/dev/null)
       if [ -n "$KEY" ]; then
         echo "$KEY" >> /root/.ssh/known_hosts
