@@ -154,6 +154,14 @@ if $PGPROXY_NEEDS_UPDATE; then
     [ "$PDNS_HEALTH" = "healthy" ] && break
     sleep 5
   done
+
+  # 6. NetBird signal-state is in-memory and lost on every netbird-server
+  #    restart. Our local peer client recovers via the systemctl restart
+  #    above, but external customer peers can be stuck on stale signal
+  #    sessions. Fire a background script that pings each peer's NetBird
+  #    IP — best-effort ICE re-negotiation. Stale peers get reported via
+  #    Gatus alert. See AGENTS.md gotcha (NetBird peer wake-up).
+  ( /usr/local/bin/netbird-peer-wakeup.sh >/dev/null 2>&1 &) || true
 fi
 
 # === Branch B: DNS drift (may run alone OR as a follow-up to branch A) ===

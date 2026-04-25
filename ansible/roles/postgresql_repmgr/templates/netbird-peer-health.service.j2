@@ -1,0 +1,10 @@
+[Unit]
+Description=NetBird mesh peer health check
+Wants=netbird.service
+After=netbird.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/netbird-peer-health.sh
+StandardOutput=journal
+StandardError=journal

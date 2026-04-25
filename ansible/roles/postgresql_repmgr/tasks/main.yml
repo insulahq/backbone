@@ -102,6 +102,37 @@
     dest: /usr/local/bin/pg-role-watchdog.sh
     mode: '0755'
 
+- name: Deploy NetBird peer wake-up script (post-failover)
+  template:
+    src: netbird-peer-wakeup.sh.j2
+    dest: /usr/local/bin/netbird-peer-wakeup.sh
+    mode: '0755'
+
+- name: Deploy NetBird peer health check script (periodic)
+  template:
+    src: netbird-peer-health.sh.j2
+    dest: /usr/local/bin/netbird-peer-health.sh
+    mode: '0755'
+
+- name: Deploy NetBird peer health systemd timer
+  template:
+    src: netbird-peer-health.timer.j2
+    dest: /etc/systemd/system/netbird-peer-health.timer
+    mode: '0644'
+
+- name: Deploy NetBird peer health systemd service
+  template:
+    src: netbird-peer-health.service.j2
+    dest: /etc/systemd/system/netbird-peer-health.service
+    mode: '0644'
+
+- name: Enable + start NetBird peer health timer
+  systemd:
+    name: netbird-peer-health.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+
 - name: Deploy PG role watchdog timer
   template:
     src: pg-role-watchdog.timer.j2

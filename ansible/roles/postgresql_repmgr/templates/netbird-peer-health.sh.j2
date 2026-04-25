@@ -1,0 +1,33 @@
+#!/bin/bash
+# NetBird peer health checker — periodic. Detects stale mesh peers and
+# pushes status to Gatus. Runs every 5 min via systemd timer.
+
+set -euo pipefail
+source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
+
+ALERT_NAME="NetBird-Mesh-Peers-Healthy"
+
+PEER_IPS=$(netbird status --json 2>/dev/null \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(p['netbirdIp'] for p in d.get('peers', {}).get('details', []) if p.get('netbirdIp')))" \
+  2>/dev/null || true)
+
+if [ -z "$PEER_IPS" ]; then
+  exit 0
+fi
+
+STALE_COUNT=0
+STALE_LIST=""
+TOTAL=0
+for ip in $PEER_IPS; do
+  TOTAL=$((TOTAL + 1))
+  if ! ping -c 1 -W 2 "$ip" >/dev/null 2>&1; then
+    STALE_COUNT=$((STALE_COUNT + 1))
+    STALE_LIST="$STALE_LIST $ip"
+  fi
+done
+
+if [ "$STALE_COUNT" -gt 0 ]; then
+  platform_alert "warning" "$ALERT_NAME" "Stale NetBird mesh peers from {{ inventory_hostname }}:${STALE_LIST} ($STALE_COUNT/$TOTAL)"
+else
+  platform_alert "info" "$ALERT_NAME" "All $TOTAL NetBird mesh peers reachable from {{ inventory_hostname }}"
+fi

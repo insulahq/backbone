@@ -142,6 +142,11 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
+  - name: NetBird-Mesh-Peers-Healthy
+    group: {{ host }}
+    token: "{{ gatus_external_token }}"
+    conditions:
+      - "[CONNECTED] == true"
 {% endfor %}
 
 # ============================================================================

@@ -1,0 +1,11 @@
+[Unit]
+Description=NetBird mesh peer health check (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
