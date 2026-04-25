@@ -1,0 +1,6 @@
+---
+- name: restart netbird-proxy
+  community.docker.docker_compose_v2:
+    project_src: "{{ netbird_proxy_install_dir }}"
+    state: present
+    recreate: always

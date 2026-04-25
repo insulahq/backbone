@@ -1,0 +1,33 @@
+---
+# NetBird Reverse Proxy — defaults
+# Exposes internal NetBird-mesh services to the public internet at
+# `*.{{ netbird_proxy_apex }}` over HTTPS, terminating TLS in the proxy
+# itself via ACME TLS-ALPN-01. Sits behind Traefik in TCP-passthrough mode.
+#
+# Auth (OIDC, password, PIN, header, IP allowlist, "none" for public) is
+# configured per-service in the NetBird dashboard at runtime — no role-side
+# config needed for that.
+
+netbird_proxy_enabled: true
+
+# Pinned to the same minor as netbird-server. Both are released as a set.
+netbird_proxy_image: "netbirdio/reverse-proxy:{{ netbird_proxy_version | default(netbird_server_version | default('0.69.0')) }}"
+
+# DNS apex under which exposed services live (e.g. dummy.proxy.example.com).
+# A wildcard A/AAAA record is created in PowerDNS pointing at the active node.
+netbird_proxy_apex: "proxy.{{ platform_domain }}"
+
+netbird_proxy_install_dir: /opt/netbird-proxy
+
+# Listening port inside the proxy container (Traefik routes :443 SNI here).
+netbird_proxy_listen: ":8443"
+
+# ACME (Let's Encrypt). Switch to staging while validating, then flip to prod.
+netbird_proxy_acme_email: "acme@{{ platform_domain }}"
+netbird_proxy_acme_ca: ""  # empty = LE prod; set to staging URL for testing
+
+# Logging
+netbird_proxy_log_level: "info"
+
+# DNS automation — set false to manage records by hand
+netbird_proxy_create_dns_records: true

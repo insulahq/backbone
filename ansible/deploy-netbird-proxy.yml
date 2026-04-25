@@ -1,0 +1,27 @@
+---
+# Deploy NetBird Reverse Proxy (netbirdio/reverse-proxy) — sidecar to the
+# all-in-one netbird-server. Sits behind Traefik in TCP-passthrough mode.
+#
+# Prerequisite: an M2M token must exist at
+#   ansible/.generated_secrets/netbird_proxy_token (mode 0600).
+# Generate once on a node with netbird-server running:
+#   docker exec netbird-server /go/bin/netbird-server \
+#     -c /etc/netbird/config.yaml token create --name proxy-platform
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml deploy-netbird-proxy.yml
+# Or as part of full site deploy (already wired in site.yml phase 2/3).
+
+- import_playbook: _ssh-keys.yml
+
+- name: Deploy netbird-proxy on primary node first (DNS records originate here)
+  hosts: "{{ dns_failover_primary | default('ns1') }}"
+  tags: [netbird-proxy, proxy]
+  roles:
+    - netbird_proxy
+
+- name: Deploy netbird-proxy on secondary node
+  hosts: "dns_servers:!{{ dns_failover_primary | default('ns1') }}"
+  tags: [netbird-proxy, proxy]
+  roles:
+    - netbird_proxy

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  role_name: netbird_proxy
+  description: Deploys netbirdio/reverse-proxy alongside the netbird-server all-in-one container, sitting behind Traefik in TCP-passthrough mode.
+  license: proprietary
+  min_ansible_version: "2.15"
+dependencies: []
