@@ -32,7 +32,8 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 | PowerDNS | 5.0 | Both nodes Native (read-write), shared PostgreSQL HA backend |
 | Traefik | 3.6 | Reverse proxy, DNS-01 ACME via PowerDNS API |
 | PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
-| NetBird | 0.67.0 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS |
+| NetBird | 0.69.0 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS |
+| NetBird Reverse Proxy | 0.69.0 (beta) | Public HTTPS ingress to NetBird-mesh services. Sits behind Traefik in TCP-passthrough mode at `*.proxy.<domain>`; terminates TLS itself with ACME TLS-ALPN-01. Auth (OIDC/password/PIN/header/IP allowlist/none) configured per-service in dashboard. |
 | Zitadel | 4.12.3 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.14.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
 | OpenZiti | 1.4.1 | Zero-trust network overlay, active-standby controller, active-active edge routers |

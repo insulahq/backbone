@@ -477,6 +477,54 @@
       when: openziti_enabled | default(false) | bool
       tags: [openziti]
 
+    # ------------------------------------------------------------------
+    # NetBird Reverse Proxy
+    # ------------------------------------------------------------------
+    - name: "NetBird Proxy | Container running"
+      community.docker.docker_container_info:
+        name: netbird-proxy
+      register: _t_nb_proxy
+      ignore_errors: true
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [netbird-proxy, proxy]
+
+    - name: "NetBird Proxy | Record result — container running"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'NetBird Proxy container running', 'host': inventory_hostname, 'passed': (_t_nb_proxy.container.State.Status | default('')) == 'running'}] }}"
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [netbird-proxy, proxy]
+
+    # Confirm Traefik passes the SNI through to netbird-proxy (NOT terminating
+    # with the platform wildcard cert). When no service is configured, the
+    # proxy returns a TLS alert — that itself proves passthrough works,
+    # because Traefik's own router would have served a valid wildcard cert.
+    # Pass criterion: peer cert CN is anything OTHER than the platform domain.
+    - name: "NetBird Proxy | Traefik TCP passthrough (not terminating with wildcard)"
+      shell: |
+        timeout 5 bash -c 'echo "" | openssl s_client -connect 127.0.0.1:443 -servername {{ netbird_proxy_apex | default("proxy." + platform_domain) }} 2>&1 | head -30'
+      register: _t_nb_proxy_passthrough
+      changed_when: false
+      ignore_errors: true
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [netbird-proxy, proxy]
+
+    - name: "NetBird Proxy | Record result — passthrough working"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{
+            'name': 'NetBird Proxy TCP passthrough via Traefik',
+            'host': inventory_hostname,
+            'passed': (
+              ('alert' in (_t_nb_proxy_passthrough.stdout | default('')))
+              or (
+                ('Verify return code: 0' in (_t_nb_proxy_passthrough.stdout | default('')))
+                and ((platform_domain + ',') not in (_t_nb_proxy_passthrough.stdout | default('')))
+              )
+            )
+          }] }}
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [netbird-proxy, proxy]
+
     - name: "OpenZiti | Watchdog timer active"
       command: systemctl is-active ziti-watchdog.timer
       register: _t_ziti_watchdog

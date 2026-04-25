@@ -16,6 +16,29 @@ http:
     insecureTransport:
       insecureSkipVerify: true
 
+# TCP passthrough for the NetBird Reverse Proxy.
+# Scoped tightly to *.{{ netbird_proxy_apex | default('proxy.' + platform_domain) }}
+# so it does NOT shadow the existing HTTPS routers (Traefik HTTPS routers for
+# vpn., auth., status., etc. continue to terminate TLS as before).
+{% if (netbird_proxy_enabled | default(true)) and (groups['dns_servers'] | length > 0) %}
+tcp:
+  routers:
+    netbird-proxy-passthrough:
+      entryPoints:
+        - websecure
+      # Single-quoted YAML scalar to avoid double-backslash escape issues in
+      # the Traefik regex. The HostSNIRegexp matches any subdomain of the apex.
+      rule: 'HostSNI(`{{ netbird_proxy_apex | default("proxy." + platform_domain) }}`) || HostSNIRegexp(`^[^.]+\.{{ (netbird_proxy_apex | default("proxy." + platform_domain)) | regex_escape }}$`)'
+      tls:
+        passthrough: true
+      service: netbird-proxy
+  services:
+    netbird-proxy:
+      loadBalancer:
+        servers:
+          - address: "netbird-proxy:8443"
+{% endif %}
+
 tls:
   stores:
     default:
