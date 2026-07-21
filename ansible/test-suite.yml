@@ -999,6 +999,46 @@
       failed_when: _pf_watchdog.rc != 0
       tags: [failover, never]
 
+    # Fencing (gotcha 149) must be in its expected state BEFORE the drill,
+    # otherwise the post-failover fencing assertions measure nothing. The
+    # watchdog self-heals drift within ~30s — retry until it has.
+    - name: "Failover | Pre-flight — NetBird fencing in expected state"
+      community.docker.docker_container_info:
+        name: netbird-server
+      register: _pf_nb_fence
+      retries: 10
+      delay: 5
+      until: >-
+        ((_pf_nb_fence.container.State.Status | default('')) == 'running')
+        == (inventory_hostname == _pg_primary)
+      tags: [failover, never]
+
+    # Optional: capture the pre-drill connected-peer count via the management
+    # API (needs netbird_admin_pat deployed to /etc/netbird-api-token). Used
+    # after the failover to verify the mesh reconverged to at least this
+    # count. -1 = API mode unavailable, convergence check is skipped.
+    - name: "Failover | Pre-flight — capture connected NetBird peer count (API mode)"
+      shell: |
+        set -o pipefail
+        if [ ! -f /etc/netbird-api-token ]; then echo "-1"; exit 0; fi
+        curl -fsSk --max-time 10 \
+          -H "Authorization: Token $(cat /etc/netbird-api-token)" \
+          "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/peers" \
+          | python3 -c "import json,sys; print(sum(1 for p in json.load(sys.stdin) if p.get('connected')))" \
+          || echo "-1"
+      args:
+        executable: /bin/bash
+      register: _pf_nb_peer_count
+      changed_when: false
+      when: inventory_hostname == _pg_primary
+      tags: [failover, never]
+
+    - name: "Failover | Pre-flight — publish peer count to all hosts"
+      set_fact:
+        _nb_pre_connected: "{{ hostvars[_pg_primary]['_pf_nb_peer_count']['stdout'] | default('-1') | trim }}"
+      run_once: true
+      tags: [failover, never]
+
   tasks:
 
     # --- DNS failover: stop Traefik, verify other node still serves ---
@@ -1234,6 +1274,169 @@
       when: inventory_hostname != _pg_primary
       tags: [failover, never]
 
+    # ------------------------------------------------------------------
+    # NetBird fencing after PG failover (gotcha 149)
+    # New primary (= surviving node) must be RUNNING netbird-server;
+    # the demoted node (rejoined as standby) must have it STOPPED.
+    # The watchdog needs up to one 30s cycle per direction.
+    # ------------------------------------------------------------------
+    - name: "Failover | Wait for NetBird fencing to settle post-failover"
+      community.docker.docker_container_info:
+        name: netbird-server
+      register: _t_fo_nb_fence
+      retries: 12
+      delay: 5
+      until: >-
+        ((_t_fo_nb_fence.container.State.Status | default('')) == 'running')
+        == (inventory_hostname == _surviving_node)
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — netbird-server fencing post-failover"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Fencing post-failover: netbird-server '
+              + ('running' if inventory_hostname == _surviving_node else 'stopped') + ' on ' + inventory_hostname,
+              'host': 'cluster',
+              'passed': ((_t_fo_nb_fence.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname == _surviving_node)}] }}
+      tags: [failover, never]
+
+    - name: "Failover | Wait for netbird-proxy fencing to settle post-failover"
+      community.docker.docker_container_info:
+        name: netbird-proxy
+      register: _t_fo_nbproxy_fence
+      retries: 12
+      delay: 5
+      until: >-
+        ((_t_fo_nbproxy_fence.container.State.Status | default('')) == 'running')
+        == (inventory_hostname == _surviving_node)
+      ignore_errors: true
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — netbird-proxy fencing post-failover"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Fencing post-failover: netbird-proxy '
+              + ('running' if inventory_hostname == _surviving_node else 'stopped') + ' on ' + inventory_hostname,
+              'host': 'cluster',
+              'passed': ((_t_fo_nbproxy_fence.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname == _surviving_node)}] }}
+      when: netbird_proxy_enabled | default(true) | bool
+      tags: [failover, never]
+
+    # pgproxy child-kill regression guard: after retargeting, no orphaned
+    # socat child may still hold a connection to the demoted node's PG.
+    - name: "Failover | Verify no leaked pgproxy connections to demoted node"
+      shell: |
+        LEAKED=$(docker exec pgproxy netstat -tn 2>/dev/null | grep ESTABLISHED | grep -c "{{ hostvars[_test_node]['wireguard_ip'] }}:5432")
+        echo "${LEAKED:-0}"
+      register: _t_fo_pgproxy_leak
+      changed_when: false
+      ignore_errors: true
+      when: inventory_hostname == _surviving_node
+      tags: [failover, never]
+
+    - name: "Failover | Record result — no leaked pgproxy children"
+      set_fact:
+        _failover_results: "{{ _failover_results + [{'name': 'No leaked pgproxy connections to demoted node', 'host': 'cluster', 'passed': (_t_fo_pgproxy_leak.stdout | default('1') | trim) == '0'}] }}"
+      when: inventory_hostname == _surviving_node
+      tags: [failover, never]
+
+    # Both local peer clients must re-attach to the NEW primary's signal
+    # server (watchdog restarts them on role change — gotcha 136).
+    - name: "Failover | Wait for local peer clients to attach to new primary's signal"
+      shell: >-
+        ss -tnp 2>/dev/null | grep netbird | grep ':443' | grep ESTAB |
+        awk '{print $5}' | sed 's/\[//;s/\]//;s/:443$//' | sort -u
+      register: _t_fo_signal_ips
+      retries: 12
+      delay: 10
+      until: >-
+        (hostvars[_surviving_node]['ansible_host'] in (_t_fo_signal_ips.stdout | default('')))
+        or ((hostvars[_surviving_node]['public_ipv6'] | default('NO-IPV6')) in (_t_fo_signal_ips.stdout | default('')))
+      changed_when: false
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — peer client on new primary's signal"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Peer client on ' + inventory_hostname + ' attached to new primary signal',
+              'host': 'cluster',
+              'passed': (hostvars[_surviving_node]['ansible_host'] in (_t_fo_signal_ips.stdout | default('')))
+                        or ((hostvars[_surviving_node]['public_ipv6'] | default('NO-IPV6')) in (_t_fo_signal_ips.stdout | default('')))}] }}
+      tags: [failover, never]
+
+    # Mesh reconvergence (API mode only): every peer that was connected
+    # before the drill must be connected again. Ceiling 8 min — covers the
+    # ~6 min client self-heal guard cycle for external peers.
+    - name: "Failover | Wait for mesh reconvergence to pre-drill peer count"
+      shell: |
+        set -o pipefail
+        curl -fsSk --max-time 10 \
+          -H "Authorization: Token $(cat /etc/netbird-api-token)" \
+          "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/peers" \
+          | python3 -c "import json,sys; print(sum(1 for p in json.load(sys.stdin) if p.get('connected')))" \
+          || echo "-1"
+      args:
+        executable: /bin/bash
+      register: _t_fo_nb_converge
+      retries: 16
+      delay: 30
+      until: (_t_fo_nb_converge.stdout | default('-1') | trim | int) >= (_nb_pre_connected | int)
+      changed_when: false
+      ignore_errors: true
+      when:
+        - inventory_hostname == _surviving_node
+        - (_nb_pre_connected | int) > 0
+      tags: [failover, never]
+
+    - name: "Failover | Record result — mesh reconvergence"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Mesh reconverged: ' + (_t_fo_nb_converge.stdout | default('?') | trim)
+              + '/' + _nb_pre_connected + ' peers after ~' + ((_t_fo_nb_converge.attempts | default(1)) * 30) | string + 's',
+              'host': 'cluster',
+              'passed': (_t_fo_nb_converge.stdout | default('-1') | trim | int) >= (_nb_pre_connected | int)}] }}
+      when:
+        - inventory_hostname == _surviving_node
+        - (_nb_pre_connected | int) > 0
+      tags: [failover, never]
+
+    # Optional guard-less recovery measurement: set
+    # netbird_drill_guardless_peer_ip to the NetBird IP of an external test
+    # peer WITHOUT the self-heal guard to measure how long unguarded clients
+    # take to recover (15 min ceiling). E.g.:
+    #   --tags failover -e netbird_drill_guardless_peer_ip=100.64.0.42
+    - name: "Failover | Measure guard-less test peer recovery (optional)"
+      command: "ping -c 1 -W 3 {{ netbird_drill_guardless_peer_ip | default('') }}"
+      register: _t_fo_guardless
+      retries: 30
+      delay: 30
+      until: _t_fo_guardless.rc == 0
+      changed_when: false
+      ignore_errors: true
+      when:
+        - inventory_hostname == _surviving_node
+        - netbird_drill_guardless_peer_ip is defined
+        - netbird_drill_guardless_peer_ip | length > 0
+      tags: [failover, never]
+
+    - name: "Failover | Record result — guard-less peer recovery"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Guard-less peer ' + netbird_drill_guardless_peer_ip
+              + ' recovered after ~' + ((_t_fo_guardless.attempts | default(1)) * 30) | string + 's',
+              'host': 'cluster',
+              'passed': _t_fo_guardless.rc | default(1) == 0}] }}
+      when:
+        - inventory_hostname == _surviving_node
+        - netbird_drill_guardless_peer_ip is defined
+        - netbird_drill_guardless_peer_ip | length > 0
+      tags: [failover, never]
+
     # --- Service-level failover: verify surviving node serves via direct IP ---
     # Active-passive DNS: domain always points to PG primary. These tests verify
     # services respond on the surviving node via direct IP (not DNS resolution).
@@ -1419,9 +1622,27 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Verify NetBird healthy on recovered node"
+    # Fencing (gotcha 149): the recovered node rejoined as STANDBY, so its
+    # netbird-server must be re-fenced (compose restarted it; the watchdog
+    # stops it within ~30s). NetBird service health is asserted via the
+    # primary instead.
+    - name: "Failover | Verify netbird-server re-fenced on recovered standby"
+      community.docker.docker_container_info:
+        name: netbird-server
+      register: _t_fo_recovery_nb_fence
+      ignore_errors: true
+      retries: 12
+      delay: 10
+      until: (_t_fo_recovery_nb_fence.container.State.Status | default('')) != 'running'
+      delegate_to: "{{ _test_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
+      run_once: true
+      tags: [failover, never]
+
+    - name: "Failover | Verify NetBird API healthy via primary after full recovery"
       uri:
-        url: "https://{{ hostvars[_test_node]['ansible_host'] }}/api/instance"
+        url: "https://{{ hostvars[_surviving_node]['ansible_host'] }}/api/instance"
         validate_certs: false
         status_code: [200, 401, 403]
         timeout: 15
@@ -1432,9 +1653,9 @@
       retries: 18
       delay: 10
       until: _t_fo_recovery_netbird is success
-      delegate_to: "{{ _test_node }}"
+      delegate_to: "{{ _surviving_node }}"
       vars:
-        ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
       run_once: true
       tags: [failover, never]
 
@@ -1444,9 +1665,14 @@
       run_once: true
       tags: [failover, never]
 
-    - name: "Failover | Record result — NetBird recovery"
+    - name: "Failover | Record result — NetBird recovery (fencing-aware)"
       set_fact:
-        _failover_results: "{{ _failover_results + [{'name': 'NetBird healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_netbird is success}] }}"
+        _failover_results: >-
+          {{ _failover_results + [
+             {'name': 'netbird-server re-fenced on recovered standby', 'host': 'cluster',
+              'passed': (_t_fo_recovery_nb_fence.container.State.Status | default('')) != 'running'},
+             {'name': 'NetBird API healthy via primary after recovery', 'host': 'cluster',
+              'passed': _t_fo_recovery_netbird is success}] }}
       run_once: true
       tags: [failover, never]
 

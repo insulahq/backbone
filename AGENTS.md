@@ -483,9 +483,18 @@ Prints a pass/fail summary table and exits non-zero on any failure (CI-compatibl
 Failover tests (destructive, opt-in via `--tags failover`):
 - DNS LUA failover — stops Traefik, verifies `ifportup()` excludes dead node, restores
 - PostgreSQL HA — stops primary, waits for repmgrd promotion, tests writes, verifies rejoin
-- NetBird management — stops management server, verifies API via surviving node, restores
+- NetBird fencing (gotcha 149) — pre-flight asserts fence state + captures connected-peer
+  count (API mode); post-failover asserts netbird-server/netbird-proxy running on the NEW
+  primary and stopped on the demoted node, no leaked pgproxy socat children to the demoted
+  node, both local peer clients re-attached to the new primary's signal, and (API mode)
+  mesh reconvergence to the pre-drill peer count within 8 min
+- Guard-less peer drill (optional) — pass `-e netbird_drill_guardless_peer_ip=100.x.y.z`
+  (an external test peer WITHOUT the self-heal guard) to measure unguarded recovery time
+  (15 min ceiling, reported in the summary)
 - Zitadel IAM — stops Zitadel, verifies health on surviving node, restores
-- Full node outage — stops all services on one node, verifies DNS/PG/Gatus on survivor, restores all
+- Full node outage — stops all services on one node, verifies DNS/PG/Gatus on survivor,
+  restores all; recovered standby must re-fence netbird-server, NetBird API asserted via
+  the primary
 
 ### Ansible Lint (CI)
 ```bash
