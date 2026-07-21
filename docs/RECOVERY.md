@@ -337,8 +337,12 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NODE>
 
 > **Stranded external peers** (customer machines stuck after failover): peers with the
 > self-heal guard recover automatically. For machines without it, install the guard once
-> while the mesh is healthy so this never needs manual action again:
-> `sudo ./scripts/netbird-selfheal-install.sh` (from https://github.com/insulahq/backbone)
+> while the mesh is healthy so this never needs manual action again — per platform
+> (all in `scripts/` at https://github.com/insulahq/backbone):
+> Linux `sudo ./netbird-selfheal-install.sh` · Windows (elevated)
+> `powershell -ExecutionPolicy Bypass -File netbird-selfheal-install.ps1` ·
+> Docker clients `netbird-selfheal-docker.sh` via cron, or the
+> healthcheck+autoheal pattern in `netbird-selfheal-compose.example.yml`.
 
 ---
 

@@ -1,0 +1,61 @@
+# ==========================================================================
+# NetBird Self-Heal Guard — docker-compose pattern (no host access needed)
+# ==========================================================================
+# For pure-compose environments where you cannot install cron or systemd
+# units on the host (managed container platforms, locked-down NAS UIs).
+#
+# How it maps to the other guards' state machine:
+#   - healthcheck interval 120s x retries 3  ==  "3 consecutive failed
+#     2-minute checks" before the container is marked unhealthy (~6 min)
+#   - autoheal restarts unhealthy containers == the engine restart remedy
+#     (a container restart forces fresh DNS resolution + signal re-register)
+#   - start_period 300s == grace after (re)start, prevents flapping
+#
+# Security note: autoheal needs the Docker socket, which is root-equivalent
+# on the host. If that is unacceptable, prefer the host-cron variant
+# (netbird-selfheal-docker.sh) which needs no long-running privileged helper.
+#
+# Merge the marked pieces into your existing NetBird client compose file.
+# Project: https://github.com/insulahq/backbone
+# ==========================================================================
+
+services:
+  netbird:
+    image: netbirdio/netbird:latest
+    container_name: netbird
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    environment:
+      NB_SETUP_KEY: "<YOUR_SETUP_KEY>"
+      NB_MANAGEMENT_URL: "https://vpn.<YOUR_DOMAIN>"
+      NB_HOSTNAME: "<PEER_HOSTNAME>"
+    volumes:
+      - netbird-client:/var/lib/netbird
+    # --- self-heal: mark the container unhealthy when the engine dangles ---
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "netbird status | grep -q 'Management: Connected' && netbird status | grep -q 'Signal: Connected'"
+      interval: 120s
+      timeout: 20s
+      retries: 3
+      start_period: 300s
+    labels:
+      - autoheal=true
+
+  # --- self-heal: restart containers that go unhealthy ---------------------
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: netbird-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  netbird-client:

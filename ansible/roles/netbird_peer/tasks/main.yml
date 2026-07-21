@@ -126,8 +126,11 @@
       - "Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key"
       - ""
       - "For UNMANAGED peers (customer machines), also install the self-heal guard"
-      - "so they recover automatically after a server failover (gotcha 148):"
-      - "      sudo ./scripts/netbird-selfheal-install.sh   (from the backbone repo)"
+      - "so they recover automatically after a server failover (gotcha 148)."
+      - "Per-platform installers in the backbone repo's scripts/ directory:"
+      - "  Linux:   sudo ./netbird-selfheal-install.sh"
+      - "  Windows: powershell -ExecutionPolicy Bypass -File netbird-selfheal-install.ps1"
+      - "  Docker:  netbird-selfheal-docker.sh (cron) or netbird-selfheal-compose.example.yml"
   when:
     - not netbird_config.stat.exists
     - netbird_setup_key is not defined or netbird_setup_key | length == 0

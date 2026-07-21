@@ -39,8 +39,18 @@ or signal stay disconnected for 3 consecutive checks (~6 min), it runs the full
 stranded-peer remedy. This is the only mechanism that recovers a peer after a
 hard failure of the primary node, because it needs no server-side reachability.
 
-For unmanaged machines (customer laptops/servers outside Ansible), install the
-same guard with `scripts/netbird-selfheal-install.sh` from the repo root.
+For unmanaged machines (customer devices outside Ansible), the same guard
+exists per platform under `scripts/` in the repo root:
+
+| Client type | Guard | Mechanism |
+|-------------|-------|-----------|
+| Linux (systemd) | `netbird-selfheal-install.sh` | systemd timer, `netbird down && up` |
+| Windows | `netbird-selfheal-install.ps1` | Scheduled Task (SYSTEM, every 2 min), `netbird down && up` |
+| Docker client, host has cron | `netbird-selfheal-docker.sh` | cron + `docker exec` check, `docker restart` remedy |
+| Docker client, compose only | `netbird-selfheal-compose.example.yml` | healthcheck (3×120s) + autoheal sidecar |
+
+All four implement the same state machine: ~6 min of confirmed
+management/signal disconnect → full engine restart, with a flap cooldown.
 
 ## Usage
 
