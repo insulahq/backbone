@@ -91,7 +91,24 @@
         seconds: 15
       tags: [rolling-update]
 
+    # --- Step 2b: Re-fence NetBird on the standby (primary-only service) ---
+    # `compose up -d` just (re)started netbird-server here; on the standby it
+    # must not accept clients (gotcha 149). Doing it inline avoids racing the
+    # pg-role-watchdog during the health checks below. netbird-proxy is not
+    # part of _service_dirs (never recreated by rolling updates) — stopping it
+    # too is a defensive no-op when it isn't running.
+    - name: "Fence | Stop netbird-server + netbird-proxy on standby"
+      shell: |
+        docker stop --time 5 netbird-proxy >/dev/null 2>&1 || true
+        docker stop --time 5 netbird-server >/dev/null 2>&1 || true
+      changed_when: true
+      when:
+        - not _is_primary
+        - "'netbird' in _update_services"
+      tags: [rolling-update]
+
     # --- Step 3: Health checks ---
+    # netbird is skipped on the standby — its server is fenced there by design.
     - name: "Health | Verify services on {{ inventory_hostname }}"
       uri:
         url: "{{ _health_checks[item].url }}"
@@ -105,6 +122,7 @@
       until: _health_result is success
       register: _health_result
       loop: "{{ _update_services | select('in', _health_checks.keys()) | list }}"
+      when: item != 'netbird' or _is_primary
       tags: [rolling-update]
 
     # --- Step 4: Restore DNS (primary only; standby must NOT redirect DNS to itself) ---

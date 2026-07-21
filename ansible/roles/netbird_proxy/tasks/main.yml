@@ -161,3 +161,25 @@
     - inventory_hostname == (postgresql_primary_node | default('ns1'))
   run_once: true
   tags: [netbird-proxy, proxy, dns]
+
+# --- Fencing: netbird-proxy runs ONLY on the PG primary (gotcha 149) -----
+# It depends on the LOCAL netbird-server (NB_PROXY_MANAGEMENT_ADDRESS points
+# at the Docker-net neighbor), which is fenced on the standby — left running
+# it would just crash-loop. The pg-role-watchdog enforces this every cycle;
+# this closes the deploy-time window.
+- name: Fence netbird-proxy on PG standby (primary-only service)
+  ansible.builtin.shell: |
+    ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "unknown")
+    if [ "$ROLE" = "t" ]; then
+      if docker stop --time 5 netbird-proxy >/dev/null 2>&1; then
+        echo "FENCED"
+      else
+        echo "FENCE_FAILED"
+      fi
+    else
+      echo "SKIPPED role=$ROLE"
+    fi
+  register: _nb_proxy_fence
+  changed_when: "'FENCED' in _nb_proxy_fence.stdout"
+  failed_when: "'FENCE_FAILED' in _nb_proxy_fence.stdout"
+  tags: [netbird-proxy, proxy]

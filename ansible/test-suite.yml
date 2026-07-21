@@ -350,6 +350,25 @@
         _test_results: "{{ _test_results + [{'name': 'NetBird API health', 'host': inventory_hostname, 'passed': _t_nb_api is success}] }}"
       tags: [netbird]
 
+    # Fencing (gotcha 149): netbird-server runs ONLY on the PG primary.
+    # Running on the standby would re-open the split-signal trap (gotcha 136).
+    - name: "NetBird | Server container state (fencing)"
+      community.docker.docker_container_info:
+        name: netbird-server
+      register: _t_nb_server
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — server fenced to primary"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'netbird-server fencing ('
+              + ('running on primary' if inventory_hostname == _pg_primary else 'stopped on standby') + ')',
+              'host': inventory_hostname,
+              'passed': ((_t_nb_server.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname == _pg_primary)}] }}
+      tags: [netbird]
+
     - name: "NetBird | Cross-node mesh connectivity (ping peer)"
       command: "ping -c 2 -W 3 {{ _peer_wireguard_ip }}"
       register: _t_nb_ping
@@ -392,6 +411,18 @@
     - name: "NetBird | Record result — signal check timer"
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'NetBird signal check timer active', 'host': inventory_hostname, 'passed': _t_nb_signal_timer.rc | default(1) == 0}] }}"
+      tags: [netbird]
+
+    - name: "NetBird | Self-heal timer active (gotcha 148 guard)"
+      command: systemctl is-active netbird-selfheal.timer
+      register: _t_nb_selfheal_timer
+      changed_when: false
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — self-heal timer"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'NetBird self-heal timer active', 'host': inventory_hostname, 'passed': _t_nb_selfheal_timer.rc | default(1) == 0}] }}"
       tags: [netbird]
 
     # ------------------------------------------------------------------
@@ -488,9 +519,16 @@
       when: netbird_proxy_enabled | default(true) | bool
       tags: [netbird-proxy, proxy]
 
-    - name: "NetBird Proxy | Record result — container running"
+    # Fencing (gotcha 149): netbird-proxy is primary-only — it depends on the
+    # local netbird-server, which is fenced on the standby.
+    - name: "NetBird Proxy | Record result — container fenced to primary"
       set_fact:
-        _test_results: "{{ _test_results + [{'name': 'NetBird Proxy container running', 'host': inventory_hostname, 'passed': (_t_nb_proxy.container.State.Status | default('')) == 'running'}] }}"
+        _test_results: >-
+          {{ _test_results + [{'name': 'NetBird Proxy fencing ('
+              + ('running on primary' if inventory_hostname == _pg_primary else 'stopped on standby') + ')',
+              'host': inventory_hostname,
+              'passed': ((_t_nb_proxy.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname == _pg_primary)}] }}
       when: netbird_proxy_enabled | default(true) | bool
       tags: [netbird-proxy, proxy]
 
@@ -505,7 +543,11 @@
       register: _t_nb_proxy_passthrough
       changed_when: false
       ignore_errors: true
-      when: netbird_proxy_enabled | default(true) | bool
+      when:
+        # Primary only — on the standby the proxy is fenced (stopped), so the
+        # passthrough has no backend and the probe result is meaningless.
+        - netbird_proxy_enabled | default(true) | bool
+        - inventory_hostname == _pg_primary
       tags: [netbird-proxy, proxy]
 
     - name: "NetBird Proxy | Record result — passthrough working"
@@ -522,7 +564,9 @@
               )
             )
           }] }}
-      when: netbird_proxy_enabled | default(true) | bool
+      when:
+        - netbird_proxy_enabled | default(true) | bool
+        - inventory_hostname == _pg_primary
       tags: [netbird-proxy, proxy]
 
     - name: "OpenZiti | Watchdog timer active"

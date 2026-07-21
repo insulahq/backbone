@@ -44,6 +44,32 @@
     state: present
     update_cache: true
 
+# Old clients have engine bugs where signal reconnection silently fails after
+# a server failover — the "dangling client" class (gotcha 148). Enforce a
+# floor when netbird_peer_min_version is set.
+- name: Check installed NetBird client version
+  command: netbird version
+  register: _nb_client_version
+  changed_when: false
+  failed_when: false
+  when: netbird_peer_min_version | length > 0
+
+- name: Upgrade NetBird client below minimum version
+  apt:
+    name: netbird
+    state: latest  # noqa package-latest — deliberate: pull the current repo version when below the floor
+    update_cache: true
+  notify: restart netbird
+  when:
+    - netbird_peer_min_version | length > 0
+    - _nb_client_version.rc | default(1) == 0
+    # trim first, then default(..., true) so empty/whitespace-only output falls
+    # back to 0.0.0 instead of hard-failing the version() test; strip a leading
+    # "v" in case a future client prefixes it.
+    - >-
+      (_nb_client_version.stdout | default('') | trim | regex_replace('^v', '')
+       | default('0.0.0', true)) is version(netbird_peer_min_version, '<')
+
 - name: Enable and start NetBird daemon
   systemd:
     name: netbird
@@ -98,6 +124,10 @@
       - "      netbird up --setup-key <KEY> --management-url {{ netbird_management_url }} --hostname {{ netbird_peer_hostname }}"
       - ""
       - "Create a setup key in the NetBird dashboard: Settings > Setup Keys > Add Key"
+      - ""
+      - "For UNMANAGED peers (customer machines), also install the self-heal guard"
+      - "so they recover automatically after a server failover (gotcha 148):"
+      - "      sudo ./scripts/netbird-selfheal-install.sh   (from the backbone repo)"
   when:
     - not netbird_config.stat.exists
     - netbird_setup_key is not defined or netbird_setup_key | length == 0
@@ -130,6 +160,49 @@
     daemon_reload: true
     enabled: true
     state: started
+
+# Self-heal guard — client-side stranded-peer recovery (gotcha 148).
+# Restarts the NetBird engine when management/signal stay disconnected.
+# Unmanaged/customer peers get the same guard via
+# scripts/netbird-selfheal-install.sh in the repo root.
+- name: Deploy NetBird self-heal script
+  template:
+    src: netbird-selfheal.sh.j2
+    dest: /usr/local/bin/netbird-selfheal.sh
+    mode: '0755'
+  when: netbird_selfheal_enabled | bool
+
+- name: Deploy NetBird self-heal timer
+  template:
+    src: netbird-selfheal.timer.j2
+    dest: /etc/systemd/system/netbird-selfheal.timer
+    mode: '0644'
+  notify: reload systemd
+  when: netbird_selfheal_enabled | bool
+
+- name: Deploy NetBird self-heal service
+  template:
+    src: netbird-selfheal.service.j2
+    dest: /etc/systemd/system/netbird-selfheal.service
+    mode: '0644'
+  notify: reload systemd
+  when: netbird_selfheal_enabled | bool
+
+- name: Enable and start NetBird self-heal timer
+  systemd:
+    name: netbird-selfheal.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: netbird_selfheal_enabled | bool
+
+- name: Disable NetBird self-heal timer (if disabled)
+  systemd:
+    name: netbird-selfheal.timer
+    enabled: false
+    state: stopped
+  ignore_errors: true
+  when: not (netbird_selfheal_enabled | bool)
 
 - name: Display NetBird peer status
   command: netbird status

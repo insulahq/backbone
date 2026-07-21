@@ -1,12 +1,95 @@
 #!/bin/bash
-# NetBird peer health checker — periodic. Detects stale mesh peers and
-# pushes status to Gatus. Runs every 5 min via systemd timer.
+# NetBird peer health checker — periodic (5 min timer).
+#
+# Preferred mode: query the management API, the authoritative source for
+# which peers are attached (`connected` flag + `last_seen` per peer). Peers
+# that disconnected RECENTLY are likely stranded post-failover (gotcha 148)
+# and are alerted by name; peers offline for longer than the recent window
+# are counted but not alarmed (laptop closed ≠ stranded).
+#
+# Fallback mode (no /etc/netbird-api-token): ping each peer's NetBird IP
+# from this node's peer client — reachability-only, can't distinguish
+# "stranded" from "switched off".
 
 set -euo pipefail
 source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
 
 ALERT_NAME="NetBird-Mesh-Peers-Healthy"
+API_TOKEN_FILE=/etc/netbird-api-token
+API_URL="https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/peers"
+RECENT_WINDOW_HOURS={{ netbird_peer_health_recent_hours | default(24) }}
 
+# --- Mode 1: management API (authoritative) -------------------------------
+if [ -f "$API_TOKEN_FILE" ]; then
+  API_TOKEN=$(cat "$API_TOKEN_FILE")
+  RESPONSE=""
+  # PATs use the "Token" scheme; some token types use "Bearer" — try both.
+  for SCHEME in Token Bearer; do
+    if RESPONSE=$(curl -fsS --max-time 10 {% if not (netbird_validate_certs | default(false)) %}-k {% endif %}\
+        -H "Authorization: $SCHEME $API_TOKEN" "$API_URL" 2>/dev/null); then
+      break
+    fi
+    RESPONSE=""
+  done
+
+  if [ -n "$RESPONSE" ]; then
+    SUMMARY=$(printf '%s' "$RESPONSE" | python3 -c "
+import json, sys
+from datetime import datetime, timezone
+
+hours = float(sys.argv[1])
+data = json.load(sys.stdin)
+peers = data if isinstance(data, list) else data.get('peers', [])
+now = datetime.now(timezone.utc)
+
+total = 0
+stale = []        # disconnected, but seen within the recent window → likely stranded
+long_offline = 0  # disconnected for longer → probably just switched off
+
+for p in peers:
+    total += 1
+    if p.get('connected'):
+        continue
+    last_seen = p.get('last_seen') or p.get('lastSeen') or ''
+    age_h = None
+    try:
+        ts = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+        age_h = (now - ts).total_seconds() / 3600
+    except (ValueError, TypeError):
+        pass
+    if age_h is not None and age_h <= hours:
+        name = p.get('hostname') or p.get('dns_label') or p.get('id', '?')
+        stale.append('%s (%s, last seen %.1fh ago)' % (name, p.get('ip', '?'), age_h))
+    else:
+        long_offline += 1
+
+if stale:
+    print('STALE|%d|%d|%d|%s' % (total, len(stale), long_offline, '; '.join(stale)))
+else:
+    print('OK|%d|%d' % (total, long_offline))
+" "$RECENT_WINDOW_HOURS" 2>/dev/null || echo "PARSE_ERROR")
+
+    if [ "$SUMMARY" != "PARSE_ERROR" ]; then
+      STATUS=$(printf '%s' "$SUMMARY" | cut -d'|' -f1)
+      TOTAL=$(printf '%s' "$SUMMARY" | cut -d'|' -f2)
+      if [ "$STATUS" = "STALE" ]; then
+        STALE_COUNT=$(printf '%s' "$SUMMARY" | cut -d'|' -f3)
+        LONG_OFFLINE=$(printf '%s' "$SUMMARY" | cut -d'|' -f4)
+        STALE_LIST=$(printf '%s' "$SUMMARY" | cut -d'|' -f5-)
+        platform_alert "warning" "$ALERT_NAME" \
+          "$STALE_COUNT/$TOTAL NetBird peers disconnected within the last ${RECENT_WINDOW_HOURS}h (likely stranded): ${STALE_LIST}. ${LONG_OFFLINE} long-offline. Guard-equipped peers self-heal within ~6 min; others need 'netbird down && netbird up'."
+      else
+        LONG_OFFLINE=$(printf '%s' "$SUMMARY" | cut -d'|' -f3)
+        platform_alert "info" "$ALERT_NAME" \
+          "All recently-seen NetBird peers connected per management API (total: $TOTAL, long-offline: $LONG_OFFLINE)"
+      fi
+      exit 0
+    fi
+  fi
+  echo "$(date): WARNING — management API query failed, falling back to ping mode"
+fi
+
+# --- Mode 2: ping fallback (reachability from this node) ------------------
 PEER_IPS=$(netbird status --json 2>/dev/null \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(p['netbirdIp'] for p in d.get('peers', {}).get('details', []) if p.get('netbirdIp')))" \
   2>/dev/null || true)

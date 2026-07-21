@@ -1,0 +1,12 @@
+[Unit]
+Description=NetBird Self-Heal Guard (stranded-peer recovery, gotcha 148)
+After=netbird.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec={{ netbird_selfheal_interval }}
+AccuracySec=30
+RandomizedDelaySec=20
+
+[Install]
+WantedBy=timers.target multi-user.target

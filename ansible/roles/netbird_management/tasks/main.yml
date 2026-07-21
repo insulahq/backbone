@@ -291,6 +291,29 @@
   ignore_errors: true
   tags: [netbird, netbird_management, dns]
 
+# --- Fencing: netbird-server runs ONLY on the PG primary (gotchas 136/148/149) ---
+# The pg-role-watchdog enforces this every cycle; doing it here too closes the
+# window where `compose up -d` just started the container on the standby and a
+# stale client could attach to its empty signal registry before the next
+# watchdog tick. Best-effort: if PG isn't queryable (bootstrap), leave running.
+- name: Fence netbird-server on PG standby (primary-only service)
+  shell: |
+    ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "unknown")
+    if [ "$ROLE" = "t" ]; then
+      docker stop --time 5 netbird-proxy >/dev/null 2>&1 || true
+      if docker stop --time 5 netbird-server >/dev/null 2>&1; then
+        echo "FENCED"
+      else
+        echo "FENCE_FAILED"
+      fi
+    else
+      echo "SKIPPED role=$ROLE"
+    fi
+  register: _nb_fence
+  changed_when: "'FENCED' in _nb_fence.stdout"
+  failed_when: "'FENCE_FAILED' in _nb_fence.stdout"
+  tags: [netbird, netbird_management]
+
 # --- Status display ---
 
 - name: Display NetBird deployment status

@@ -112,6 +112,68 @@ if [ -n "$GATUS_TOKEN" ]; then
     >/dev/null 2>&1 || true
 fi
 
+# ==========================================================================
+# NetBird fencing — netbird-server + netbird-proxy run ONLY on the PG primary
+# ==========================================================================
+# Signal state is per-instance and in-memory (gotchas 136/148/149). A running
+# netbird-server on the standby lets stale clients silently attach to its
+# empty signal registry → split-signal mesh isolation. Fencing makes that
+# state unrepresentable: with the container stopped, the standby's Traefik
+# has no netbird routes, so a stale client gets an immediate failure,
+# redials, re-resolves the 30s-TTL DNS record, and lands on the primary.
+#
+# Runs EVERY cycle, not just on transitions: deploys (`compose up -d`),
+# manual `docker start`, and reboots all drift. Note `restart:
+# unless-stopped` keeps a fenced container stopped across reboots, so
+# promotion MUST re-start it here — nothing else will.
+enforce_netbird_fence() {
+  local nb_state proxy_state
+  # Inspect BOTH containers independently — the roles are separately taggable,
+  # so netbird-proxy can exist on a node without netbird-server (or vice
+  # versa) after a partial --tags/--limit run. Neither may run on the standby.
+  nb_state=$(docker inspect netbird-server --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+  proxy_state=$(docker inspect netbird-proxy --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+  if [ "$nb_state" = "missing" ] && [ "$proxy_state" = "missing" ]; then
+    return 0  # NetBird not deployed on this node
+  fi
+
+  if [ "$PG_ROLE" = "t" ]; then
+    if [ "$proxy_state" = "running" ] || [ "$proxy_state" = "restarting" ]; then
+      echo "$(date): NetBird fence — standby role, stopping netbird-proxy"
+      docker stop --time 5 netbird-proxy 2>&1 || echo "$(date): WARNING — netbird-proxy stop failed"
+    fi
+    if [ "$nb_state" = "running" ] || [ "$nb_state" = "restarting" ]; then
+      echo "$(date): NetBird fence — standby role, stopping netbird-server"
+      docker stop --time 5 netbird-server 2>&1 || echo "$(date): WARNING — netbird-server stop failed"
+    fi
+  elif [ "$PG_ROLE" = "f" ]; then
+    # Only start once pgproxy already routes to the local primary. Starting
+    # earlier would fill netbird's activity-store pool (DSN via pgproxy) with
+    # connections to the read-only ex-primary, which pgx caches for up to
+    # 60 min (gotcha 148).
+    if [ "$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || true)" != "$CORRECT_TARGET" ]; then
+      return 0  # Branch A retargets pgproxy first; the end-of-script call starts us
+    fi
+    if [ "$nb_state" != "missing" ] && [ "$nb_state" != "running" ]; then
+      echo "$(date): NetBird fence — primary role, starting netbird-server"
+      docker start netbird-server 2>&1 || echo "$(date): WARNING — netbird-server start failed"
+      nb_state=$(docker inspect netbird-server --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+    fi
+    # The proxy talks to the LOCAL netbird-server — only start it when that
+    # dependency is actually up, otherwise it just crash-loops.
+    if [ "$proxy_state" != "missing" ] && [ "$proxy_state" != "running" ] && [ "$nb_state" = "running" ]; then
+      echo "$(date): NetBird fence — primary role, starting netbird-proxy"
+      docker start netbird-proxy 2>&1 || echo "$(date): WARNING — netbird-proxy start failed"
+    fi
+  fi
+  return 0
+}
+
+# Steady-state fence enforcement (before the early exit below). During a role
+# transition this only applies the stop direction — the start direction waits
+# for pgproxy to be retargeted and runs via the end-of-script call.
+enforce_netbird_fence
+
 # Decompose the cascade: pgproxy-target change vs. DNS-only drift.
 # Previously, any DNS mismatch re-triggered the full cascade (service restarts +
 # netbird restart) every cycle while DNS stayed bad, causing continuous flapping.
@@ -135,8 +197,14 @@ if $PGPROXY_NEEDS_UPDATE; then
   # 2. Wait for pgproxy to pick up new target (self-updating every 5s)
   sleep 7
 
-  # 3. Restart PG-dependent services (they need fresh connections via new pgproxy target)
-  if ! docker restart powerdns-auth powerdns-nginx gatus netbird-server zitadel --timeout 5 2>&1; then
+  # 3. Restart PG-dependent services (they need fresh connections via new pgproxy target).
+  #    netbird-server is deliberately NOT in this list — restarting it wipes its
+  #    in-memory signal state and strands external peers (gotcha 148). It is
+  #    managed by enforce_netbird_fence(): stopped on the standby, started
+  #    fresh on the new primary AFTER pgproxy is retargeted, so its pools can
+  #    never poison and its signal state is only ever wiped when clients must
+  #    reconnect anyway.
+  if ! docker restart powerdns-auth powerdns-nginx gatus zitadel --timeout 5 2>&1; then
     echo "$(date): WARNING — one or more service restarts failed after PG role change"
   fi
 
@@ -155,13 +223,11 @@ if $PGPROXY_NEEDS_UPDATE; then
     sleep 5
   done
 
-  # 6. NetBird signal-state is in-memory and lost on every netbird-server
-  #    restart. Our local peer client recovers via the systemctl restart
-  #    above, but external customer peers can be stuck on stale signal
-  #    sessions. Fire a background script that pings each peer's NetBird
-  #    IP — best-effort ICE re-negotiation. Stale peers get reported via
-  #    Gatus alert. See AGENTS.md gotcha (NetBird peer wake-up).
-  ( /usr/local/bin/netbird-peer-wakeup.sh >/dev/null 2>&1 &) || true
+  # 6. netbird-server itself is handled AFTER Branch B by the end-of-script
+  #    enforce_netbird_fence() call: started fresh on the new primary (now
+  #    that pgproxy routes locally), stopped on the demoted node. The peer
+  #    wake-up fires at the end too — only on promotion — so it observes the
+  #    post-fence mesh.
 fi
 
 # === Branch B: DNS drift (may run alone OR as a follow-up to branch A) ===
@@ -170,6 +236,20 @@ if $DNS_NEEDS_UPDATE; then
     /usr/local/bin/platform-dns-switch "$DNS_MODE" 2>&1 && break
     sleep 5
   done
+fi
+
+# Post-cascade fence pass — on promotion this is where netbird-server starts
+# (pgproxy now routes to the local primary, so its pools connect cleanly).
+enforce_netbird_fence
+
+# External customer peers can hold stale signal sessions from the old
+# primary. Fire the background wake-up (60s grace, then pings each peer's
+# NetBird IP — best-effort ICE re-negotiation from our side). Only on
+# promotion: the demoted node's netbird-server is fenced, and firing from
+# both nodes doubles every Gatus alert. Unrecovered peers self-heal via the
+# client-side netbird-selfheal.timer where installed (gotcha 148).
+if $PGPROXY_NEEDS_UPDATE && [ "$PG_ROLE" = "f" ]; then
+  ( /usr/local/bin/netbird-peer-wakeup.sh >/dev/null 2>&1 &) || true
 fi
 
 if $PGPROXY_NEEDS_UPDATE; then

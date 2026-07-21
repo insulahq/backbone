@@ -116,6 +116,18 @@ netbird_peer_dns_domain: "netbird.vpn"
 # netbird_relay_auth_secret: "<GENERATE: openssl rand -hex 32>"
 # netbird_datastore_encryption_key: "<GENERATE: openssl rand -base64 32>"
 
+# Management API token (PAT) — enables the peer-health checker's
+# management-API mode (authoritative per-peer `connected` + last_seen instead
+# of ping-based guessing). Create a service user in the NetBird dashboard
+# (Team > Service Users > Create) and generate an access token for it.
+# Optional — without it the health checker falls back to ping mode.
+# netbird_admin_pat: "<PAT from NetBird dashboard service user>"
+
+# Minimum NetBird client version enforced by the netbird_peer role — peers
+# below it are upgraded from the NetBird apt repo. Old clients are the main
+# "dangling peer after failover" source (gotcha 148). Empty = disabled.
+# netbird_peer_min_version: "0.67.0"
+
 # ============================================================================
 # Gatus Monitoring (HA status dashboard + alert receiver)
 # ============================================================================

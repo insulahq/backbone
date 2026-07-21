@@ -52,7 +52,14 @@ Before any recovery, ensure you have:
 **Impact during recovery:**
 - DNS: Other node continues serving (both are authoritative NS)
 - PostgreSQL: Write unavailability for ~80s (detection + promotion + DNS switch)
-- Services: Brief restart on the surviving node (PowerDNS, NetBird, Zitadel, Gatus)
+- Services: Brief restart on the surviving node (PowerDNS, Zitadel, Gatus).
+  NetBird management (`netbird-server` + `netbird-proxy`) is *fenced* — it runs only on the
+  PG primary, so on promotion the watchdog starts it fresh on the surviving node (gotcha 149).
+  On the standby, both containers being **stopped is expected** — do not start them manually.
+- NetBird external peers: clients with the self-heal guard (`netbird-selfheal.timer`)
+  reconnect automatically within ~6 min of a hard failover; unguarded clients recover via
+  their own reconnect logic or a manual `netbird down && netbird up` (watch the
+  `NetBird-Mesh-Peers-Healthy` Gatus endpoint for stragglers)
 - OpenZiti: Router on surviving node stays healthy. If controller was on the failed node,
   the watchdog on the surviving node promotes itself (~90s). Routers reconnect via
   `127.0.0.1` (host network). Edge API and ZAC console resume on the surviving node.
@@ -322,6 +329,16 @@ ssh root@<NODE> "netbird down && netbird up"
 # 3. Re-enroll if needed
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml --limit <NODE>
 ```
+
+> **Fencing (gotcha 149):** `netbird-server`/`netbird-proxy` stopped on the PG **standby**
+> is intentional, not a fault — the watchdog reverts manual starts within ~30s. Check
+> `docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();"` before
+> concluding the management stack is broken. It must be running on the **primary** only.
+
+> **Stranded external peers** (customer machines stuck after failover): peers with the
+> self-heal guard recover automatically. For machines without it, install the guard once
+> while the mesh is healthy so this never needs manual action again:
+> `sudo ./scripts/netbird-selfheal-install.sh` (from https://github.com/insulahq/backbone)
 
 ---
 

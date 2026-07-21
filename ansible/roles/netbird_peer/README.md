@@ -25,6 +25,22 @@ Installs the NetBird peer client and enrolls servers in the WireGuard VPN mesh.
 | `netbird_log_level` | `info` | Log verbosity |
 | `netbird_config_dir` | `/etc/netbird` | Config directory |
 | `netbird_peer_hostname` | `{{ inventory_hostname }}` | Peer name in mesh |
+| `netbird_selfheal_enabled` | `true` | Deploy the self-heal guard (gotcha 148) |
+| `netbird_selfheal_interval` | `2min` | Guard check cadence |
+| `netbird_selfheal_fail_threshold` | `3` | Consecutive failed checks before engine restart |
+| `netbird_selfheal_cooldown_secs` | `900` | Minimum seconds between restarts (flap guard) |
+| `netbird_peer_min_version` | `""` | When set, upgrade clients below this version |
+
+## Self-Heal Guard (gotcha 148)
+
+`netbird-selfheal.timer` checks `netbird status` every 2 minutes. If management
+or signal stay disconnected for 3 consecutive checks (~6 min), it runs the full
+`netbird down && netbird up` cycle — the automated version of the manual
+stranded-peer remedy. This is the only mechanism that recovers a peer after a
+hard failure of the primary node, because it needs no server-side reachability.
+
+For unmanaged machines (customer laptops/servers outside Ansible), install the
+same guard with `scripts/netbird-selfheal-install.sh` from the repo root.
 
 ## Usage
 

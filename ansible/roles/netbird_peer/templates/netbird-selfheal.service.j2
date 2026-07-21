@@ -1,0 +1,8 @@
+[Unit]
+Description=NetBird Self-Heal Guard
+After=netbird.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=180
+ExecStart=/usr/local/bin/netbird-selfheal.sh

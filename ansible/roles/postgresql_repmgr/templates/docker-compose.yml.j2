@@ -98,6 +98,15 @@ services:
             echo "pgproxy: target changed to $$TARGET:5432"
             # Kill existing socat and start new one
             if [ -n "$$SOCAT_PID" ]; then kill $$SOCAT_PID 2>/dev/null || true; fi
+            # Kill orphaned per-connection children too — with `fork`, each
+            # accepted connection is a child that SURVIVES the parent kill and
+            # keeps proxying its established flow to the OLD target (the now
+            # read-only ex-primary). Consumer pools (pgx/GORM) cache those
+            # poisoned connections for up to 60 min (gotcha 148). Killing the
+            # children RSTs the consumers, forcing a clean reconnect that goes
+            # through the NEW listener to the new primary.
+            CHILD_PIDS=$$(pidof socat 2>/dev/null || true)
+            if [ -n "$$CHILD_PIDS" ]; then kill $$CHILD_PIDS 2>/dev/null || true; fi
             sleep 1
             socat TCP-LISTEN:5432,fork,reuseaddr TCP:$$TARGET:5432 &
             SOCAT_PID=$$!

@@ -1,0 +1,72 @@
+#!/bin/bash
+# ==========================================================================
+# NetBird Self-Heal Guard — client-side stranded-peer recovery
+# ==========================================================================
+# Runs every {{ netbird_selfheal_interval }} via systemd timer. If management
+# or signal stay disconnected for {{ netbird_selfheal_fail_threshold }}
+# consecutive checks, performs a full engine restart (netbird down && up) —
+# the automated version of the manual remedy from AGENTS.md gotcha 148.
+#
+# The full engine restart (not just a daemon poke) is deliberate: it forces
+# fresh DNS resolution of the management URL, a new signal registration, and
+# fresh ICE negotiation — recovering even the engine states where the
+# client's own reconnect logic silently wedges. Because it runs ON the peer,
+# it needs no server-side reachability: it is the only mechanism that
+# recovers a peer after a hard failure of the primary node.
+#
+# Flap guard: at most one restart per {{ netbird_selfheal_cooldown_secs }}s —
+# during a genuine full outage the guard stays quiet instead of thrashing.
+# ==========================================================================
+
+set -u
+
+FAIL_FILE=/run/netbird-selfheal.fails
+LAST_RESTART_FILE=/run/netbird-selfheal.last-restart
+FAIL_THRESHOLD={{ netbird_selfheal_fail_threshold }}
+COOLDOWN_SECS={{ netbird_selfheal_cooldown_secs }}
+
+log() { echo "$(date): $1"; logger -t netbird-selfheal "$1" 2>/dev/null || true; }
+
+# Daemon not running or peer not enrolled — nothing to guard
+systemctl is-active netbird >/dev/null 2>&1 || exit 0
+[ -f "{{ netbird_config_dir }}/config.json" ] || exit 0
+
+# Plain-text status parse — stable across client versions and needs no
+# extra tooling. A hung daemon (status times out / empty output) counts as
+# unhealthy, which is exactly right: that state also needs the restart.
+STATUS_OUT=$(timeout 15 netbird status 2>/dev/null || true)
+HEALTHY=false
+if printf '%s\n' "$STATUS_OUT" | grep -q '^Management: Connected' \
+   && printf '%s\n' "$STATUS_OUT" | grep -q '^Signal: Connected'; then
+  HEALTHY=true
+fi
+
+if [ "$HEALTHY" = "true" ]; then
+  rm -f "$FAIL_FILE"
+  exit 0
+fi
+
+FAILS=$(cat "$FAIL_FILE" 2>/dev/null || echo 0)
+FAILS=$((FAILS + 1))
+echo "$FAILS" > "$FAIL_FILE"
+log "management/signal disconnected (consecutive check $FAILS/$FAIL_THRESHOLD)"
+
+[ "$FAILS" -lt "$FAIL_THRESHOLD" ] && exit 0
+
+NOW=$(date +%s)
+LAST_RESTART=$(cat "$LAST_RESTART_FILE" 2>/dev/null || echo 0)
+if [ $((NOW - LAST_RESTART)) -lt "$COOLDOWN_SECS" ]; then
+  log "still in cooldown ($((NOW - LAST_RESTART))s since last restart) — skipping"
+  exit 0
+fi
+
+log "restarting NetBird engine (netbird down && netbird up)"
+echo "$NOW" > "$LAST_RESTART_FILE"
+rm -f "$FAIL_FILE"
+
+if ! { timeout 30 netbird down; sleep 2; timeout 90 netbird up; }; then
+  log "engine restart failed — falling back to daemon restart"
+  systemctl restart netbird 2>&1 || log "ERROR — daemon restart failed too"
+fi
+
+log "engine restart complete"

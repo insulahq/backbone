@@ -4,7 +4,13 @@ Deploys NetBird Management + Signal + Relay on both ns1 and ns2 with PostgreSQL 
 
 ## Architecture
 
-Both ns1 and ns2 run the full NetBird stack behind Traefik (HTTPS). Active-passive DNS on `vpn.<domain>` routes clients to the current primary node.
+Both ns1 and ns2 have the full NetBird stack deployed behind Traefik (HTTPS), but
+`netbird-server` (and `netbird-proxy`) **run only on the current PG primary** —
+the standby's containers are stopped ("fenced", gotcha 149). Signal state is
+per-instance and in-memory; a standby that accepts clients re-opens the
+split-signal trap (gotcha 136). The `pg-role-watchdog` enforces the fence every
+cycle and starts the server fresh on the new primary after failover. Active-passive
+DNS on `vpn.<domain>` routes clients to the current primary node.
 
 - **Database:** PostgreSQL HA (deployed by `postgresql_repmgr` role), multi-host DSN with `target_session_attrs=read-write`
 - **IdP:** Embedded Dex IdP for local authentication. External IdPs (Zitadel, Google, etc.) can be added manually via the dashboard

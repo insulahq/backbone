@@ -1,10 +1,13 @@
 #!/bin/bash
 # NetBird peer wake-up — best-effort tunnel re-negotiation post-failover.
-# Called by pg-role-watchdog AFTER it restarts netbird-server, to nudge
-# external peers' ICE state from our side. NetBird signal-server state is
-# in-memory and lost on every netbird-server restart (gotcha #136 / #148).
+# Called by pg-role-watchdog on PROMOTION only, after enforce_netbird_fence()
+# has started netbird-server fresh on the new primary, to nudge external
+# peers' ICE state from our side. NetBird signal-server state is in-memory
+# and per-instance (gotcha #136 / #148 / #149) — after failover all external
+# peers must re-register with the new primary's signal server.
 # Best-effort — peers behind symmetric NAT or with truly stale signal
-# sessions still need a manual `netbird down/up` on their machine.
+# sessions recover via their netbird-selfheal.timer (~6 min) where installed,
+# or need a manual `netbird down/up` on their machine.
 
 set -euo pipefail
 source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
@@ -38,7 +41,7 @@ sleep 5
 echo "$(date): netbird-peer-wakeup: post-count=$AFTER stale=$STALE_COUNT (${STALE_LIST# })"
 
 if [ "$STALE_COUNT" -gt 0 ]; then
-  platform_alert "warning" "$ALERT_NAME" "$STALE_COUNT NetBird peers stale post-failover:${STALE_LIST} — owners must run 'netbird down && netbird up'"
+  platform_alert "warning" "$ALERT_NAME" "$STALE_COUNT NetBird peers stale post-failover:${STALE_LIST} — guard-equipped peers (netbird-selfheal.timer) recover within ~6 min; others need a manual 'netbird down && netbird up'"
 else
   platform_alert "info" "$ALERT_NAME" "All NetBird peers reachable post-failover (count: $AFTER)"
 fi

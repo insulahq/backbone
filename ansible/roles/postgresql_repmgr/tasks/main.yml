@@ -114,6 +114,30 @@
     dest: /usr/local/bin/netbird-peer-health.sh
     mode: '0755'
 
+# API token unlocks the health checker's management-API mode (authoritative
+# `connected` flag per peer instead of ping-based guessing). Create a PAT via
+# a NetBird service user (dashboard: Team > Service Users) and set
+# `netbird_admin_pat` in group_vars/all.yml. Without it the checker falls
+# back to ping mode.
+- name: Deploy NetBird API token for peer health checks (management-API mode)
+  copy:
+    content: "{{ netbird_admin_pat }}"
+    dest: /etc/netbird-api-token
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+  when: netbird_admin_pat is defined and netbird_admin_pat | length > 0
+
+# Explicitly emptying the var ("netbird_admin_pat: ''") revokes API mode and
+# removes the stale credential file; leaving it undefined leaves any existing
+# file alone.
+- name: Remove NetBird API token when explicitly cleared
+  file:
+    path: /etc/netbird-api-token
+    state: absent
+  when: netbird_admin_pat is defined and netbird_admin_pat | length == 0
+
 - name: Deploy NetBird peer health systemd timer
   template:
     src: netbird-peer-health.timer.j2
