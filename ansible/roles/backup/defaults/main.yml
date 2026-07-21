@@ -5,8 +5,9 @@
 # Set to false to skip backup deployment (e.g., no backup server credentials yet)
 backup_enabled: true
 
-# Restic configuration
-restic_version: "0.16.4"
+# Restic configuration — repo format unchanged since v2 (0.14); 0.17+ adds
+# distinct exit codes (10/11/12) which our rc==0 checks are agnostic to.
+restic_version: "0.19.1"
 restic_install_dir: /usr/local/bin
 restic_config_dir: /etc/restic
 restic_cache_dir: /var/cache/restic

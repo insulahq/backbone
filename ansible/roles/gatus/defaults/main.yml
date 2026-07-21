@@ -6,7 +6,9 @@
 # Both ns1 and ns2 run Gatus — shared database via PostgreSQL replication.
 
 # Version — pin to a tested stable release (gotcha 47)
-gatus_version: "v5.14.0"
+# v5.14.0 → v5.36.0 reviewed 2026-07: no breaking config changes in the
+# release notes; monitoring-only blast radius.
+gatus_version: "v5.36.0"
 gatus_image: "ghcr.io/twin/gatus:{{ gatus_version }}"
 
 # Installation directory

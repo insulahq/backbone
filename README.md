@@ -12,7 +12,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 |-----------|-------------|
 | **WireGuard** | Infrastructure backbone tunnel (zero-dependency private network) |
 | **PowerDNS 5.0** | Authoritative DNS, Native mode (read-write on both nodes), PostgreSQL HA backend |
-| **Traefik 3.6** | Reverse proxy with automatic TLS via DNS-01 ACME, rate limiting |
+| **Traefik 3.7** | Reverse proxy with automatic TLS via DNS-01 ACME, rate limiting |
 | **PostgreSQL 18** | Streaming replication with repmgr 5.5, auto-failover (~60s), split-brain prevention |
 | **NetBird 0.67.0** | WireGuard VPN mesh (management + signal + relay), embedded Dex IdP |
 | **Zitadel** | Central IAM (OIDC/OAuth2) for service authentication |

@@ -3,8 +3,11 @@
 # Deploys a shared Traefik reverse proxy with a public Docker network
 # that other stacks (NetBird, PowerDNS-Admin, etc.) can attach to for TLS termination.
 
-# Version
-traefik_version: "v3.6"
+# Version — floating minor tag (patches auto-applied on pull).
+# v3.7 behavior changes reviewed 2026-07: Host(`*`) catch-all, StripPrefix
+# 400s, BasicAuth empty-user unmount — none of these features are used here
+# (TCP passthrough uses HostSNI, which is unaffected).
+traefik_version: "v3.7"
 
 # Installation directory
 traefik_install_dir: /opt/traefik

@@ -7,13 +7,16 @@
 # PowerDNS-Admin (web UI) runs on ns1 only.
 
 # PowerDNS versions — pin to specific tags
+# 5.0.6 closes security advisories 2026-05, 2026-06 and 2026-07.
+# NOTE: the supported release train moved to 5.1 (image repo pdns-auth-51) —
+# that is a minor-train upgrade to plan separately, not a blind pin bump.
 powerdns_version: "5.0"
-powerdns_image: "powerdns/pdns-auth-50:5.0.3"
-powerdns_admin_version: "0.4.1"
-powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.1"
+powerdns_image: "powerdns/pdns-auth-50:5.0.6"
+powerdns_admin_version: "0.4.2"
+powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.2"
 
-# Nginx proxy
-nginx_image: "nginx:1.27-alpine"
+# Nginx proxy — track the current stable line
+nginx_image: "nginx:1.30-alpine"
 
 # Installation directory
 powerdns_install_dir: /opt/powerdns

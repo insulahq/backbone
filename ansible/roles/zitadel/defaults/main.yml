@@ -6,7 +6,10 @@
 
 # Version — pin to a tested stable release (gotcha 47)
 # CRITICAL: test upgrades in staging first — Zitadel migrations can be breaking
-zitadel_version: "v4.12.3"
+# v4.12.3 → v4.16.1 reviewed 2026-07: same major, release notes show no
+# breaking changes/migration steps. Deploy via rolling-update.yml with a
+# fresh backup — Zitadel runs its DB migrations at startup.
+zitadel_version: "v4.16.1"
 zitadel_image: "ghcr.io/zitadel/zitadel:{{ zitadel_version }}"
 
 # Installation directory

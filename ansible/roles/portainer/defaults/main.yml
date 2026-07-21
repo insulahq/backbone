@@ -5,7 +5,7 @@
 # Accessible via WireGuard (wg0) and NetBird (wt0) only — not publicly exposed.
 
 # Version — pin to a tested stable release (gotcha 47)
-portainer_version: "2.39.0"
+portainer_version: "2.39.5"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
 
 # Installation directory
