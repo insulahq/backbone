@@ -106,7 +106,7 @@ None (standalone role).
 ## Deployment
 
 ```bash
-cd /config/hosting-platform-backbone/ansible
+cd /config/backbone/ansible
 
 # Deploy to all servers
 ansible-playbook site.yml --tags backup

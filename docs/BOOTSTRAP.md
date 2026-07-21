@@ -26,7 +26,7 @@ ansible-galaxy install -r ansible/requirements.yml
 5. Project directory must NOT be world-writable (gotcha #73):
 
 ```bash
-chmod 755 /path/to/hosting-platform-backbone/ansible
+chmod 755 /path/to/backbone/ansible
 ```
 
 ### Installing controller prerequisites

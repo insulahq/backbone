@@ -1,6 +1,8 @@
-# Hosting Platform Backbone
+# Backbone
 
 Provider-agnostic Ansible automation for deploying a fully redundant, self-healing infrastructure backbone on two geographically separated servers.
+
+Project home: https://github.com/insulahq/backbone (formerly `hosting-platform-backbone`)
 
 ## What It Deploys
 
