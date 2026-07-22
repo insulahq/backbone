@@ -23,7 +23,10 @@ backup_sftp_path: backups
 backup_sftp_port: 22  # Override to 23 for Hetzner Storage Box
 
 # SSH key for SFTP backup server access
-restic_ssh_key_src: "~/hosting-platform.key"      # path on control machine
+# Kept inside .generated_secrets so the repo folder is fully self-contained
+# for disaster recovery (2026-07-22 full-loss audit); ~/hosting-platform.key
+# remains a copy for interactive bootstrap use.
+restic_ssh_key_src: "{{ playbook_dir }}/.generated_secrets/hosting-platform.key"
 restic_ssh_key_path: /etc/restic/hosting-platform.key  # deployed path on servers
 
 # --- S3 backend settings ---
