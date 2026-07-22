@@ -29,8 +29,11 @@ netbird_selfheal_interval: "2min"    # timer cadence
 netbird_selfheal_fail_threshold: 3   # consecutive failed checks before restart (~6 min)
 netbird_selfheal_cooldown_secs: 900  # min seconds between restarts (flap guard)
 
-# Minimum client version — older clients have engine bugs where signal
-# reconnection silently fails after failover (the "dangling client" class).
-# When set (e.g. "0.67.0"), peers below it are upgraded from the NetBird apt
-# repo. Empty = disabled.
+# Minimum client version — keeps clients current for relay/lazy-connection
+# fixes and security patches. NOTE (2026-07-22): a version floor does NOT
+# prevent the management-reconnect wedge — a 0.74.7 (current) client was
+# observed wedging permanently after a 90s endpoint outage, same as older
+# ones. The self-heal guard above is the effective protection; this floor
+# is hygiene. When set (e.g. "0.74.7"), peers below it are upgraded from
+# the NetBird apt repo. Empty = disabled.
 netbird_peer_min_version: ""

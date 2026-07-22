@@ -124,9 +124,10 @@ netbird_peer_dns_domain: "netbird.vpn"
 # netbird_admin_pat: "<PAT from NetBird dashboard service user>"
 
 # Minimum NetBird client version enforced by the netbird_peer role — peers
-# below it are upgraded from the NetBird apt repo. Old clients are the main
-# "dangling peer after failover" source (gotcha 148). Empty = disabled.
-# netbird_peer_min_version: "0.67.0"
+# below it are upgraded from the NetBird apt repo. Hygiene only: the
+# management-reconnect wedge (gotcha 148) is version-independent (observed
+# on a current 0.74.7 client) — the self-heal guard is the effective fix.
+# netbird_peer_min_version: "0.74.7"
 
 # ============================================================================
 # Gatus Monitoring (HA status dashboard + alert receiver)
