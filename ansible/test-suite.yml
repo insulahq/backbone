@@ -1073,7 +1073,6 @@
     - name: "Failover | Record result — surviving node HTTPS"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'Surviving node serves HTTPS after Traefik stop on ' + _test_node, 'host': 'cluster', 'passed': _t_fo_https is success}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Restart Traefik on {{ _test_node }}"
@@ -1107,7 +1106,6 @@
     - name: "Failover | Record result — Traefik recovery"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'Traefik recovered on ' + _test_node, 'host': 'cluster', 'passed': _t_fo_recovery is success}] }}"
-      run_once: true
       tags: [failover, never]
 
     # --- PostgreSQL failover: stop primary, verify standby promotes ---
@@ -1234,7 +1232,6 @@
     - name: "Failover | Record result — DNS points to surviving node"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS switched to surviving node after PG failover', 'host': 'cluster', 'passed': hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_switch.stdout | default(''))}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Verify DNS still points to surviving node after cluster rejoin"
@@ -1251,7 +1248,6 @@
     - name: "Failover | Record result — DNS stays on surviving node (active-passive)"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS points to surviving node after rejoin (active-passive, IP: ' + (_t_fo_dns_after_rejoin.stdout | default('') | trim) + ')', 'host': 'cluster', 'passed': hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_after_rejoin.stdout | default('')) and (_t_fo_dns_after_rejoin.stdout_lines | default([]) | length) == 1}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Verify pgproxy write via surviving node after PG failover"
@@ -1463,7 +1459,6 @@
     - name: "Failover | Record result — NetBird on surviving node"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'NetBird API responds on surviving node', 'host': 'cluster', 'passed': _t_fo_netbird.status | default(0) in [200, 401, 403]}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Verify Zitadel on surviving node (direct IP)"
@@ -1488,7 +1483,6 @@
     - name: "Failover | Record result — Zitadel on surviving node"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy on surviving node', 'host': 'cluster', 'passed': _t_fo_zitadel.status | default(0) == 200}] }}"
-      run_once: true
       tags: [failover, never]
 
     # --- Full node outage: stop all services on test node, verify platform ---
@@ -1528,7 +1522,6 @@
     - name: "Failover | Record result — DNS during full outage"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS resolves during full node outage', 'host': 'cluster', 'passed': _t_fo_full_dns.stdout | default('') | length > 0}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Verify PostgreSQL accessible during full node outage"
@@ -1548,7 +1541,6 @@
     - name: "Failover | Record result — PostgreSQL during full outage"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'PostgreSQL accessible during full node outage', 'host': 'cluster', 'passed': _t_fo_full_pg.rc | default(1) == 0}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | FULL NODE RECOVERY — restarting all services on {{ _test_node }}"
@@ -1600,7 +1592,6 @@
     - name: "Failover | Record result — DNS active-passive after recovery"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS single-IP after recovery (active-passive)', 'host': 'cluster', 'passed': (_t_fo_full_recovery_dns.stdout_lines | default([]) | length) == 1}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Verify Zitadel healthy on recovered node"
@@ -1662,7 +1653,6 @@
     - name: "Failover | Record result — Zitadel recovery"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'Zitadel healthy on recovered node', 'host': 'cluster', 'passed': _t_fo_recovery_zitadel is success}] }}"
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Record result — NetBird recovery (fencing-aware)"
@@ -1673,7 +1663,6 @@
               'passed': (_t_fo_recovery_nb_fence.container.State.Status | default('')) != 'running'},
              {'name': 'NetBird API healthy via primary after recovery', 'host': 'cluster',
               'passed': _t_fo_recovery_netbird is success}] }}
-      run_once: true
       tags: [failover, never]
 
     # --- OpenZiti failover: verify router reconnects to surviving node ---
@@ -1695,7 +1684,6 @@
     - name: "Failover | Record result — OpenZiti router on surviving node"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'OpenZiti router healthy on surviving node', 'host': 'cluster', 'passed': (_t_fo_ziti_router.container.State.Health.Status | default('')) == 'healthy'}] }}"
-      run_once: true
       when: openziti_enabled | default(false) | bool
       tags: [failover, never]
 
@@ -1718,7 +1706,6 @@
     - name: "Failover | Record result — OpenZiti Edge API after recovery"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'OpenZiti Edge API available (at least one node)', 'host': 'cluster', 'passed': _t_fo_ziti_api.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'eq', 200) | list | length > 0}] }}"
-      run_once: true
       when: openziti_enabled | default(false) | bool
       tags: [failover, never]
 
@@ -1740,7 +1727,6 @@
     - name: "Failover | Record result — OpenZiti recovery"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'OpenZiti router healthy on recovered node', 'host': 'cluster', 'passed': (_t_fo_ziti_recovery.container.State.Health.Status | default('')) == 'healthy'}] }}"
-      run_once: true
       when: openziti_enabled | default(false) | bool
       tags: [failover, never]
 
