@@ -55,7 +55,11 @@ COOLDOWN_SECS=${COOLDOWN_SECS}
 log() { echo "\$(date): \$1"; logger -t netbird-selfheal "\$1" 2>/dev/null || true; }
 
 systemctl is-active netbird >/dev/null 2>&1 || exit 0
-[ -f /etc/netbird/config.json ] || exit 0
+# Enrollment check across client config layouts (pre-profiles and 0.7x
+# profile-based) — a wrong path silently no-ops the whole guard.
+{ [ -f /etc/netbird/config.json ] \
+  || [ -f /var/lib/netbird/default.json ] \
+  || [ -f /var/lib/netbird/config.json ]; } || exit 0
 
 STATUS_OUT=\$(timeout 15 netbird status 2>/dev/null || true)
 HEALTHY=false

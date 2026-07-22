@@ -84,10 +84,14 @@
     timeout: 30
   ignore_errors: true
 
+# Config location varies by client generation (pre-profiles config.json,
+# 0.7x profile-based default.json) — a single stat path here made every
+# peer look unenrolled (gotcha 152).
 - name: Check if NetBird is already enrolled
-  stat:
-    path: "{{ netbird_config_dir }}/config.json"
-  register: netbird_config
+  shell: '[ -f {{ netbird_config_dir }}/config.json ] || [ -f /var/lib/netbird/default.json ] || [ -f /var/lib/netbird/config.json ]'
+  register: _nb_enrolled
+  changed_when: false
+  failed_when: false
 
 # Auto-enroll when a setup key is provided (recovery / node-replacement drills).
 # Skips silently if already enrolled OR if no key is configured — manual
@@ -106,7 +110,7 @@
       - --hostname
       - "{{ netbird_peer_hostname }}"
   when:
-    - not netbird_config.stat.exists
+    - _nb_enrolled.rc != 0
     - netbird_setup_key is defined
     - netbird_setup_key | length > 0
   register: _netbird_enroll
@@ -132,7 +136,7 @@
       - "  Windows: powershell -ExecutionPolicy Bypass -File netbird-selfheal-install.ps1"
       - "  Docker:  netbird-selfheal-docker.sh (cron) or netbird-selfheal-compose.example.yml"
   when:
-    - not netbird_config.stat.exists
+    - _nb_enrolled.rc != 0
     - netbird_setup_key is not defined or netbird_setup_key | length == 0
 
 # Signal server failback guard — hourly check that restarts the peer client
@@ -212,9 +216,9 @@
   register: netbird_status
   changed_when: false
   failed_when: false
-  when: netbird_config.stat.exists
+  when: _nb_enrolled.rc == 0
 
 - name: Show peer status
   debug:
     msg: "{{ netbird_status.stdout_lines }}"
-  when: netbird_config.stat.exists and netbird_status.stdout_lines is defined
+  when: _nb_enrolled.rc == 0 and netbird_status.stdout_lines is defined

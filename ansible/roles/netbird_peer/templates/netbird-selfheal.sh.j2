@@ -29,7 +29,13 @@ log() { echo "$(date): $1"; logger -t netbird-selfheal "$1" 2>/dev/null || true;
 
 # Daemon not running or peer not enrolled — nothing to guard
 systemctl is-active netbird >/dev/null 2>&1 || exit 0
-[ -f "{{ netbird_config_dir }}/config.json" ] || exit 0
+# Enrollment check — config location varies by client generation:
+# pre-profiles /etc/netbird/config.json, profile-based (0.7x)
+# /var/lib/netbird/default.json. A wrong path here silently no-ops the
+# entire guard (gotcha 152) — match all known layouts.
+{ [ -f "{{ netbird_config_dir }}/config.json" ] \
+  || [ -f /var/lib/netbird/default.json ] \
+  || [ -f /var/lib/netbird/config.json ]; } || exit 0
 
 # Plain-text status parse — stable across client versions and needs no
 # extra tooling. A hung daemon (status times out / empty output) counts as
