@@ -125,6 +125,13 @@ unexpected-HTTP-status response as a transport-level failure.
    Validated: the exact stimulus that pinned the client permanently
    (experiment B) causes only transient errors + ~30s recovery once
    connections are closed instead of answered.
+   IMPORTANT: routing-level measures only govern NEW dials — most proxies
+   (incl. Traefik) never terminate EXISTING h2 connections on router
+   changes, so already-connected clients stay pinned through any failover.
+   The complete proxy-side answer includes killing established :443
+   connections after a topology change (for containerized proxies, inside
+   the container netns: `nsenter -t <pid> -n ss -K 'sport = :443'`) —
+   in our deployment this recovered six pinned peers in under a minute.
 
 ---
 *Internal references: repro harness `/var/tmp/wedge-test{,4}.sh` on ns2,

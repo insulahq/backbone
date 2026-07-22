@@ -268,13 +268,10 @@ if $PGPROXY_NEEDS_UPDATE; then
     echo "$(date): WARNING — one or more service restarts failed after PG role change"
   fi
 
-  # 4. Restart NetBird peer client — forces reconnection to the current primary's signal
-  #    server. Without this, the peer holds a stale gRPC connection (gotcha 136).
-  #    ONLY runs when the role actually transitioned — not on every DNS-retry cycle.
-  if systemctl is-active netbird &>/dev/null; then
-    echo "$(date): Restarting NetBird peer client (force signal server reconnection)"
-    systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
-  fi
+  # 4. (moved) The local NetBird peer client restart now happens at the END of
+  #    the script, after the fence pass — restarting it here gave it a fresh
+  #    channel that dialed straight into the mid-transition window and pinned
+  #    (gotcha 150, observed on both nodes during the 2026-07-22 failback).
 
   # 5. Wait for PowerDNS to be healthy (needed for DNS switch API call)
   for _i in $(seq 1 12); do
@@ -301,6 +298,33 @@ fi
 # Post-cascade fence pass — on promotion this is where netbird-server starts
 # (pgproxy now routes to the local primary, so its pools connect cleanly).
 enforce_netbird_fence
+
+# Kill established client TLS connections in Traefik's netns after a role
+# transition. Traefik NEVER terminates existing h2 connections when routers
+# change, and our gRPC-friendly idleTimeout=0 keeps them alive forever — so
+# clients stay pinned to the pre-transition router set no matter what the
+# sentinel/fence does to NEW dials (gotcha 150: observed five peers sending
+# 6.7k requests/30min of 404s to the demoted node an HOUR after failback).
+# Fresh dials meet the correct router set on whichever node DNS names.
+# NOTE: must run inside the container netns — host ss cannot see (or kill)
+# bridge-networked container sockets.
+if $PGPROXY_NEEDS_UPDATE; then
+  TRAEFIK_PID=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
+  if [ -n "$TRAEFIK_PID" ] && [ "$TRAEFIK_PID" != "0" ]; then
+    _CONNS=$(nsenter -t "$TRAEFIK_PID" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
+    nsenter -t "$TRAEFIK_PID" -n ss -K 'sport = :443' >/dev/null 2>&1 || true
+    echo "$(date): Killed ${_CONNS:-0} established :443 connections in Traefik netns (post-transition unpin)"
+  fi
+fi
+
+# Restart the local NetBird peer client AFTER the fence pass and the conn
+# kill, so its fresh management channel dials into a settled topology
+# (primary serving, standby closing) instead of the mid-transition window
+# (gotchas 136/150). Only on actual role transitions.
+if $PGPROXY_NEEDS_UPDATE && systemctl is-active netbird &>/dev/null; then
+  echo "$(date): Restarting NetBird peer client (post-fence, force clean reconnection)"
+  systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
+fi
 
 # External customer peers can hold stale signal sessions from the old
 # primary. Fire the background wake-up (60s grace, then pings each peer's
