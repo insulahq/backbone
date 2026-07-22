@@ -59,6 +59,11 @@ services:
       # HTTP rules and TLS termination wins — observed live).
       - traefik.tcp.routers.netbird-fence.priority=10000
       - traefik.tcp.services.netbird-fence.loadbalancer.server.port=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
 
   # Combined server: Management + Signal + Relay + STUN
   netbird-server:
