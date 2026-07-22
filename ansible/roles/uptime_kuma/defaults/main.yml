@@ -9,7 +9,9 @@
 uptime_kuma_enabled: false
 
 # Version
-uptime_kuma_version: "1"
+# v2 line (2.4.0 era). Not deployed anywhere yet (opt-in) — a future first
+# deploy starts directly on v2, avoiding the one-way v1->v2 DB migration.
+uptime_kuma_version: "2"
 uptime_kuma_image: "louislam/uptime-kuma:{{ uptime_kuma_version }}"
 
 # Installation

@@ -63,7 +63,12 @@ services:
     command: ["--config", "/etc/netbird/config.yaml"]
     labels:
       - traefik.enable=true
-      # gRPC router (h2c backend required for HTTP/2 cleartext)
+      # gRPC router (h2c backend required for HTTP/2 cleartext).
+      # 0.74 combined server: ALL services stay multiplexed on :80; the mux
+      # dispatches gRPC by ProtoMajor==2 + Content-Type application/grpc
+      # (path-agnostic), so both management and signal route here.
+      # (:33073 is NOT the management listener — verified against
+      # combined/cmd/root.go @ v0.74.7.)
       - traefik.http.routers.netbird-grpc.rule=Host(`{{ netbird_dashboard_domain }}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`))
       - traefik.http.routers.netbird-grpc.entrypoints=websecure
       - traefik.http.routers.netbird-grpc.tls=true

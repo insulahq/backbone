@@ -11,7 +11,9 @@
 netbird_proxy_enabled: true
 
 # Pinned to the same minor as netbird-server. Both are released as a set.
-netbird_proxy_image: "netbirdio/reverse-proxy:{{ netbird_proxy_version | default(netbird_server_version | default('0.69.0')) }}"
+# Fallback must track netbird_server_version (0.73.x showed proxy/server
+# version skew breaks the proxy) — keep in sync on every server bump.
+netbird_proxy_image: "netbirdio/reverse-proxy:{{ netbird_proxy_version | default(netbird_server_version | default('0.74.7')) }}"
 
 # DNS apex under which exposed services live (e.g. dummy.proxy.example.com).
 # A wildcard A/AAAA record is created in PowerDNS pointing at the active node.

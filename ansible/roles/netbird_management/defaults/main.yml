@@ -8,8 +8,13 @@
 
 # NetBird versions -- combined server architecture (0.66+)
 # Pin to specific versions to prevent breakage on deploy
-netbird_server_version: "0.67.0"
-netbird_dashboard_version: "v2.35.0"
+# 0.67.0 -> 0.74.7 (2026-07-22). Gap review: 0.70.x peer-list visibility
+# regression (role=user), 0.73.x reverse-proxy breakage (mitigated by
+# pinning the proxy to the same version), 0.74.0 enabled lazy connections
+# by default (routing-peer issues; fixed/patched through 0.74.x — if mesh
+# problems appear, disable via Dashboard > Settings > Clients > Lazy).
+netbird_server_version: "0.74.7"
+netbird_dashboard_version: "v2.90.5"
 
 # Deployment directory
 netbird_install_dir: /opt/netbird
