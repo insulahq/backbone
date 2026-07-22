@@ -1,0 +1,22 @@
+# Gitleaks configuration — extends the default ruleset.
+#
+# The commit allowlist below covers 18 historical false positives from
+# March 2026 documentation (since deleted): example curl auth headers
+# ("X-API-Key: YOUR_API_KEY"), placeholder webhook secrets
+# ("whsec_abc123xyz") and fabricated sample passwords in API spec docs.
+# Verified 2026-07-22: every flagged value is a placeholder, no real
+# credential ever landed in history — allowlisting the commits rather
+# than rewriting pushed history.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Historical doc-example false positives (verified placeholders)"
+commits = [
+  "2fa6e64b6d65bcbd761271e13b90a52ba679748f",
+  "66795916dbf65b4eaabcf2b9899ff295c72dd308",
+  "d1abfd79f3434863a8e7098ec2973301ba5ddf86",
+  "e58ef060b425e800761c403a60123f46a41c0012",
+  "26c85b66db5dbac13613094e62b73225e91da489",
+]
