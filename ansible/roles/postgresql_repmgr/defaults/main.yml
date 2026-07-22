@@ -71,6 +71,12 @@ postgresql_max_slot_wal_keep_size: "10GB"   # Cap WAL retained by replication sl
                                             # is offline. Standby must re-clone if it falls
                                             # behind this limit.
 
+# Connection limit — the default 100 was exhausted in production (2026-07-21:
+# 2x zitadel pools + pdnsadmin + netbird + pdns + gatus hit 100/100 during the
+# Zitadel v4.16 rollout, starving PowerDNS). Applied to existing clusters by
+# appending to postgresql.conf (restart-required, staged on both nodes).
+postgresql_max_connections: 200
+
 # Memory tuning (safe defaults for 4-8GB servers)
 postgresql_shared_buffers: "256MB"          # Shared memory (default 128MB)
 postgresql_work_mem: "8MB"                  # Per-sort/hash memory (default 4MB)

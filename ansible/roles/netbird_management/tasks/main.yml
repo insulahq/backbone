@@ -105,6 +105,23 @@
   when: inventory_hostname == (postgresql_primary_node | default('ns1'))
   tags: [netbird, netbird_management]
 
+# Fencing awareness (gotcha 149): on the PG standby the watchdog stops
+# netbird-server within ~30s of `compose up`, so waiting on the LOCAL API
+# there races the fence and loses (Traefik drops the route, the dashboard
+# SPA answers 404). Detect the role once; bootstrap (PG absent/unknown)
+# counts as NOT standby so first installs still wait normally.
+- name: Detect PostgreSQL role for fencing-aware checks
+  shell: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "unknown"
+  register: _nb_pg_role
+  changed_when: false
+  failed_when: false
+  tags: [netbird, netbird_management]
+
+- name: Set fencing-awareness fact
+  set_fact:
+    _nb_pg_standby: "{{ (_nb_pg_role.stdout | default('') | trim) == 't' }}"
+  tags: [netbird, netbird_management]
+
 - name: Wait for NetBird API to be ready
   uri:
     # Use the server's public IP with Host header to bypass DNS dependency —
@@ -118,6 +135,8 @@
   delay: 3
   register: result
   until: result.status == 200
+  # Standby is fenced (gotcha 149) — its local API is intentionally down.
+  when: not _nb_pg_standby
 
 # Auto-detect valid TLS certs — if Let's Encrypt issued a cert, enable validation
 # for all subsequent API calls in this run. Avoids forgetting to flip the variable.

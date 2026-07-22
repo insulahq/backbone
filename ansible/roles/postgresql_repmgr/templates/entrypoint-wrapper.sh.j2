@@ -441,6 +441,10 @@ min_wal_size = '{{ postgresql_min_wal_size }}'
 # Standby must re-clone if it falls behind this limit.
 max_slot_wal_keep_size = '{{ postgresql_max_slot_wal_keep_size }}'
 
+# Connection limit — default 100 proved too small for the consumer fleet
+# (2x zitadel + pdnsadmin + netbird + pdns + gatus), see role defaults.
+max_connections = {{ postgresql_max_connections }}
+
 # Memory tuning
 shared_buffers = '{{ postgresql_shared_buffers }}'
 work_mem = '{{ postgresql_work_mem }}'

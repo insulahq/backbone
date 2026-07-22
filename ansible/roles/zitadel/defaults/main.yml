@@ -42,8 +42,11 @@ zitadel_admin_email: "admin@{{ platform_domain }}"
 zitadel_log_level: "info"
 
 # PostgreSQL connection pool
-zitadel_db_max_open_conns: 25
-zitadel_db_max_idle_conns: 10
+# Reduced 25/10 → 12/4 (2026-07-21): two instances at 25 each consumed 51 of
+# PG's 100 connection slots and starved PowerDNS during the v4.16 rollout.
+# This IAM serves platform-internal logins only — 12 per instance is ample.
+zitadel_db_max_open_conns: 12
+zitadel_db_max_idle_conns: 4
 zitadel_db_max_conn_lifetime: "1h"
 zitadel_db_max_conn_idle_time: "5m"
 
