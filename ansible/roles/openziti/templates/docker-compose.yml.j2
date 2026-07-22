@@ -20,6 +20,12 @@ services:
     volumes:
       - {{ openziti_install_dir }}/pki:/openziti/pki:ro
       - {{ openziti_controller_dir }}:/openziti/controller
+    # The >=1.5 image entrypoint runs a PKI bootstrap (default CA name
+    # "intermediate") BEFORE exec'ing the CLI. Our PKI is pre-provisioned as
+    # "intermediate-ca" and mounted read-only, so the bootstrap fails and the
+    # controller exits before ever reading controller.yaml. Bypass the
+    # entrypoint and exec the CLI directly (matches the 1.4-era behavior).
+    entrypoint: ["ziti", "controller"]
     command: ["run", "/openziti/controller/controller.yaml"]
     mem_limit: 512m
     memswap_limit: 512m

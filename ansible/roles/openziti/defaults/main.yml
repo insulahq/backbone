@@ -11,7 +11,10 @@
 openziti_enabled: false
 
 # Version pins
-openziti_version: "1.4.1"
+# 1.4.1 -> 1.6.17 (2026-07-22): latest 1.x line; breaking changes begin in
+# the 1.7 line / 2.0 (deprecated-feature removals) — hold at 1.6.x until the
+# 2.0 upgrade is planned. Controller upgrades before routers (play order).
+openziti_version: "1.6.17"
 openziti_controller_image: "openziti/ziti-controller:{{ openziti_version }}"
 openziti_router_image: "openziti/ziti-router:{{ openziti_version }}"
 openziti_cli_image: "openziti/ziti-cli:{{ openziti_version }}"
