@@ -127,17 +127,38 @@ fi
 # unless-stopped` keeps a fenced container stopped across reboots, so
 # promotion MUST re-start it here — nothing else will.
 enforce_netbird_fence() {
-  local nb_state proxy_state
-  # Inspect BOTH containers independently — the roles are separately taggable,
+  local nb_state proxy_state fence_state
+  # Inspect the containers independently — the roles are separately taggable,
   # so netbird-proxy can exist on a node without netbird-server (or vice
   # versa) after a partial --tags/--limit run. Neither may run on the standby.
   nb_state=$(docker inspect netbird-server --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
   proxy_state=$(docker inspect netbird-proxy --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
-  if [ "$nb_state" = "missing" ] && [ "$proxy_state" = "missing" ]; then
+  # netbird-fence sentinel (gotcha 150) — runs INVERSELY to netbird-server:
+  # on the standby its TCP-passthrough-to-dead-port Traefik router closes
+  # vpn-domain connections mid-TLS-handshake (a transport error gRPC clients
+  # retry through) instead of letting the dashboard answer a valid-TLS 404
+  # that pins management channels permanently.
+  fence_state=$(docker inspect netbird-fence --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+  if [ "$nb_state" = "missing" ] && [ "$proxy_state" = "missing" ] && [ "$fence_state" = "missing" ]; then
     return 0  # NetBird not deployed on this node
   fi
 
   if [ "$PG_ROLE" = "t" ]; then
+    # ORDER (gotcha 150): the sentinel's TCP passthrough only wins the vpn
+    # SNI once NO HTTP router claims it (TLS termination beats passthrough
+    # while any Host-matching HTTP router lives — observed). Sequence so no
+    # 404 surface is ever exposed: sentinel up (inert while contested) ->
+    # dashboard down (server still serves mgmt correctly) -> proxy down ->
+    # server down LAST (its routers vanish -> sentinel takes the SNI).
+    if [ "$fence_state" != "missing" ] && [ "$fence_state" != "running" ]; then
+      echo "$(date): NetBird fence — standby role, starting fence sentinel"
+      docker start netbird-fence 2>&1 || echo "$(date): WARNING — netbird-fence start failed"
+    fi
+    dash_state=$(docker inspect netbird-dashboard --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+    if [ "$dash_state" = "running" ] || [ "$dash_state" = "restarting" ]; then
+      echo "$(date): NetBird fence — standby role, stopping netbird-dashboard"
+      docker stop --time 5 netbird-dashboard 2>&1 || echo "$(date): WARNING — netbird-dashboard stop failed"
+    fi
     if [ "$proxy_state" = "running" ] || [ "$proxy_state" = "restarting" ]; then
       echo "$(date): NetBird fence — standby role, stopping netbird-proxy"
       docker stop --time 5 netbird-proxy 2>&1 || echo "$(date): WARNING — netbird-proxy stop failed"
@@ -164,6 +185,18 @@ enforce_netbird_fence() {
     if [ "$proxy_state" != "missing" ] && [ "$proxy_state" != "running" ] && [ "$nb_state" = "running" ]; then
       echo "$(date): NetBird fence — primary role, starting netbird-proxy"
       docker start netbird-proxy 2>&1 || echo "$(date): WARNING — netbird-proxy start failed"
+    fi
+    dash_state=$(docker inspect netbird-dashboard --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+    if [ "$dash_state" != "missing" ] && [ "$dash_state" != "running" ] && [ "$nb_state" = "running" ]; then
+      echo "$(date): NetBird fence — primary role, starting netbird-dashboard"
+      docker start netbird-dashboard 2>&1 || echo "$(date): WARNING — netbird-dashboard start failed"
+    fi
+    # Sentinel down LAST, once netbird-server is up. While both run, the
+    # server's HTTP routers win the SNI (TLS termination beats passthrough),
+    # so mgmt is served even before the sentinel stops — no gap either way.
+    if [ "$fence_state" = "running" ] && [ "$nb_state" = "running" ]; then
+      echo "$(date): NetBird fence — primary role, stopping fence sentinel"
+      docker stop --time 2 netbird-fence 2>&1 || echo "$(date): WARNING — netbird-fence stop failed"
     fi
   fi
   return 0

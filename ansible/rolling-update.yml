@@ -97,14 +97,18 @@
     # pg-role-watchdog during the health checks below. netbird-proxy is not
     # part of _service_dirs (never recreated by rolling updates) — stopping it
     # too is a defensive no-op when it isn't running.
-    - name: "Fence | Stop netbird-server + netbird-proxy on standby"
+    - name: "Fence | Re-place netbird fencing after recreate (gotcha 149/150)"
       shell: |
-        docker stop --time 5 netbird-proxy >/dev/null 2>&1 || true
-        docker stop --time 5 netbird-server >/dev/null 2>&1 || true
+        if [ "{{ 'primary' if _is_primary else 'standby' }}" = "primary" ]; then
+          docker stop --time 2 netbird-fence >/dev/null 2>&1 || true
+        else
+          docker start netbird-fence >/dev/null 2>&1 || true
+          docker stop --time 5 netbird-dashboard >/dev/null 2>&1 || true
+          docker stop --time 5 netbird-proxy >/dev/null 2>&1 || true
+          docker stop --time 5 netbird-server >/dev/null 2>&1 || true
+        fi
       changed_when: true
-      when:
-        - not _is_primary
-        - "'netbird' in _update_services"
+      when: "'netbird' in _update_services"
       tags: [rolling-update]
 
     # --- Step 3: Health checks ---

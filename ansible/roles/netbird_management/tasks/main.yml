@@ -105,6 +105,15 @@
   when: inventory_hostname == (postgresql_primary_node | default('ns1'))
   tags: [netbird, netbird_management]
 
+# The compose start above also starts the netbird-fence sentinel on BOTH
+# nodes; on the primary its TCP passthrough router would hijack the vpn
+# domain. Stop it immediately everywhere — the fence logic below (and the
+# watchdog every 30s) starts it back up on the standby only.
+- name: Park fence sentinel until fencing places it (gotcha 150)
+  shell: docker stop --time 2 netbird-fence >/dev/null 2>&1 || true
+  changed_when: false
+  tags: [netbird, netbird_management]
+
 # Fencing awareness (gotcha 149): on the PG standby the watchdog stops
 # netbird-server within ~30s of `compose up`, so waiting on the LOCAL API
 # there races the fence and loses (Traefik drops the route, the dashboard
@@ -319,6 +328,12 @@
   shell: |
     ROLE=$(docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "unknown")
     if [ "$ROLE" = "t" ]; then
+      # Gotcha 150 ordering: sentinel up (inert while contested) ->
+      # dashboard down -> proxy down -> server down LAST, so the vpn SNI
+      # passes from the real server directly to the sentinel with no
+      # 404-answering window in between.
+      docker start netbird-fence >/dev/null 2>&1 || true
+      docker stop --time 5 netbird-dashboard >/dev/null 2>&1 || true
       docker stop --time 5 netbird-proxy >/dev/null 2>&1 || true
       if docker stop --time 5 netbird-server >/dev/null 2>&1; then
         echo "FENCED"

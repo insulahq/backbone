@@ -108,11 +108,23 @@ connection (`ClientConn.Close()` + rebuild, or `ResetConnectBackoff` +
 enter idle) so the channel re-resolves and redials. Alternatively treat an
 unexpected-HTTP-status response as a transport-level failure.
 
-## Workaround for other self-hosted users
+## Workarounds for other self-hosted users
 
-A watchdog that restarts the engine when management stays disconnected
-(`netbird status` parsing + `netbird down && up`, cooldown-guarded) — we
-ship one as a systemd timer / scheduled task / container healthcheck.
+1. Client-side: a watchdog that restarts the engine when management stays
+   disconnected (`netbird status` parsing + `netbird down && up`,
+   cooldown-guarded) — we ship one as a systemd timer / scheduled task /
+   container healthcheck.
+2. Proxy-side: make any node that cannot serve management **close**
+   vpn-domain connections instead of answering them. With Traefik we run a
+   sentinel container on the passive node whose labels define a TCP router
+   (`HostSNI(vpn domain)`, `tls.passthrough: true`) to a dead port —
+   connections fail mid-TLS-handshake, which the client handles correctly
+   (retries + re-resolves). Note: TLS termination wins over passthrough
+   while any Host-matching HTTP router exists for that SNI, so the passive
+   node must not keep e.g. a dashboard router alive on the same hostname.
+   Validated: the exact stimulus that pinned the client permanently
+   (experiment B) causes only transient errors + ~30s recovery once
+   connections are closed instead of answered.
 
 ---
 *Internal references: repro harness `/var/tmp/wedge-test{,4}.sh` on ns2,

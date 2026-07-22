@@ -369,6 +369,48 @@
                         == (inventory_hostname == _pg_primary)}] }}
       tags: [netbird]
 
+    # Fence sentinel (gotcha 150): runs INVERSELY to netbird-server — its TCP
+    # passthrough router closes vpn-domain connections on the standby so
+    # stale-DNS clients get a retryable transport error instead of a
+    # channel-pinning dashboard 404.
+    - name: "NetBird | Fence sentinel state (inverse fencing)"
+      community.docker.docker_container_info:
+        name: netbird-fence
+      register: _t_nb_sentinel
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — fence sentinel placement"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'netbird-fence sentinel ('
+              + ('stopped on primary' if inventory_hostname == _pg_primary else 'running on standby') + ')',
+              'host': inventory_hostname,
+              'passed': ((_t_nb_sentinel.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname != _pg_primary)}] }}
+      tags: [netbird]
+
+    # Functional check of the same: the vpn domain served locally must answer
+    # on the primary and be CLOSED (TLS-level) on the standby.
+    - name: "NetBird | vpn-domain behavior on this node"
+      shell: |
+        curl -sk -o /dev/null -w '%{http_code}' --max-time 6 \
+          --resolve {{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}:443:127.0.0.1 \
+          "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/" || echo CLOSED
+      register: _t_nb_vpn_local
+      changed_when: false
+      ignore_errors: true
+      tags: [netbird]
+
+    - name: "NetBird | Record result — vpn-domain served/closed by role"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'vpn domain ' + ('served on primary' if inventory_hostname == _pg_primary else 'closed on standby'),
+              'host': inventory_hostname,
+              'passed': (inventory_hostname == _pg_primary and (_t_nb_vpn_local.stdout | default('') | trim) in ['200', '301', '302', '308'])
+                        or (inventory_hostname != _pg_primary and 'CLOSED' in (_t_nb_vpn_local.stdout | default('')))}] }}
+      tags: [netbird]
+
     - name: "NetBird | Cross-node mesh connectivity (ping peer)"
       command: "ping -c 2 -W 3 {{ _peer_wireguard_ip }}"
       register: _t_nb_ping
@@ -1320,6 +1362,28 @@
               'passed': ((_t_fo_nbproxy_fence.container.State.Status | default('')) == 'running')
                         == (inventory_hostname == _surviving_node)}] }}
       when: netbird_proxy_enabled | default(true) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Wait for fence sentinel to settle post-failover (gotcha 150)"
+      community.docker.docker_container_info:
+        name: netbird-fence
+      register: _t_fo_nb_sentinel
+      retries: 12
+      delay: 5
+      until: >-
+        ((_t_fo_nb_sentinel.container.State.Status | default('')) == 'running')
+        == (inventory_hostname != _surviving_node)
+      ignore_errors: true
+      tags: [failover, never]
+
+    - name: "Failover | Record result — fence sentinel post-failover"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'Fence sentinel post-failover: '
+              + ('stopped' if inventory_hostname == _surviving_node else 'running') + ' on ' + inventory_hostname,
+              'host': 'cluster',
+              'passed': ((_t_fo_nb_sentinel.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname != _surviving_node)}] }}
       tags: [failover, never]
 
     # pgproxy child-kill regression guard: after retargeting, no orphaned

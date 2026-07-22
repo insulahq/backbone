@@ -32,6 +32,34 @@ services:
         max-size: "100m"
         max-file: "2"
 
+  # Fence sentinel — runs ONLY on the PG standby (inverse of netbird-server,
+  # watchdog-managed, gotcha 150). Its labels install a TCP passthrough
+  # router for the vpn domain pointing at a dead port: Traefik accepts the
+  # TCP connection, fails to dial the backend, and closes the client
+  # connection BEFORE the TLS handshake completes. gRPC clients see a
+  # transport error (Unavailable) -> they re-resolve DNS and retry until
+  # they land on the primary. Without this, a stale-DNS client reaching the
+  # fenced standby gets a valid-TLS HTTP 404 (dashboard route) and its
+  # management channel pins to that live transport PERMANENTLY.
+  # restart "no": only the pg-role-watchdog decides where this runs.
+  netbird-fence:
+    image: busybox:stable
+    container_name: netbird-fence
+    restart: "no"
+    command: ["sleep", "infinity"]
+    networks:
+      - traefik_public
+    labels:
+      - traefik.enable=true
+      - traefik.tcp.routers.netbird-fence.rule=HostSNI(`{{ netbird_dashboard_domain }}`)
+      - traefik.tcp.routers.netbird-fence.entrypoints=websecure
+      - traefik.tcp.routers.netbird-fence.tls.passthrough=true
+      # Must outrank the HTTP routers' TLS-muxer entries for the same SNI
+      # (default TCP priority = rule length loses to the long grpc/backend
+      # HTTP rules and TLS termination wins — observed live).
+      - traefik.tcp.routers.netbird-fence.priority=10000
+      - traefik.tcp.services.netbird-fence.loadbalancer.server.port=1
+
   # Combined server: Management + Signal + Relay + STUN
   netbird-server:
     image: netbirdio/netbird-server:{{ netbird_server_version }}
