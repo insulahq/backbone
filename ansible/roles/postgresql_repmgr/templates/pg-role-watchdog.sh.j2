@@ -112,6 +112,30 @@ if [ -n "$GATUS_TOKEN" ]; then
     >/dev/null 2>&1 || true
 fi
 
+# Standby replication watch (gotcha 151) — a WAL gap that develops while the
+# standby is LIVE (walreceiver dead, primary already recycled the segment)
+# is NOT caught by the entrypoint's startup-replay detector: PG stays up,
+# serves reads, retries forever, and silently falls behind. Observed
+# 2026-07-22 after back-to-back node reboots. Alert so the operator can
+# re-clone (docker stop postgresql; wipe postgresql_postgresql_data; start —
+# the entrypoint's fresh-standby path clones from the primary).
+if [ "$PG_ROLE" = "t" ]; then
+  _WAL_STREAMING=$(docker exec postgresql psql -U postgres -tAc "SELECT count(*) FROM pg_stat_wal_receiver WHERE status='streaming';" 2>/dev/null | tr -d ' ' || echo "0")
+  if [ "${_WAL_STREAMING:-0}" = "0" ]; then
+    STREAM_FAILS=$(cat /var/run/pg-stream-fails 2>/dev/null || echo 0)
+    STREAM_FAILS=$((STREAM_FAILS + 1))
+    echo "$STREAM_FAILS" > /var/run/pg-stream-fails
+    # ~2 min of confirmed non-streaming before alerting; re-alert ~20-minutely
+    if [ "$STREAM_FAILS" -eq 4 ] || [ $((STREAM_FAILS % 40)) -eq 0 ]; then
+      echo "$(date): WARNING — standby has no streaming WAL receiver ($STREAM_FAILS consecutive checks)"
+      source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
+      platform_alert "warning" "PG-Standby-Streaming" "Standby {{ inventory_hostname }} has NO streaming WAL receiver (${STREAM_FAILS} checks ≈ $((STREAM_FAILS / 2)) min). Likely WAL gap — see gotcha 151 for the re-clone procedure."
+    fi
+  else
+    rm -f /var/run/pg-stream-fails
+  fi
+fi
+
 # ==========================================================================
 # NetBird fencing — netbird-server + netbird-proxy run ONLY on the PG primary
 # ==========================================================================
