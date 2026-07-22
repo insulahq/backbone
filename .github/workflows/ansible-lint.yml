@@ -49,16 +49,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Direct CLI instead of gitleaks-action@v2: the action requires a paid
-      # GITLEAKS_LICENSE for ORGANIZATION repos (broke on the move to
-      # insulahq); the CLI itself is MIT-licensed and license-free. It picks
-      # up .gitleaks.toml from the repo root automatically.
-      - name: Install gitleaks
-        run: |
-          GL_VER=8.24.3
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/gitleaks_${GL_VER}_linux_x64.tar.gz" \
-            | tar -xz gitleaks
-          ./gitleaks version
-
-      - name: Run gitleaks (full history)
-        run: ./gitleaks detect --source . --redact --no-banner
+      # gitleaks-action requires GITLEAKS_LICENSE (repo secret) for
+      # organization repos. Historical doc-example false positives are
+      # allowlisted in .gitleaks.toml, which the action picks up
+      # automatically from the repo root.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
