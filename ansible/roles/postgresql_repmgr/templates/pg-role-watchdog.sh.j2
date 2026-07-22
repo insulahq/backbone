@@ -324,12 +324,23 @@ enforce_netbird_fence
 # Fresh dials meet the correct router set on whichever node DNS names.
 # NOTE: must run inside the container netns — host ss cannot see (or kill)
 # bridge-networked container sockets.
+# Sweep over the next cycles too, not just once: a client redialing during
+# the ~1-2s Traefik router-rebuild gap right after the transition can pin a
+# NEW connection that a single kill pass misses (observed: moodle re-pinned
+# within seconds of the 19:00 failback kill and hammered 404s for 46 min).
+# By the following cycles the sentinel/server routers are definitively
+# active, so post-sweep redials land correctly.
 if $ROLE_TRANSITIONED; then
+  echo 3 > /var/run/pg-transition-sweep
+fi
+SWEEP=$(cat /var/run/pg-transition-sweep 2>/dev/null || echo 0)
+if [ "${SWEEP:-0}" -gt 0 ]; then
+  echo $((SWEEP - 1)) > /var/run/pg-transition-sweep
   TRAEFIK_PID=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
   if [ -n "$TRAEFIK_PID" ] && [ "$TRAEFIK_PID" != "0" ]; then
     _CONNS=$(nsenter -t "$TRAEFIK_PID" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
     nsenter -t "$TRAEFIK_PID" -n ss -K 'sport = :443' >/dev/null 2>&1 || true
-    echo "$(date): Killed ${_CONNS:-0} established :443 connections in Traefik netns (post-transition unpin)"
+    echo "$(date): Killed ${_CONNS:-0} established :443 connections in Traefik netns (transition sweep, $SWEEP passes left)"
   fi
 fi
 
