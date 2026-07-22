@@ -49,6 +49,22 @@ else
   DNS_MODE="drain-self"
 fi
 
+# Role-transition detection independent of WHO retargets pgproxy — on real
+# promotions the repmgr post-promote hook retargets before our next cycle,
+# so PGPROXY_NEEDS_UPDATE stays false and gating post-transition actions on
+# it silently skips them (observed: conn-kill never fired during the
+# 2026-07-22 drill). /var/run is tmpfs: cleared on boot, and boot already
+# breaks all connections, so skip-when-empty is correct.
+LAST_ROLE=$(cat /var/run/pg-last-role 2>/dev/null || echo "")
+ROLE_TRANSITIONED=false
+if [ "$PG_ROLE" != "$LAST_ROLE" ]; then
+  echo "$PG_ROLE" > /var/run/pg-last-role
+  if [ -n "$LAST_ROLE" ]; then
+    ROLE_TRANSITIONED=true
+    echo "$(date): Role transition detected: $LAST_ROLE -> $PG_ROLE"
+  fi
+fi
+
 # Read current target
 CURRENT_TARGET=$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || echo "")
 
@@ -240,7 +256,7 @@ PGPROXY_NEEDS_UPDATE=false
 DNS_NEEDS_UPDATE=false
 [ "$DNS_OK" != "true" ] && DNS_NEEDS_UPDATE=true
 
-if ! $PGPROXY_NEEDS_UPDATE && ! $DNS_NEEDS_UPDATE; then
+if ! $PGPROXY_NEEDS_UPDATE && ! $DNS_NEEDS_UPDATE && ! $ROLE_TRANSITIONED; then
   exit 0  # Everything already correct
 fi
 
@@ -308,7 +324,7 @@ enforce_netbird_fence
 # Fresh dials meet the correct router set on whichever node DNS names.
 # NOTE: must run inside the container netns — host ss cannot see (or kill)
 # bridge-networked container sockets.
-if $PGPROXY_NEEDS_UPDATE; then
+if $ROLE_TRANSITIONED; then
   TRAEFIK_PID=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
   if [ -n "$TRAEFIK_PID" ] && [ "$TRAEFIK_PID" != "0" ]; then
     _CONNS=$(nsenter -t "$TRAEFIK_PID" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
@@ -321,7 +337,7 @@ fi
 # kill, so its fresh management channel dials into a settled topology
 # (primary serving, standby closing) instead of the mid-transition window
 # (gotchas 136/150). Only on actual role transitions.
-if $PGPROXY_NEEDS_UPDATE && systemctl is-active netbird &>/dev/null; then
+if $ROLE_TRANSITIONED && systemctl is-active netbird &>/dev/null; then
   echo "$(date): Restarting NetBird peer client (post-fence, force clean reconnection)"
   systemctl restart netbird 2>&1 || echo "$(date): WARNING — NetBird peer restart failed"
 fi
@@ -332,7 +348,7 @@ fi
 # promotion: the demoted node's netbird-server is fenced, and firing from
 # both nodes doubles every Gatus alert. Unrecovered peers self-heal via the
 # client-side netbird-selfheal.timer where installed (gotcha 148).
-if $PGPROXY_NEEDS_UPDATE && [ "$PG_ROLE" = "f" ]; then
+if $ROLE_TRANSITIONED && [ "$PG_ROLE" = "f" ]; then
   ( /usr/local/bin/netbird-peer-wakeup.sh >/dev/null 2>&1 &) || true
 fi
 
