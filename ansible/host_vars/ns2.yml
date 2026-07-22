@@ -1,5 +1,11 @@
 ---
 # ns2 Host Variables
 
-# Backup paths
-restic_backup_paths: "{{ ns2_backup_paths }}"
+# Backup paths are role-controlled — see roles/backup/defaults/main.yml.
+#
+# This file used to set `restic_backup_paths: "{{ ns2_backup_paths }}"`, which
+# silently outranked the role default (host_vars beat role defaults). The
+# 2026-07-22 audit rewrote the role default to back up the whole of /opt, but
+# the change was inert until this line was removed on 2026-07-23 — a restore
+# test proved /opt/openziti was in no snapshot. Do not reintroduce a per-host
+# path list here: it goes stale every time a service is added.

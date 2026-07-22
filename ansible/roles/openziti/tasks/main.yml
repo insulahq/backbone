@@ -18,10 +18,80 @@
   tags: [openziti]
 
 # --- Determine active controller node ---
-# On fresh deploy: preferred primary. After failover: detect actual.
-- name: Detect active controller node
+# Two concepts that used to be conflated:
+#   openziti_primary_node       — PREFERRED home (static policy: watchdog mode,
+#                                 DB-sync direction, DNS records)
+#   _openziti_active_controller — where the controller answers RIGHT NOW
+#                                 (decides PKI source, what we start here, and
+#                                 whether bootstrapping a CA is even legal)
+#
+# This used to be a stub that always returned the preferred primary, which made
+# `site.yml --limit <PREFERRED_PRIMARY>` during a node rebuild (a) re-bootstrap a
+# brand-new CA on the empty node, invalidating every enrolled router and
+# identity, and (b) start a second controller alongside the live one on the
+# peer — split-brain. Probing is done from the target host because the edge API
+# is WireGuard-only (the WireGuard role runs earlier in site.yml) and because
+# inventory vars for the peer resolve even when --limit puts it out of scope.
+- name: Set OpenZiti peer node name
   set_fact:
-    _openziti_active_controller: "{{ openziti_primary_node }}"
+    _openziti_peer_node: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+  tags: [openziti]
+
+- name: Probe each node for a running OpenZiti controller
+  command: >
+    curl -fsSk --max-time 5
+    https://{{ hostvars[item]['wireguard_ip'] }}:{{ openziti_edge_port }}/edge/client/v1/version
+  loop: "{{ groups['dns_servers'] }}"
+  register: _openziti_ctrl_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [openziti]
+
+- name: Determine active controller node
+  set_fact:
+    _openziti_healthy_controllers: "{{ _openziti_ctrl_probe.results | selectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
+  tags: [openziti]
+
+# Preferred primary wins when it is healthy, so steady state never flaps (and a
+# pre-existing split-brain resolves toward the configured home rather than
+# whichever node sorts first).
+- name: Select the active controller
+  set_fact:
+    _openziti_active_controller: >-
+      {{ openziti_primary_node
+         if openziti_primary_node in _openziti_healthy_controllers
+         else (_openziti_healthy_controllers[0]
+               if (_openziti_healthy_controllers | length) > 0
+               else openziti_primary_node) }}
+  tags: [openziti]
+
+# The PKI-sync task below delegates to the active controller, and a delegated
+# task's connection `vars:` are templated in the DELEGATE's variable context.
+# Under --limit the delegate never ran this play, so a plain set_fact is
+# undefined there and the run dies with "'_openziti_active_controller' is
+# undefined". (The old code dodged this by using a role default, which is
+# defined for every host.) Publish the facts into the peer's hostvars so both
+# contexts agree. set_fact opens no connection, so this is safe for a peer that
+# is out of --limit scope or even down.
+- name: Publish controller placement into the peer's hostvars
+  set_fact:
+    _openziti_active_controller: "{{ _openziti_active_controller }}"
+    _openziti_peer_node: "{{ inventory_hostname }}"
+  delegate_to: "{{ _openziti_peer_node }}"
+  delegate_facts: true
+  tags: [openziti]
+
+- name: Report controller placement
+  debug:
+    msg: >-
+      OpenZiti controller: active={{ _openziti_active_controller }},
+      preferred={{ openziti_primary_node }}
+      {{ '(FAILED OVER — this run will not start a second controller or re-bootstrap PKI; '
+         ~ 'ziti-watchdog handles failback)'
+         if _openziti_active_controller != openziti_primary_node
+         else ('(steady state)' if (_openziti_healthy_controllers | length) > 0
+               else '(no controller reachable — treating as fresh install)') }}
   tags: [openziti]
 
 # --- Generate admin password if not set ---
@@ -89,14 +159,60 @@
   notify: restart openziti
   tags: [openziti]
 
-# --- Bootstrap PKI and controller (primary node only, first run) ---
+# --- Bootstrap PKI and controller (active controller only, first run) ---
+# The bootstrap script is idempotent per-artifact, so it is a no-op whenever a
+# PKI already exists. The danger is the *empty* case: a rebuilt node with no PKI
+# would mint a fresh root CA, and every router/identity signed by the old CA
+# would stop validating. Guard it explicitly.
+- name: Check for an existing local OpenZiti PKI
+  stat:
+    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
+  register: _openziti_local_ca
+  tags: [openziti]
+
+- name: Check whether the peer node already holds a PKI
+  stat:
+    path: "{{ openziti_pki_dir }}/root-ca/certs/root-ca.cert"
+  delegate_to: "{{ _openziti_peer_node }}"
+  register: _openziti_peer_ca
+  ignore_errors: true
+  vars:
+    # Same delegate_to + --limit key-resolution pitfall as the PKI sync below.
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _openziti_peer_node }}"
+  when:
+    - inventory_hostname == _openziti_active_controller
+    - not (_openziti_local_ca.stat.exists | default(false))
+  tags: [openziti]
+
+- name: Refuse to mint a new CA when a PKI may already exist elsewhere
+  fail:
+    msg: >-
+      Local OpenZiti PKI is absent on {{ inventory_hostname }} and this run would
+      bootstrap a BRAND-NEW root CA, invalidating every enrolled router and
+      identity.
+      {{ 'The peer ' ~ _openziti_peer_node ~ ' still holds a PKI — recover from it
+      instead: bring its controller up (so it is detected as the active
+      controller and this node syncs the PKI from it), or restore /opt/openziti
+      from restic.'
+      if (_openziti_peer_ca.stat.exists | default(false))
+      else 'The peer ' ~ _openziti_peer_node ~ ' could not be reached, so it
+      cannot be proven CA-free. Check the peer before assuming the PKI is gone.' }}
+      If this really is a greenfield build with no surviving PKI anywhere, re-run
+      with -e openziti_force_bootstrap=true.
+  when:
+    - inventory_hostname == _openziti_active_controller
+    - not (_openziti_local_ca.stat.exists | default(false))
+    - not (openziti_force_bootstrap | bool)
+    - (_openziti_peer_ca is failed) or (_openziti_peer_ca.stat.exists | default(false))
+  tags: [openziti]
+
 - name: Deploy bootstrap script
   template:
     src: bootstrap.sh.j2
     dest: "{{ openziti_install_dir }}/bootstrap.sh"
     mode: '0700'
   no_log: true
-  when: inventory_hostname == openziti_primary_node
+  when: inventory_hostname == _openziti_active_controller
   tags: [openziti]
 
 - name: Run PKI bootstrap (idempotent — skips existing artifacts)
@@ -107,12 +223,41 @@
     -v {{ openziti_install_dir }}/bootstrap.sh:/bootstrap.sh:ro
     {{ openziti_cli_image }}
     /bootstrap.sh
-  when: inventory_hostname == openziti_primary_node
+  when: inventory_hostname == _openziti_active_controller
+  changed_when: false
+  tags: [openziti]
+
+# --- Distribute PKI from the active controller to the other node ---
+# Runs BEFORE the permission fix-ups so a freshly rebuilt node has its PKI in
+# place to be fixed up. Sourcing from the ACTIVE controller (not the preferred
+# primary) is what makes a preferred-primary rebuild work: the empty node pulls
+# the surviving CA from the peer instead of minting its own.
+#
+# Note: delegate_to runs on the active controller, but inventory_hostname
+# retains this node's identity — so hostvars[inventory_hostname] correctly
+# resolves to this node's WireGuard IP as the rsync destination.
+- name: Sync PKI from the active controller
+  shell: >
+    rsync -az -e "ssh -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key"
+    {{ openziti_pki_dir }}/
+    root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
+  delegate_to: "{{ _openziti_active_controller }}"
+  vars:
+    # Under --limit, delegation resolves the templated per-server
+    # ansible_ssh_private_key_file with the ORIGINAL host's context (the
+    # repo-known delegate_to limitation, see repmgr role comment + RECOVERY
+    # pitfalls) — Ansible then dials the controller with this node's key and
+    # gets Permission denied. Pin the delegated connection to the controller's
+    # own key explicitly (same pattern the test suite uses).
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _openziti_active_controller }}"
+  when: inventory_hostname != _openziti_active_controller
   changed_when: false
   tags: [openziti]
 
 # Container runs as uid=2171 (ziggy). Certs are public material (0644),
 # private keys must be restricted (0640 readable by ziggy via group).
+# Applied on every node: the standby holds a full PKI copy too, and after a
+# rebuild it has just arrived over rsync.
 - name: Fix PKI directory permissions
   shell: >
     find {{ openziti_pki_dir }} -type d -exec chmod 755 {} +;
@@ -120,57 +265,35 @@
     find {{ openziti_pki_dir }} -type f -name '*.pem' -exec chmod 644 {} +;
     find {{ openziti_pki_dir }} -type f -name '*.key' -exec chmod 640 {} +;
     chown -R root:2171 {{ openziti_pki_dir }}
-  when: inventory_hostname == openziti_primary_node
   changed_when: false
   tags: [openziti]
 
 - name: Fix controller DB permissions (owned by container user, not world-writable)
   shell: "chown -R 2171:2171 {{ openziti_controller_dir }}/db && chmod 750 {{ openziti_controller_dir }}/db && chmod 640 {{ openziti_controller_dir }}/db/*"
-  when: inventory_hostname == openziti_primary_node
-  changed_when: false
-  tags: [openziti]
-
-# --- Distribute PKI to standby node ---
-# Note: delegate_to runs on the primary, but inventory_hostname retains the
-# standby's identity — so hostvars[inventory_hostname] correctly resolves to
-# the standby's WireGuard IP as the rsync destination.
-- name: Sync PKI to standby node
-  shell: >
-    rsync -az -e "ssh -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key"
-    {{ openziti_pki_dir }}/
-    root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
-  delegate_to: "{{ openziti_primary_node }}"
-  vars:
-    # Under --limit, delegation resolves the templated per-server
-    # ansible_ssh_private_key_file with the ORIGINAL host's context (the
-    # repo-known delegate_to limitation, see repmgr role comment + RECOVERY
-    # pitfalls) — Ansible then dials the primary with the standby's key and
-    # gets Permission denied. Pin the delegated connection to the primary's
-    # own key explicitly (same pattern the test suite uses).
-    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ openziti_primary_node }}"
-  when: inventory_hostname != openziti_primary_node
+  when: inventory_hostname == _openziti_active_controller
   changed_when: false
   tags: [openziti]
 
 # --- Start containers ---
 # Controller + console are defined on both nodes (for failover) but only
-# started on the primary. The standby's controller stays stopped until
-# the watchdog promotes it.
-- name: Start OpenZiti stack (controller + console + router on primary)
+# started where the controller is currently active. The other node's controller
+# stays stopped until ziti-watchdog promotes it — starting it here would mean
+# two controllers writing separate bbolt DBs (split-brain).
+- name: Start OpenZiti stack (controller + console + router on active controller)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
     pull: missing
     state: present
-  when: inventory_hostname == openziti_primary_node
+  when: inventory_hostname == _openziti_active_controller
   tags: [openziti]
 
-- name: Start OpenZiti router only (standby node)
+- name: Start OpenZiti router only (non-controller node)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
     services: ["ziti-router"]
     pull: missing
     state: present
-  when: inventory_hostname != openziti_primary_node
+  when: inventory_hostname != _openziti_active_controller
   tags: [openziti]
 
 # --- Enroll router (requires running controller) ---
@@ -266,6 +389,40 @@
     enabled: true
     state: started
   when: inventory_hostname != openziti_primary_node
+  tags: [openziti]
+
+# Cleanup: the role only ever added these units, so a run made while
+# openziti_primary_node was flipped (see defaults) left the standby DB-sync
+# timer installed on the real primary. It self-skips while the local controller
+# runs, but it would rsync --delete the peer's DB over the primary's own during
+# any window where the primary's controller is stopped.
+- name: Stop stale standby DB-sync timer on the preferred primary
+  systemd:
+    name: ziti-db-sync.timer
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: inventory_hostname == openziti_primary_node
+  tags: [openziti]
+
+- name: Remove stale standby DB-sync units from the preferred primary
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/ziti-db-sync.timer
+    - /etc/systemd/system/ziti-db-sync.service
+    - /usr/local/bin/ziti-db-sync.sh
+  register: _openziti_dbsync_cleanup
+  when: inventory_hostname == openziti_primary_node
+  tags: [openziti]
+
+- name: Reload systemd after removing stale DB-sync units
+  systemd:
+    daemon_reload: true
+  when:
+    - inventory_hostname == openziti_primary_node
+    - _openziti_dbsync_cleanup is changed
   tags: [openziti]
 
 # --- DNS records ---

@@ -27,8 +27,28 @@ openziti_controller_dir: "{{ openziti_install_dir }}/controller"
 openziti_router_dir: "{{ openziti_install_dir }}/router"
 openziti_console_dir: "{{ openziti_install_dir }}/console"
 
-# Primary node — runs the active controller (matches dns_failover_primary)
-openziti_primary_node: "{{ dns_failover_primary | default('ns1') }}"
+# PREFERRED controller home — a *static* policy value. It decides which node
+# ziti-watchdog templates into primary (failback) mode, which node gets the
+# standby DB-sync timer, and where DNS records point.
+#
+# Deliberately NOT derived from dns_failover_primary: that is a *runtime*
+# value. site.yml's pre-flight auto-detect sets it to whichever node currently
+# holds the PostgreSQL primary, and RECOVERY tells you to override it during a
+# node rebuild. Inheriting it meant a PostgreSQL failover silently re-designated
+# OpenZiti's preferred primary, which re-templates ziti-watchdog into standby
+# mode on the real primary (so failback never fires) and installs the standby
+# DB-sync timer onto it. Both were observed on this cluster (2026-07-23).
+#
+# Where the controller is running *right now* is a separate, detected value —
+# see _openziti_active_controller in tasks/main.yml. Override this in group_vars
+# if the controller should prefer a different node than the first dns_server.
+openziti_primary_node: "{{ groups['dns_servers'] | first }}"
+
+# Escape hatch: allow minting a brand-new PKI when the local CA is absent and
+# the peer cannot be proven CA-free (see "Refuse to mint a new CA" task).
+# Only set this for a genuine greenfield build with no surviving PKI anywhere —
+# a new CA invalidates every enrolled router and identity.
+openziti_force_bootstrap: false
 
 # Domain (behind Traefik)
 openziti_domain: "ziti.{{ platform_domain }}"

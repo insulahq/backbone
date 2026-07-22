@@ -7,19 +7,22 @@
     state: absent
   listen: restart openziti
 
-- name: restart openziti (primary - all services)
+# Gated on the ACTIVE controller, not the preferred primary: recreating "all
+# services" on a node whose controller is deliberately stopped would start a
+# second controller alongside the live one on the peer.
+- name: restart openziti (active controller - all services)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
     state: present
     recreate: always
-  when: inventory_hostname == openziti_primary_node
+  when: inventory_hostname == _openziti_active_controller
   listen: restart openziti
 
-- name: restart openziti (standby - router only)
+- name: restart openziti (non-controller node - router only)
   community.docker.docker_compose_v2:
     project_src: "{{ openziti_install_dir }}"
     services: ["ziti-router"]
     state: present
     recreate: always
-  when: inventory_hostname != openziti_primary_node
+  when: inventory_hostname != _openziti_active_controller
   listen: restart openziti

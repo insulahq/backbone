@@ -160,6 +160,65 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml
 - No DNS zone recreation (replicated via PG)
 - No certificate transfer (Traefik re-issues via ACME)
 - No WireGuard key regeneration (reuses existing keys from `.generated_secrets/`)
+- No OpenZiti PKI restore (the survivor holds a full copy — see 3b)
+
+### Scenario 3b: the dead node is the PRIMARY (PG primary / OpenZiti controller)
+
+Everything above still applies, but the node you are rebuilding is the one the
+cluster normally takes its state *from*. Two extra rules:
+
+**1. Rebuild it as a standby. Do not tell Ansible it is still the primary.**
+The pre-flight primary auto-detect respects `--limit`, so with `--limit ns1` it
+only queries the (absent) ns1, finds no primary, and falls back to the
+configured default — pointing the whole run at the dead node (pitfall 1c).
+Pass the *surviving* node explicitly:
+
+```bash
+ansible-playbook -i inventory/hosts.yml site.yml --limit <NEW_NODE> \
+  -e postgresql_primary_node=<SURVIVOR> \
+  -e dns_failover_primary=<SURVIVOR>
+```
+
+PostgreSQL then clones from the survivor, and the new node comes up as a
+streaming standby. repmgr's auto-failback returns the primary role afterwards.
+
+**2. Do NOT override `openziti_primary_node`.** It is the *preferred* home and
+must keep naming the node being rebuilt, so `ziti-watchdog` is templated into
+primary/failback mode there. Where the controller is running *right now* is
+detected at run time (`_openziti_active_controller`), which is what makes the
+rebuild safe:
+
+- PKI is synced **from the surviving controller** — the survivor holds a full
+  copy of the CA, so nothing is restored from backup.
+- The PKI bootstrap is skipped, so no new root CA is minted.
+- Only the router starts on the new node; the live controller on the survivor
+  is not duplicated (no split-brain).
+- Once the new node is healthy, `ziti-watchdog` fails the controller back on its
+  own (after the settling period, and the 2h fresh-install grace).
+
+> Before 2026-07-23 `openziti_primary_node` defaulted to `dns_failover_primary`,
+> so the override in rule 1 silently flipped it — which templated *both* nodes'
+> watchdogs into standby mode and installed the standby DB-sync timer onto the
+> real primary. If you are running an older checkout, this is the trap.
+
+**If the role refuses to bootstrap the PKI**, it means the new node has no local
+CA and the survivor could not be proven to have one either:
+
+```
+Local OpenZiti PKI is absent on <NODE> and this run would bootstrap a
+BRAND-NEW root CA, invalidating every enrolled router and identity.
+```
+
+Do not force past it. Either bring the survivor's controller up so the PKI can
+be synced, or restore the PKI from backup onto the new node and re-run:
+
+```bash
+ssh root@<NEW_NODE> "/etc/restic/restore.sh files --include /opt/openziti --target /root/ziti-restore"
+ssh root@<NEW_NODE> "cp -a /root/ziti-restore/opt/openziti/pki /opt/openziti/"
+```
+
+`-e openziti_force_bootstrap=true` exists only for a genuine greenfield build
+where no PKI survives anywhere. It invalidates every enrolled identity.
 
 ### Known pitfalls (surfaced by 2026-04-23 and 2026-04-24 node-replacement drills)
 

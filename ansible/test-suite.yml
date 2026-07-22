@@ -660,6 +660,55 @@
         - inventory_hostname != (openziti_primary_node | default(dns_failover_primary | default('ns1')))
       tags: [openziti]
 
+    # Gotcha 153: the preferred primary must NOT carry the standby DB-sync
+    # units. A run made while openziti_primary_node was flipped (it used to
+    # inherit the runtime dns_failover_primary) installed them there; they
+    # self-skip while the local controller runs, but would rsync --delete the
+    # peer's DB over the primary's own during any controller-stopped window.
+    - name: "OpenZiti | Preferred primary has no standby DB-sync units"
+      stat:
+        path: "{{ item }}"
+      register: _t_ziti_dbsync_stale
+      loop:
+        - /etc/systemd/system/ziti-db-sync.timer
+        - /usr/local/bin/ziti-db-sync.sh
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname == (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — no stale DB-sync on preferred primary"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti preferred primary free of standby DB-sync units', 'host': inventory_hostname, 'passed': (_t_ziti_dbsync_stale.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | list | length) == 0}] }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname == (openziti_primary_node | default(dns_failover_primary | default('ns1')))
+      tags: [openziti]
+
+    # Gotcha 153: exactly one controller must be running cluster-wide. Two
+    # means split-brain (two independent bbolt DBs); zero means the overlay is
+    # down. Counted across both nodes rather than asserted per-host, so it
+    # holds whether or not a failover is in progress.
+    - name: "OpenZiti | Controller container state (both nodes)"
+      command: docker inspect ziti-controller --format '{% raw %}{{.State.Running}}{% endraw %}'
+      register: _t_ziti_ctrl_state
+      changed_when: false
+      failed_when: false
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
+    # No run_once here: run_once + set_fact propagates one host's list to every
+    # host, silently discarding the other node's accumulated results (the
+    # clobber fixed in 6bcbbd4). Each host computes the same cluster-wide count
+    # from hostvars instead.
+    - name: "OpenZiti | Record result — exactly one controller cluster-wide"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'OpenZiti exactly one controller running cluster-wide (' + (_ziti_running_count | string) + ' of ' + (ansible_play_hosts_all | length | string) + ' nodes)', 'host': inventory_hostname, 'passed': (_ziti_running_count | int) == 1}] }}"
+      vars:
+        _ziti_running_count: "{{ ansible_play_hosts_all | map('extract', hostvars, '_t_ziti_ctrl_state') | selectattr('stdout', 'defined') | selectattr('stdout', 'equalto', 'true') | list | length }}"
+      when: openziti_enabled | default(false) | bool
+      tags: [openziti]
+
     # ------------------------------------------------------------------
     # Platform DNS Switch Tests
     # ------------------------------------------------------------------
