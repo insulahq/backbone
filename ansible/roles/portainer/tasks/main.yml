@@ -66,10 +66,28 @@
   register: portainer_admin_check
   tags: [portainer]
 
+# Portainer 2.39+ requires a setup token for admin initialization
+# (X-Setup-Token header) — printed in the container logs at startup and
+# regenerated on every container start, so always read the LATEST
+# occurrence (surfaced by the 2026-07-22 ns2 node-replacement drill; the
+# old tokenless init worked when ns1 was first initialized on an earlier
+# Portainer and the change only bites on fresh installs).
+- name: Read Portainer setup token from container logs (2.39+)
+  shell: |
+    docker logs portainer 2>&1 | sed 's/\x1b\[[0-9;]*m//g' \
+      | grep -oE 'setup_token=[^[:space:]]+' | tail -1 | cut -d= -f2-
+  register: _portainer_setup_token
+  changed_when: false
+  no_log: true
+  when: portainer_admin_check.status == 404
+  tags: [portainer]
+
 - name: Create initial Portainer admin user via API
   uri:
     url: "http://127.0.0.1:{{ portainer_port }}/api/users/admin/init"
     method: POST
+    headers:
+      X-Setup-Token: "{{ _portainer_setup_token.stdout | default('') | trim }}"
     body_format: json
     body:
       Username: "{{ portainer_admin_username }}"

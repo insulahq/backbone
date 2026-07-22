@@ -41,6 +41,9 @@ systemctl is-active netbird >/dev/null 2>&1 || exit 0
 # extra tooling. A hung daemon (status times out / empty output) counts as
 # unhealthy, which is exactly right: that state also needs the restart.
 STATUS_OUT=$(timeout 15 netbird status 2>/dev/null || true)
+# Unenrolled peer (NeedsLogin) — nothing to heal; a down/up loop here would
+# just churn an unconfigured daemon (gotcha 152 addendum).
+printf '%s\n' "$STATUS_OUT" | grep -q 'NeedsLogin' && exit 0
 HEALTHY=false
 if printf '%s\n' "$STATUS_OUT" | grep -q '^Management: Connected' \
    && printf '%s\n' "$STATUS_OUT" | grep -q '^Signal: Connected'; then

@@ -84,11 +84,14 @@
     timeout: 30
   ignore_errors: true
 
-# Config location varies by client generation (pre-profiles config.json,
-# 0.7x profile-based default.json) — a single stat path here made every
-# peer look unenrolled (gotcha 152).
+# Ask the DAEMON, not the filesystem (gotcha 152, both directions): a
+# single stat path made every peer look unenrolled, and profile files
+# (default.json) exist as empty scaffolds BEFORE enrollment, making fresh
+# installs look enrolled. "NeedsLogin" in netbird status is authoritative.
 - name: Check if NetBird is already enrolled
-  shell: '[ -f {{ netbird_config_dir }}/config.json ] || [ -f /var/lib/netbird/default.json ] || [ -f /var/lib/netbird/config.json ]'
+  shell: |
+    STATUS=$(timeout 15 netbird status 2>&1 || true)
+    if printf '%s' "$STATUS" | grep -q 'NeedsLogin'; then exit 1; else exit 0; fi
   register: _nb_enrolled
   changed_when: false
   failed_when: false
@@ -96,6 +99,19 @@
 # Auto-enroll when a setup key is provided (recovery / node-replacement drills).
 # Skips silently if already enrolled OR if no key is configured — manual
 # enrollment instructions still print in that case.
+# Quiesce the engine first: an unenrolled daemon sits in an anonymous
+# login-retry loop, and an `up --setup-key` racing that loop was observed
+# to fail server-side ("invalid setup-key") while the identical command
+# succeeded on a settled daemon (2026-07-22 ns2 rebuild drill).
+- name: Quiesce NetBird engine before enrollment
+  command: netbird down
+  changed_when: false
+  failed_when: false
+  when:
+    - _nb_enrolled.rc != 0
+    - netbird_setup_key is defined
+    - netbird_setup_key | length > 0
+
 - name: Enroll NetBird peer automatically (if setup key provided + not yet enrolled)
   # argv list form avoids shell interpolation of the setup key (no leak to
   # process table via /proc/*/cmdline shell expansion; no metachar issues).

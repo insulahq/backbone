@@ -62,6 +62,7 @@ systemctl is-active netbird >/dev/null 2>&1 || exit 0
   || [ -f /var/lib/netbird/config.json ]; } || exit 0
 
 STATUS_OUT=\$(timeout 15 netbird status 2>/dev/null || true)
+printf '%s\n' "\$STATUS_OUT" | grep -q 'NeedsLogin' && exit 0
 HEALTHY=false
 if printf '%s\n' "\$STATUS_OUT" | grep -q '^Management: Connected' \\
    && printf '%s\n' "\$STATUS_OUT" | grep -q '^Signal: Connected'; then

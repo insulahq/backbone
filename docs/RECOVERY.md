@@ -179,6 +179,20 @@ ansible-playbook -i inventory/hosts.yml test-suite.yml
      -e dns_failover_primary=<SURVIVING_NODE>
    ```
 
+1e. **Portainer 2.39+ admin init requires a setup token** (X-Setup-Token from the
+   container logs) — the role reads it automatically now. Portainer also locks the
+   init endpoint ~5 min after first start; if the image pull ate the window (init
+   fails / admin-check returns 303), `docker restart portainer` and re-run
+   `deploy-portainer.yml --limit <NEW_NODE>` promptly.
+
+1f. **NetBird auto-enroll can race the unenrolled daemon's login-retry loop**
+   (server rejects a valid key as "invalid setup-key"). The role now quiesces with
+   `netbird down` before enrolling. Also: **delete the dead node's stale peer in
+   the NetBird dashboard BEFORE enrolling** — otherwise the new peer gets a
+   suffixed name (e.g. `ns2-121-186`) from the collision, and remember one-off
+   setup keys are consumed by a failed-but-accepted attempt's retry semantics —
+   have a spare.
+
 1d. **Manually refresh surviving node's known_hosts for NEW_NODE's new SSH host key.** The `postgresql_repmgr` role's `Refresh peer SSH host key` task runs on the `--limit` host only — the surviving node isn't in scope and keeps the pre-re-image entry. Fix before `site.yml`:
    ```bash
    ansible <SURVIVING_NODE> -m shell -a \

@@ -140,6 +140,14 @@
     {{ openziti_pki_dir }}/
     root@{{ hostvars[inventory_hostname]['wireguard_ip'] }}:{{ openziti_pki_dir }}/
   delegate_to: "{{ openziti_primary_node }}"
+  vars:
+    # Under --limit, delegation resolves the templated per-server
+    # ansible_ssh_private_key_file with the ORIGINAL host's context (the
+    # repo-known delegate_to limitation, see repmgr role comment + RECOVERY
+    # pitfalls) — Ansible then dials the primary with the standby's key and
+    # gets Permission denied. Pin the delegated connection to the primary's
+    # own key explicitly (same pattern the test suite uses).
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ openziti_primary_node }}"
   when: inventory_hostname != openziti_primary_node
   changed_when: false
   tags: [openziti]
