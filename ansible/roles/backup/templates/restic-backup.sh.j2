@@ -112,11 +112,21 @@ restic "${RESTIC_OPTS[@]}" backup \
     --host "{{ inventory_hostname }}" \
     --tag "{{ inventory_hostname }}" \
     --tag "$(date +%Y-%m-%d)" \
-    --verbose 2>&1 | tee -a "$LOG_FILE"
+    --verbose 2>&1 | tee -a "$LOG_FILE" || true
+# ^ || true: without it, set -e aborts on the pipeline itself and the ERR
+# trap fires ("Unexpected error on line NN") BEFORE the exit-code handling
+# below ever runs — it was dead code (found 2026-07-22).
 
 BACKUP_EXIT_CODE=${PIPESTATUS[0]}
 
-if [ $BACKUP_EXIT_CODE -ne 0 ]; then
+# restic >=0.17 exit semantics: 3 = snapshot SAVED but some source files
+# could not be read (or a listed path is missing). That deserves a warning,
+# not a CRITICAL failed unit — the snapshot exists and nightly recovery
+# capability is intact.
+if [ $BACKUP_EXIT_CODE -eq 3 ]; then
+    log "WARNING: snapshot saved but some source files were unreadable (rc=3)"
+    platform_alert "warning" "Backup-OK" "Backup on {{ inventory_hostname }}: snapshot saved with unreadable-source warnings (restic rc=3) — check $LOG_FILE"
+elif [ $BACKUP_EXIT_CODE -ne 0 ]; then
     notify_failure "Backup failed with exit code $BACKUP_EXIT_CODE"
     exit $BACKUP_EXIT_CODE
 fi

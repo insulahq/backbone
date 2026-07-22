@@ -56,9 +56,18 @@ restic_keep_weekly: 4
 restic_keep_monthly: 12
 restic_keep_yearly: 2
 
-# Backup paths per server — resolved from group_vars using inventory_hostname
-# e.g. ns1_backup_paths, ns2_backup_paths in group_vars/all.yml
-restic_backup_paths: "{{ lookup('vars', inventory_hostname + '_backup_paths', default=[]) }}"
+# Backup paths — role-controlled. The old per-host ns1_backup_paths /
+# ns2_backup_paths group_vars lists went stale (2026-07-22 audit: missing
+# /opt/openziti [controller DB + PKI, NOT in PostgreSQL], /opt/traefik and
+# /opt/netbird-proxy, while still listing the removed /opt/postgresql/backups
+# — which restic >=0.17 treats as a read error, rc=3). Whole /opt catches
+# every current and future service; any group_vars per-host lists are now
+# intentionally ignored.
+restic_backup_paths:
+  - /opt
+  - /etc/restic
+  - /root/.ssh
+  - /etc/wireguard
 
 # Common backup exclusions
 restic_exclude_patterns:
