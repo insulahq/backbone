@@ -261,7 +261,10 @@ if $PGPROXY_NEEDS_UPDATE; then
   #    fresh on the new primary AFTER pgproxy is retargeted, so its pools can
   #    never poison and its signal state is only ever wiped when clients must
   #    reconnect anyway.
-  if ! docker restart powerdns-auth powerdns-nginx gatus zitadel --timeout 5 2>&1; then
+  # powerdns-admin included: its SQLAlchemy session wedges permanently with
+  # PendingRollbackError when pgproxy retargets under it (observed 2026-07-22
+  # after auto-failback) — it never recovers without a restart.
+  if ! docker restart powerdns-auth powerdns-nginx powerdns-admin gatus zitadel --timeout 5 2>&1; then
     echo "$(date): WARNING — one or more service restarts failed after PG role change"
   fi
 
