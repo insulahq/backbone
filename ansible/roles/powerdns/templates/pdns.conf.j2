@@ -100,3 +100,11 @@ query-logging=no
 # Enables ifurlup()/ifportup() for health-checked DNS failover.
 # LUA records check actual service health and exclude dead servers from responses.
 enable-lua-records={{ 'yes' if powerdns_lua_records_enabled else 'no' }}
+{% if powerdns_version is version('5.1', '>=') %}
+
+# 5.1 blocks LUA-type record modifications via API/DNS-Update by default.
+# platform-dns-switch sends a LUA DELETE changetype in every switch payload
+# (cleanup of the pre-active-passive health-check records) — keep that
+# working, otherwise failover DNS switching breaks.
+enable-lua-record-updates=yes
+{% endif %}

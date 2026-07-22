@@ -32,8 +32,15 @@ http {
         listen [::]:8081;
         server_name _;
 
+        # Re-resolve the upstream via Docker's embedded DNS on every TTL
+        # expiry. A static proxy_pass hostname is resolved ONCE at nginx
+        # startup — when the powerdns-auth container is recreated (deploy,
+        # image bump) its IP changes and nginx 502s until restarted.
+        resolver 127.0.0.11 valid=10s;
+        set $pdns_upstream http://pdns:{{ powerdns_webserver_internal_port | default(8091) }};
+
         location / {
-            proxy_pass http://pdns:{{ powerdns_webserver_internal_port | default(8091) }};
+            proxy_pass $pdns_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -50,7 +57,7 @@ http {
 
         # Health check endpoint
         location /api/v1/servers/localhost {
-            proxy_pass http://pdns:{{ powerdns_webserver_internal_port | default(8091) }}/api/v1/servers/localhost;
+            proxy_pass $pdns_upstream;
             access_log off;
         }
     }
@@ -62,8 +69,11 @@ http {
         listen [::]:8080;
         server_name _;
 
+        resolver 127.0.0.11 valid=10s;
+        set $pda_upstream http://pdns-admin:8000;
+
         location / {
-            proxy_pass http://pdns-admin:8000;
+            proxy_pass $pda_upstream;
             # Use $http_host (preserves port) instead of $host (strips port).
             # PDA uses Flask url_for(_external=True) which reads the Host
             # header — without the port, generated URLs are incorrect.
@@ -88,7 +98,7 @@ http {
 
         # Static assets
         location /static/ {
-            proxy_pass http://pdns-admin:8000/static/;
+            proxy_pass $pda_upstream;
             expires 1d;
             add_header Cache-Control "public, immutable";
         }

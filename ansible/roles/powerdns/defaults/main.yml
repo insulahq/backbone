@@ -7,11 +7,11 @@
 # PowerDNS-Admin (web UI) runs on ns1 only.
 
 # PowerDNS versions — pin to specific tags
-# 5.0.6 closes security advisories 2026-05, 2026-06 and 2026-07.
-# NOTE: the supported release train moved to 5.1 (image repo pdns-auth-51) —
-# that is a minor-train upgrade to plan separately, not a blind pin bump.
-powerdns_version: "5.0"
-powerdns_image: "powerdns/pdns-auth-50:5.0.6"
+# 5.1 is the supported release train (image repo changed pdns-auth-50 →
+# pdns-auth-51). Upgrade notes reviewed 2026-07-22: no schema changes; API
+# LUA-modification guard handled via enable-lua-record-updates in pdns.conf.
+powerdns_version: "5.1"
+powerdns_image: "powerdns/pdns-auth-51:5.1.3"
 powerdns_admin_version: "0.4.2"
 powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.2"
 
