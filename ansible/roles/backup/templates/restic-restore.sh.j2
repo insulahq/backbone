@@ -4,7 +4,9 @@
 #   restore.sh list                    — List available snapshots
 #   restore.sh files [--include PATH]  — Restore file backup to /tmp/restore
 #   restore.sh database                — Extract pg_dumpall to /tmp/pg_dumpall.sql
-#   restore.sh database --load         — Extract and load into running PostgreSQL
+#   restore.sh database --load         — Extract, load, and VERIFY into running PostgreSQL
+#                                        (asserts every database in the dump is present and
+#                                         non-empty; fails loudly on psql errors or partial load)
 
 set -euo pipefail
 
@@ -102,9 +104,79 @@ cmd_database() {
             exit 1
         fi
 
+        # Expected database list, derived from the dump ITSELF (no hardcoded
+        # list to drift). pg_dumpall emits one CREATE DATABASE per user
+        # database; postgres/template0/template1 are not re-created.
+        local expected_dbs
+        expected_dbs=$(sed -n 's/^CREATE DATABASE "\{0,1\}\([A-Za-z0-9_]\{1,\}\).*/\1/p' "$dump_file" | sort -u)
+        if [ -z "$expected_dbs" ]; then
+            error "Could not read any CREATE DATABASE from the dump — refusing to load blind."
+            error "Dump preserved at: ${dump_file}"
+            exit 1
+        fi
+        local expected_count
+        expected_count=$(printf '%s\n' "$expected_dbs" | grep -c .)
+        log "Dump declares ${expected_count} database(s): $(printf '%s' "$expected_dbs" | paste -sd' ' -)"
+
         log "Loading dump into PostgreSQL (this may take a while)..."
-        docker exec -i postgresql psql -U postgres < "$dump_file"
-        log "Database restore complete"
+        local load_err="${dump_dir}/load.stderr"
+        # ON_ERROR_STOP=0 (continue, do not abort on first error): a full-cluster
+        # restore always emits the benign 'role "postgres" already exists' for the
+        # bootstrap superuser, so aborting on first error is wrong. Instead we
+        # capture all stderr and VERIFY the result below — a missing extension can
+        # otherwise desync a COPY and silently drop whole databases (gotcha 155).
+        docker exec -i postgresql psql -U postgres -v ON_ERROR_STOP=0 \
+            < "$dump_file" > "${dump_dir}/load.stdout" 2> "$load_err" || true
+
+        # --- Surface psql errors (excluding the one expected benign message) ---
+        local benign='role "postgres" already exists'
+        local real_errors real_error_count
+        real_errors=$(grep -E '^(ERROR|FATAL):' "$load_err" | grep -vF "$benign" || true)
+        real_error_count=$(printf '%s' "$real_errors" | grep -c . || true)
+
+        # --- Assert every expected database is present AND non-empty ---
+        # A desynced COPY (gotcha 155) can leave a database that was CREATEd but
+        # never populated — present yet empty — so check table counts, not just
+        # existence.
+        local missing="" empty="" db tables
+        for db in $expected_dbs; do
+            if [ "$(docker exec postgresql psql -U postgres -tAc \
+                    "SELECT count(*) FROM pg_database WHERE datname='${db}'" 2>/dev/null || echo 0)" != "1" ]; then
+                missing="${missing} ${db}"
+                continue
+            fi
+            tables=$(docker exec postgresql psql -U postgres -d "$db" -tAc \
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')" 2>/dev/null || echo 0)
+            if [ "${tables:-0}" -eq 0 ]; then
+                empty="${empty} ${db}"
+            else
+                log "  verified ${db}: ${tables} tables"
+            fi
+        done
+
+        # --- Verdict: any of these three conditions fails the restore ---
+        local failed=false
+        if [ "$real_error_count" -gt 0 ]; then
+            failed=true
+            error "psql reported ${real_error_count} non-benign error(s) during load:"
+            printf '%s\n' "$real_errors" | head -20 | sed 's/^/    /' >&2
+            [ "$real_error_count" -gt 20 ] && error "    ...(${real_error_count} total; full log in ${load_err})"
+        fi
+        [ -n "$missing" ] && { failed=true; error "MISSING databases (in dump, absent from cluster):${missing}"; }
+        [ -n "$empty" ]   && { failed=true; error "EMPTY databases (present but 0 tables — likely a desynced COPY, gotcha 155):${empty}"; }
+
+        if $failed; then
+            error "Restore verification FAILED — do NOT assume the cluster is complete."
+            error "Dump and psql log preserved for investigation:"
+            error "  dump:     ${dump_file}"
+            error "  psql log: ${load_err}"
+            error "Most common cause: loading into an image that lacks a required"
+            error "extension (e.g. repmgr) — restore into the SAME image production"
+            error "uses (sourcemation/postgres-repmgr), not a stock postgres image."
+            exit 1
+        fi
+
+        log "Database restore complete and VERIFIED: all ${expected_count} expected database(s) present and non-empty"
         rm -rf "$dump_dir"
     else
         log "Dump saved to ${dump_file}"
