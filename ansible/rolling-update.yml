@@ -51,7 +51,7 @@
         host_header: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       zitadel:
         url: "https://{{ ansible_host }}/debug/ready"
-        host_header: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        host_header: "{{ zitadel_domain | default('account.' + platform_domain) }}"
       gatus:
         url: "https://{{ ansible_host }}/health"
         host_header: "{{ gatus_domain | default('status.' + platform_domain) }}"

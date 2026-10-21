@@ -139,7 +139,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags phase2
 After Phase 2:
 - PowerDNS: zone created, DNS records pointing to ns1
 - Traefik: Let's Encrypt wildcard certificate issued (PowerDNS API available immediately)
-- Zitadel: IAM running at `auth.<domain>` (DB migrations completed)
+- Zitadel: IAM running at `account.<domain>` (DB migrations completed)
 - NetBird: management server at `vpn.<domain>` with embedded Dex IdP
 - Gatus: monitoring dashboard at `status.<domain>`
 - Portainer: Docker management at `http://10.100.0.1:9000` (admin user auto-created)
@@ -148,7 +148,7 @@ After Phase 2:
 
 > **Verify** (wait ~2 minutes for Let's Encrypt):
 > ```bash
-> echo | openssl s_client -connect <NS1_IP>:443 -servername auth.<domain> 2>/dev/null | openssl x509 -noout -subject -issuer
+> echo | openssl s_client -connect <NS1_IP>:443 -servername account.<domain> 2>/dev/null | openssl x509 -noout -subject -issuer
 > ```
 > Expected: `issuer=... Let's Encrypt ...`
 
@@ -156,7 +156,7 @@ After Phase 2:
 
 **Zitadel admin login:**
 1. `cat .generated_secrets/zitadel_admin_password`
-2. Open `https://auth.<domain>`, log in with `admin` + password from step 1
+2. Open `https://account.<domain>`, log in with `admin` + password from step 1
 
 > **CRITICAL — Back up the Zitadel masterkey:**
 >

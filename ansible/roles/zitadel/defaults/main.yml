@@ -16,7 +16,7 @@ zitadel_image: "ghcr.io/zitadel/zitadel:{{ zitadel_version }}"
 zitadel_install_dir: /opt/zitadel
 
 # Public domain and port (as seen by browsers/clients)
-zitadel_domain: "auth.{{ platform_domain }}"
+zitadel_domain: "account.{{ platform_domain }}"
 zitadel_external_port: 443
 zitadel_external_secure: true
 

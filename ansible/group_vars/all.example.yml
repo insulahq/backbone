@@ -74,7 +74,7 @@ powerdns_api_key: "<GENERATE: openssl rand -base64 48>"
 # Zitadel IAM (central identity provider)
 # ============================================================================
 # Domain for the Zitadel login/console UI
-zitadel_domain: "auth.{{ platform_domain }}"
+zitadel_domain: "account.{{ platform_domain }}"
 
 # Organization name shown in the console
 zitadel_org_name: "Hosting Platform"

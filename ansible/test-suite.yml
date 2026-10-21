@@ -84,7 +84,7 @@
       command: "dig @{{ ansible_host }} {{ item }} A +short +time=5"
       loop:
         - "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
-        - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        - "{{ zitadel_domain | default('account.' + platform_domain) }}"
         - "{{ gatus_domain | default('status.' + platform_domain) }}"
       register: _t_dns_services
       changed_when: false
@@ -140,7 +140,7 @@
         timeout: 10
       loop:
         - "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
-        - "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        - "{{ zitadel_domain | default('account.' + platform_domain) }}"
         - "{{ gatus_domain | default('status.' + platform_domain) }}"
       register: _t_tls_certs
       ignore_errors: true
@@ -825,7 +825,7 @@
   any_errors_fatal: false
   vars:
     _cluster_results: []
-    _zitadel_url: "https://{{ zitadel_domain | default('auth.' + platform_domain) }}"
+    _zitadel_url: "https://{{ zitadel_domain | default('account.' + platform_domain) }}"
     _netbird_url: "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
     _gatus_url: "https://{{ gatus_domain | default('status.' + platform_domain) }}"
   tasks:
@@ -1581,7 +1581,7 @@
         status_code: [200]
         timeout: 15
         headers:
-          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+          Host: "{{ zitadel_domain | default('account.' + platform_domain) }}"
       register: _t_fo_zitadel
       ignore_errors: true
       retries: 3
@@ -1714,7 +1714,7 @@
         status_code: [200]
         timeout: 15
         headers:
-          Host: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+          Host: "{{ zitadel_domain | default('account.' + platform_domain) }}"
       register: _t_fo_recovery_zitadel
       ignore_errors: true
       retries: 6

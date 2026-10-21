@@ -140,7 +140,7 @@
 - name: Wait for Zitadel to be ready
   uri:
     # Use the server's public IP with Host header to bypass DNS dependency —
-    # the auth.domain DNS record is created AFTER this check.
+    # the zitadel_domain DNS record is created AFTER this check.
     url: "https://{{ ansible_host }}/debug/ready"
     headers:
       Host: "{{ zitadel_domain }}"
