@@ -29,7 +29,7 @@ ns1                                ns2
 |-----------|-------|---------|
 | `powerdns-auth` | `powerdns/pdns-auth-50` | Authoritative DNS server |
 | `powerdns-nginx` | `nginx:alpine` | API proxy, binds to WireGuard IP only |
-| `powerdns-admin` | `powerdnsadmin/pda-legacy:v0.4.1` | Web UI (ns1 only) |
+| `powerdns-admin` | `powerdnsadmin/pda-legacy:v2026.08.1` | Web UI (both nodes, shared `pdnsadmin` DB) |
 
 ## Dependencies
 
@@ -66,7 +66,7 @@ Set in `group_vars/all.yml` or vault:
 
 - **DNS (port 53):** Bound to `0.0.0.0` -- serves public DNS queries
 - **API (port 8081):** Bound to WireGuard IP -- accessible only via WireGuard tunnel
-- **Admin UI (port 8080):** Bound to WireGuard IP, ns1 only -- accessible only via VPN
+- **Admin UI (port 8080):** Bound to WireGuard IP on each node -- accessible only via VPN
 - **PostgreSQL:** Connected via `postgresql_default` Docker network (internal)
 
 ## Gotchas

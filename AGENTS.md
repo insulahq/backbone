@@ -356,7 +356,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 120 | Schema check `WHERE table_name='domains'` matched `information_schema.domains` (PG built-in) — schema init skipped, PowerDNS gets "relation does not exist" | Added `table_schema='public'` filter to schema check query |
 | 121 | `GRANT` statements in `init-schema.sql` only execute on first creation — skipped when schema check finds existing tables | Added unconditional `GRANT` task that runs every time |
 | 122 | `docker cp` into PG container creates root-owned files in `/tmp` — `psql` can't read them (sticky bit) | Pipe SQL via `stdin` instead of file copy |
-| 123 | `pda-legacy` ignores `PORT` env var — always listens on 8000, nginx proxied to 9191 | Hardcoded port 8000 in nginx upstream |
+| 123 | `pda-legacy` ignores `PORT` env var — always listens on 8000, nginx proxied to 9191 | Hardcoded port 8000 in nginx upstream The image passes `BIND_ADDRESS` verbatim to gunicorn `--bind`; the compose file now sets `0.0.0.0:8000` explicitly and the unused `powerdns_admin_port` variable is gone. |
 | 124 | `pda-legacy` ignores individual `SQLA_DB_*` env vars — falls back to SQLite | Use `SQLALCHEMY_DATABASE_URI` with full PostgreSQL connection string |
 | 125 | PDA on standby node fails — writes to local read-only PG | Standby PDA connects to primary PG via WireGuard IP (same as Gatus) |
 | 126 | `powerdns-nginx` healthcheck hits API endpoint requiring auth — always unhealthy | Changed healthcheck to `wget http://localhost:8081/` (root path, no auth needed) |

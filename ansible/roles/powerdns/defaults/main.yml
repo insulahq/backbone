@@ -4,16 +4,25 @@
 # Both nodes run as Native (read-write) — zone data replicates via PostgreSQL
 # streaming replication, NOT AXFR. No primary/secondary distinction for DNS.
 #
-# PowerDNS-Admin (web UI) runs on ns1 only.
+# PowerDNS-Admin (web UI) runs on both nodes against one shared pdnsadmin DB.
 
 # PowerDNS versions — pin to specific tags
 # 5.1 is the supported release train (image repo changed pdns-auth-50 →
-# pdns-auth-51). Upgrade notes reviewed 2026-07-22: no schema changes; API
-# LUA-modification guard handled via enable-lua-record-updates in pdns.conf.
+# pdns-auth-51). No schema changes within 5.1; the API LUA-modification guard
+# is handled via enable-lua-record-updates in pdns.conf.
+# 5.1.5: security — CVE-2026-52682 (crafted packet → CPU/memory exhaustion,
+# fixed 5.1.4) and CVE-2026-73206 (name-decompression DoS, fixed 5.1.5).
 powerdns_version: "5.1"
-powerdns_image: "powerdns/pdns-auth-51:5.1.3"
-powerdns_admin_version: "0.4.2"
-powerdns_admin_image: "powerdnsadmin/pda-legacy:v0.4.2"
+powerdns_image: "powerdns/pdns-auth-51:5.1.5"
+# PowerDNS-Admin v0.5+ (project revived after v0.4.2): security fixes
+# (session fixation, privilege escalation, API-key hash leak, OIDC XSS).
+# The entrypoint runs `flask db upgrade` on every start — the Alembic
+# migrations are ONE-WAY, so pg_dump the pdnsadmin DB before any version
+# change (rollback = restore the dump + the old image). Both nodes share the
+# DB, so deploy the PG primary first — whichever node starts the new image
+# first migrates it under the other node's old instance.
+powerdns_admin_version: "2026.08.1"
+powerdns_admin_image: "powerdnsadmin/pda-legacy:v{{ powerdns_admin_version }}"
 
 # Nginx proxy — track the current stable line
 nginx_image: "nginx:1.30-alpine"
@@ -40,9 +49,8 @@ powerdns_nginx_api_port: 8081
 powerdns_nginx_admin_port: 8180
 powerdns_bind_interface: "{{ wireguard_ip | default('127.0.0.1', true) }}"
 
-# PowerDNS-Admin — web UI for managing PowerDNS (ns1 only)
+# PowerDNS-Admin — web UI for managing PowerDNS (both nodes, VPN-only)
 powerdns_admin_enabled: true
-powerdns_admin_port: 9191
 powerdns_admin_secret_key: ""  # Generated if not set
 powerdns_admin_sqla_db_name: pdnsadmin
 powerdns_admin_sqla_db_user: pdnsadmin
