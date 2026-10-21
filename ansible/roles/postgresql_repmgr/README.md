@@ -68,7 +68,7 @@ Must be deployed after:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `postgresql_image` | `sourcemation/postgres-repmgr:5.5.0` | Pinned Docker image |
+| `postgresql_image` | `sourcemation/postgres-repmgr:5.5.0-20261005` | Pinned to a dated build — the bare `5.5.0` tag floats across PG versions (gotcha 158) |
 | `postgresql_install_dir` | `/opt/postgresql` | Host directory |
 | `postgresql_primary_node` | `ns1` | Initial primary (only matters on first boot) |
 | `postgresql_node_ids` | `{ns1: 1, ns2: 2}` | Maps hostname to repmgr node_id |
