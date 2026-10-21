@@ -1,4 +1,11 @@
-# Draft upstream issue — netbirdio/netbird
+# Upstream issue — netbirdio/netbird
+
+> **Filed** as [netbirdio/netbird discussion #6857](https://github.com/netbirdio/netbird/discussions/6857)
+> (upstream bug reports now go to Discussions). No upstream fix yet: the
+> behaviour is unchanged in 0.81.3 — the reconnect-on-network-change logic
+> only fires on OS network events, and the newer health probes only log.
+> Server-side mitigations (gotcha 150) and the client self-heal guard remain
+> the effective remedies.
 
 ## Title
 
