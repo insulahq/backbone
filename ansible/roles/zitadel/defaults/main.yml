@@ -5,12 +5,26 @@
 # Sits behind Traefik for TLS termination.
 
 # Version — pin to a tested stable release (gotcha 47)
-# CRITICAL: test upgrades in staging first — Zitadel migrations can be breaking
-# v4.12.3 → v4.16.1 reviewed 2026-07: same major, release notes show no
-# breaking changes/migration steps. Deploy via rolling-update.yml with a
-# fresh backup — Zitadel runs its DB migrations at startup.
-zitadel_version: "v4.16.1"
+# CRITICAL: Zitadel migrations are one-way — there is no downgrade path.
+# Before any version change: pg_dump the zitadel DB (rollback = restore the
+# dump + the old image). Deploy with deploy-zitadel.yml or site.yml, never
+# rolling-update.yml (it reuses the existing compose file, so it cannot
+# change the version, and it would recreate both nodes one after another).
+# The role stops the peer's old-version instance before starting the new one
+# (see "Version-change quiesce" in tasks/main.yml).
+# v4.19.5: Login V1 security fixes (GHSA-45f2-5q3r-xgg6 critical account
+# takeover, fixed 4.16.2; GHSA-4hgj-wm6c-q7p2, fixed only in 4.19.1+). Skip
+# 4.18.0 (setup broke on upgrade, #12780, fixed 4.19.0). Setup steps 77-79
+# run on first start; pool/Database defaults are unchanged, so the 12/4 pool
+# below still holds.
+zitadel_version: "v4.19.5"
 zitadel_image: "ghcr.io/zitadel/zitadel:{{ zitadel_version }}"
+
+# Allow a version change started from a PG standby to stop the peer's
+# old-version instance even though that peer is the one serving clients
+# (see "Version-change quiesce" in tasks/main.yml). Off: the play fails and
+# asks for the primary to be upgraded first.
+zitadel_force_quiesce: false
 
 # Installation directory
 zitadel_install_dir: /opt/zitadel

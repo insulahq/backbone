@@ -130,6 +130,91 @@
 # start-from-init is idempotent: runs migrations if needed, creates instance if needed, then starts.
 # serial: 1 in the playbook ensures the first node completes migrations before the second starts.
 
+# --- Version-change quiesce ---
+# Both nodes run Zitadel against the same PostgreSQL primary, and the
+# playbooks upgrade one node at a time (site.yml: the whole of phase 2 sits
+# between the two). Setup steps can rewrite eventstore internals that an
+# older binary still running on the peer would misread — e.g. 4.17's step 77
+# replaces eventstore.commands_to_events and changes what
+# projections.current_states.filter_offset means, so an old instance can
+# advance a projection cursor past events it never applied. Upstream's
+# rollout is "run setup, then restart"; there is no supported mixed-version
+# window and no downgrade path (gotcha 159).
+# So before starting the target version here, stop Zitadel on every OTHER
+# node still running a different image — but only from the PG primary, the
+# node that serves clients. From a standby that would stop the serving
+# instance (a lone --limit run, a node rebuild with a newer pin, a stale
+# dns_failover_primary after a failover), so the play fails instead and asks
+# for the primary to be upgraded first (override: zitadel_force_quiesce).
+# Peers already on the target image are left alone and unreachable peers are
+# skipped. The stopped standby is started again by its own run of this role
+# (compose up starts stopped containers) — invisible to clients under
+# active-passive DNS. Caveat: pg-role-watchdog's restart cascade runs
+# `docker restart zitadel` on a PG role change, which would start a quiesced
+# old instance, so don't upgrade Zitadel while the cluster is unstable.
+- name: Pull the target Zitadel image before touching any peer
+  # A failed pull must abort while both nodes are still serving, not after
+  # the peer has been stopped (compose's own pull comes after the quiesce).
+  community.docker.docker_image:
+    name: "{{ zitadel_image }}"
+    source: pull
+  tags: [zitadel]
+
+- name: Read the local PostgreSQL role
+  command: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery()"
+  register: _zitadel_local_pg_role
+  changed_when: false
+  failed_when: false
+  tags: [zitadel]
+
+- name: Read the Zitadel image running on the other nodes
+  command: docker inspect zitadel --format '{{ '{{' }}.Config.Image{{ '}}' }}'
+  delegate_to: "{{ item }}"
+  vars:
+    # Same delegate_to + --limit key-resolution pitfall as the openziti role.
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ item }}"
+  loop: "{{ groups['dns_servers'] | difference([inventory_hostname]) }}"
+  register: _zitadel_peer_images
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  tags: [zitadel]
+
+- name: List the other nodes still on a different Zitadel image
+  set_fact:
+    # Unreachable results carry no rc; a peer without a zitadel container
+    # returns rc 1. Only a reachable peer with a running-or-stopped zitadel on
+    # another image counts.
+    _zitadel_stale_peers: >-
+      {{ _zitadel_peer_images.results
+         | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0)
+         | rejectattr('stdout', 'equalto', zitadel_image)
+         | map(attribute='item') | list }}
+  tags: [zitadel]
+
+- name: Refuse to quiesce the serving instance from a standby
+  fail:
+    msg: >-
+      {{ _zitadel_stale_peers | join(', ') }} still run(s) a different Zitadel
+      image than {{ zitadel_image }}, and {{ inventory_hostname }} is not the
+      PG primary. Starting the new version here would stop the instance that
+      serves clients. Upgrade the PG primary first
+      (deploy-zitadel.yml -e dns_failover_primary=<primary>), or pass
+      -e zitadel_force_quiesce=true to accept the outage.
+  when:
+    - _zitadel_stale_peers | length > 0
+    - (_zitadel_local_pg_role.stdout | default('') | trim) != 'f'
+    - not (zitadel_force_quiesce | bool)
+  tags: [zitadel]
+
+- name: Stop Zitadel on other nodes still running a different version
+  command: docker stop --time 30 zitadel
+  delegate_to: "{{ item }}"
+  vars:
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ item }}"
+  loop: "{{ _zitadel_stale_peers }}"
+  tags: [zitadel]
+
 - name: Start Zitadel stack
   community.docker.docker_compose_v2:
     project_src: "{{ zitadel_install_dir }}"
