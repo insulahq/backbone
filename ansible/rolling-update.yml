@@ -23,6 +23,17 @@
   serial: 1
   gather_facts: false
   pre_tasks:
+    # OpenZiti is deliberately NOT rolling-updatable: `compose up` in
+    # /opt/openziti also starts the standby's ziti-controller (its lifecycle
+    # belongs to ziti-watchdog, restart: "no"), giving two live controllers —
+    # split-brain. deploy-openziti.yml handles the active/standby split.
+    - name: "Refuse services that must not be rolling-updated"
+      assert:
+        that: "'openziti' not in _update_services"
+        fail_msg: "openziti cannot be rolling-updated (it would start a second controller on the standby) — use deploy-openziti.yml"
+      run_once: true
+      tags: [rolling-update]
+
     - name: "Detect PG role for this host"
       command: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();"
       register: _is_recovery
@@ -46,7 +57,6 @@
       traefik: /opt/traefik
       portainer: /opt/portainer
       powerdns: /opt/powerdns
-      openziti: /opt/openziti
       ntfy: /opt/ntfy
     _health_checks:
       netbird:

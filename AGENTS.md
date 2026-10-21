@@ -225,7 +225,7 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 143 | `chmod -R 777` on controller DB dir / `chmod -R a+r` on PKI | Container UID 2171 (ziggy). Keys `0640 root:2171`, DB `0750 2171:2171`, configs `0640 root:2171` |
 | 144 | Admin password baked into bootstrap.sh and enroll-router.sh | Scripts deployed mode 0700, template tasks have `no_log: true` |
 | 145 | Failback synced DB while peer controller still writing (TOCTOU) | Stop peer controller FIRST, then rsync. Controller quiesced = safe copy |
-| 146 | `openziti/zac` has no version-specific tags | Pinned to `:latest` with comment. All other images use `{{ openziti_version }}` |
+| 146 | `openziti/zac` is versioned independently of the controller | It once published only `:latest`; it now has version tags, and an unpinned `:latest` under `pull: missing` silently froze at first-deploy age (pre-4.5.3 = critical unauthenticated `/sso`, GHSA-p7rg-vcfw-3gx7, on the public console). Pinned via `openziti_console_version`; all other OpenZiti images use `{{ openziti_version }}` |
 | 147 | pg-maintenance.sh `CONTAINER` var was Gatus alert name, not Docker container | Renamed to `PG_CONTAINER="postgresql"` and `ALERT_NAME="PG-Maintenance-OK"` |
 
 ### Backup
