@@ -1,0 +1,59 @@
+---
+# ntfy — Docker Compose ({{ inventory_hostname }})
+# Push notification server behind Traefik, PostgreSQL HA backend via pgproxy.
+#
+# Deployed on BOTH nodes, running on exactly ONE: the pg-role-watchdog fences
+# it to the PG primary (enforce_ntfy_fence). `restart: unless-stopped` keeps a
+# fenced container down across reboots, so only the watchdog may start it —
+# see roles/ntfy/defaults/main.yml for why active/active is unsafe here.
+
+services:
+  ntfy:
+    image: {{ ntfy_image }}
+    container_name: ntfy
+    restart: unless-stopped
+    command: serve
+    networks:
+      - traefik_public
+      # Reach PostgreSQL (via pgproxy) over Docker DNS
+      - postgresql_default
+    volumes:
+      - {{ ntfy_install_dir }}/server.yml:/etc/ntfy/server.yml:ro
+{% if ntfy_attachments_enabled %}
+      - {{ ntfy_install_dir }}/attachments:/var/cache/ntfy/attachments
+{% endif %}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ntfy.rule=Host(`{{ ntfy_domain }}`)
+      - traefik.http.routers.ntfy.entrypoints=websecure
+      - traefik.http.routers.ntfy.tls=true
+      - traefik.http.routers.ntfy.middlewares=ratelimit@file
+      - traefik.http.routers.ntfy.service=ntfy
+      - traefik.http.services.ntfy.loadbalancer.server.port={{ ntfy_port }}
+    # The image is Alpine/busybox: no curl, but wget IS present (verified
+    # against v2.27.0 — unlike the gatus image, gotcha 74). /v1/health returns
+    # {"healthy":true}. Gatus additionally probes the public URL.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:{{ ntfy_port }}/v1/health | grep -q '"healthy":true'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: {{ ntfy_memory_limit }}
+          cpus: "{{ ntfy_cpu_limit }}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+networks:
+  traefik_public:
+    external: true
+  postgresql_default:
+    external: true

@@ -53,9 +53,16 @@ gatus_log_level: "info"
 gatus_alerting_slack_webhook: ""
 # Discord webhook URL
 gatus_alerting_discord_webhook: ""
-# ntfy server URL and topic
+# ntfy server URL and topic.
+# For the self-hosted server (ntfy role) point this at https://ntfy.<domain>
+# and set the token — that server is deny-all, so an untokened Gatus is
+# silently rejected. Token lives in .generated_secrets/ntfy_publish_token.
+# Keep an OFF-PLATFORM sink configured too (another provider, or a public
+# ntfy.sh topic): the self-hosted server dies with the platform it reports on.
 gatus_alerting_ntfy_url: ""
 gatus_alerting_ntfy_topic: ""
+gatus_alerting_ntfy_token: ""
+gatus_alerting_ntfy_priority: 4
 # Email (SMTP)
 gatus_alerting_email_host: ""
 gatus_alerting_email_port: 587

@@ -22,6 +22,7 @@ Two-node active-passive backbone with full HA:
 | NetBird (management + mesh) | 0.67.0 | Yes |
 | Zitadel IAM | 4.12.3 | Yes |
 | Gatus monitoring | 5.14.0 | Yes |
+| ntfy (optional) | 2.27.0 | Yes (fenced to primary) |
 | Portainer | 2.39.0 | Yes |
 | Restic backup | 0.16.4 | Yes |
 
@@ -241,3 +242,6 @@ Items identified in code review, deferred from v1.0:
 | 2026-03-25 | DOCKER-USER iptables chain for port blocking | Docker's iptables-nft bypasses nftables FORWARD chain; DOCKER-USER is the official hook |
 | 2026-03-25 | Post-promote hook (not promote-check) for pgproxy/DNS | promote-check runs pre-promotion; curl/nsenter calls caused SIGPIPE (exit 141) |
 | 2026-03-25 | Embedded Dex authStore → PostgreSQL | SQLite idp.db not replicated; authStore config available since NetBird v0.66.1 |
+| 2026-08-04 | Self-hosted ntfy on the PG HA backend, fenced to the primary | ntfy v2.27.0 made PostgreSQL (`database-url`) non-experimental, so all state — messages, auth/ACL, web-push subs — rides the existing repmgr replication instead of a node-local SQLite file. ntfy has no clustering, but the platform is active-passive, so multi-active fan-out is never needed. Fenced rather than active/active because a live standby answers subscriptions and delivers nothing (silent failure, gotcha 156). |
+| 2026-08-04 | ntfy attachments left disabled | Attachments are written to local disk or S3, never to the database, so they would not survive a failover to the peer node. |
+| 2026-08-04 | Off-platform alert sink stays mandatory | A self-hosted notification server dies with the platform it reports on. The self-hosted instance carries application/non-critical traffic; infra-critical alerting must retain a target that does not depend on this infrastructure. |

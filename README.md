@@ -17,6 +17,7 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 | **NetBird 0.67.0** | WireGuard VPN mesh (management + signal + relay), embedded Dex IdP |
 | **Zitadel** | Central IAM (OIDC/OAuth2) for service authentication |
 | **Gatus** | HA monitoring dashboard, active health checks, multi-channel alerting |
+| **ntfy 2.27.0** | Optional self-hosted push notifications, PostgreSQL backend, fenced to the PG primary |
 | **Portainer** | Docker management UI (VPN-only access) |
 | **OpenZiti 1.4.1** | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | **Uptime Kuma** | Optional UI-based monitoring for user-managed checks (supplements Gatus) |
@@ -111,6 +112,11 @@ Gatus provides active monitoring with multi-channel alerts:
 - **Alert channels:** Slack, Discord, ntfy, Email, Telegram, PagerDuty, custom webhooks
 - **Dashboard:** HTTPS at `status.<domain>` behind Traefik
 
+Optionally the platform can host its **own** ntfy server at `ntfy.<domain>` (`ntfy_enabled: true`),
+sharing the PostgreSQL HA cluster and fenced to the current primary. Because it runs on the very
+infrastructure it reports on, keep at least one **off-platform** alert channel configured as well —
+a self-hosted sink cannot tell you that both nodes are down.
+
 ## Prerequisites
 
 - Ansible 2.15+ with `community.docker` collection
@@ -146,6 +152,7 @@ ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml       # Zitadel IAM
 ansible-playbook -i inventory/hosts.yml deploy-netbird.yml       # NetBird management
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml         # Gatus monitoring
+ansible-playbook -i inventory/hosts.yml deploy-ntfy.yml          # ntfy push notifications
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer UI
 ansible-playbook -i inventory/hosts.yml deploy-openziti.yml       # OpenZiti overlay
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup (SFTP or S3)
@@ -175,6 +182,7 @@ ansible/
     ├── netbird_management/  # NetBird server (mgmt + signal + relay + embedded Dex)
     ├── netbird_peer/        # NetBird peer enrollment
     ├── gatus/               # Gatus HA monitoring + alerting
+    ├── ntfy/                # ntfy push notifications (optional)
     ├── openziti/            # OpenZiti zero-trust overlay (active-standby controller + routers)
     ├── portainer/           # Portainer CE (VPN-only)
     └── backup/              # Restic backup (SFTP or S3)

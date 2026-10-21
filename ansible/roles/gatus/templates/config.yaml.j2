@@ -43,6 +43,12 @@ alerting:
   ntfy:
     url: "{{ gatus_alerting_ntfy_url }}"
     topic: "{{ gatus_alerting_ntfy_topic }}"
+{% if gatus_alerting_ntfy_token %}
+    # Required against the self-hosted server, which runs auth-default-access:
+    # deny-all. Gatus validates the "tk_" prefix and sends it as a bearer token.
+    token: "{{ gatus_alerting_ntfy_token }}"
+{% endif %}
+    priority: {{ gatus_alerting_ntfy_priority | default(4) }}
     default-alert:
       enabled: true
       failure-threshold: 1
@@ -192,6 +198,21 @@ endpoints:
       insecure: true
     conditions:
       - "[STATUS] < 500"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 2m
+{% endif %}
+{% if ntfy_enabled | default(false) | bool %}
+  - name: "Push Notifications"
+    group: platform
+    # ntfy is fenced to the PG primary, so this probe follows the active-passive
+    # DNS record. A 200 with healthy=false, or no answer at all, means alerts
+    # published to the self-hosted server are going nowhere.
+    url: "https://{{ ntfy_domain | default('ntfy.' + platform_domain) }}/v1/health"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].healthy == true"
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 2m
 {% endif %}

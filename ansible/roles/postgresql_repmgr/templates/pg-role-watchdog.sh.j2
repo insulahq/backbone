@@ -242,10 +242,60 @@ enforce_netbird_fence() {
   return 0
 }
 
+# ==========================================================================
+# ntfy fencing — the ntfy server runs ONLY on the PG primary
+# ==========================================================================
+# ntfy has no clustering. Its subscriber registry is per-process and
+# in-memory; the PostgreSQL backend is a message CACHE for since=/poll=
+# replay, NOT a delivery bus. A live instance on the standby would accept
+# subscriptions and answer 200 OK while never delivering anything published
+# on the primary — a silent, indefinite failure, strictly worse than an error.
+#
+# Fenced, the standby carries no ntfy router in Traefik at all, so a stale
+# client fails fast and re-resolves the 30s-TTL record onto the primary.
+# Already-established connections are cut by the :443 sweep further down —
+# the same mechanism that unpins NetBird clients (gotcha 150).
+#
+# Unlike netbird-server, ntfy holds no durable in-memory state, so a stop/
+# start costs nothing but a client reconnect: messages live in PostgreSQL and
+# are still readable after a full container restart (verified on v2.27.0).
+enforce_ntfy_fence() {
+  local ntfy_state
+  ntfy_state=$(docker inspect ntfy --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+  # Explicit if-block, NOT `[ ... ] && return 0`: under `set -e` an AND-list
+  # whose test fails is only survivable while further statements follow it.
+  # As the last statement of a function it returns 1 and kills the whole
+  # watchdog run — taking netbird fencing, the DNS switch and the conn-kill
+  # sweep down with it. Same shape as enforce_netbird_fence() above.
+  if [ "$ntfy_state" = "missing" ]; then
+    return 0  # ntfy not deployed on this node
+  fi
+
+  if [ "$PG_ROLE" = "t" ]; then
+    if [ "$ntfy_state" = "running" ] || [ "$ntfy_state" = "restarting" ]; then
+      echo "$(date): ntfy fence — standby role, stopping ntfy"
+      docker stop --time 5 ntfy 2>&1 || echo "$(date): WARNING — ntfy stop failed"
+    fi
+  elif [ "$PG_ROLE" = "f" ]; then
+    # Same ordering constraint as NetBird (gotcha 148): only start once
+    # pgproxy already points at the local primary, or ntfy's pgx pool fills
+    # with connections to the read-only ex-primary and every publish fails.
+    if [ "$(cat "$PGPROXY_TARGET_FILE" 2>/dev/null || true)" != "$CORRECT_TARGET" ]; then
+      return 0  # Branch A retargets pgproxy first; the end-of-script call starts us
+    fi
+    if [ "$ntfy_state" != "running" ]; then
+      echo "$(date): ntfy fence — primary role, starting ntfy"
+      docker start ntfy 2>&1 || echo "$(date): WARNING — ntfy start failed"
+    fi
+  fi
+  return 0
+}
+
 # Steady-state fence enforcement (before the early exit below). During a role
 # transition this only applies the stop direction — the start direction waits
 # for pgproxy to be retargeted and runs via the end-of-script call.
 enforce_netbird_fence
+enforce_ntfy_fence
 
 # Decompose the cascade: pgproxy-target change vs. DNS-only drift.
 # Previously, any DNS mismatch re-triggered the full cascade (service restarts +
@@ -311,9 +361,14 @@ if $DNS_NEEDS_UPDATE; then
   done
 fi
 
-# Post-cascade fence pass — on promotion this is where netbird-server starts
-# (pgproxy now routes to the local primary, so its pools connect cleanly).
+# Post-cascade fence pass — on promotion this is where netbird-server and
+# ntfy start (pgproxy now routes to the local primary, so their pools connect
+# cleanly). ntfy is deliberately absent from the `docker restart` cascade in
+# Branch A for the same reason netbird-server is: the fence already gives it a
+# clean start on the new primary, after the retarget, and a restart on the
+# demoted node would just resurrect a server that must not be serving.
 enforce_netbird_fence
+enforce_ntfy_fence
 
 # Kill established client TLS connections in Traefik's netns after a role
 # transition. Traefik NEVER terminates existing h2 connections when routers

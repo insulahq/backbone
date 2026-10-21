@@ -16,7 +16,7 @@
 #   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags failover
 #
 # Available tags:
-#   dns, tls, postgresql, netbird, zitadel, gatus, portainer,
+#   dns, tls, postgresql, netbird, zitadel, gatus, ntfy, portainer,
 #   openziti, backup, maintenance, cross_node, failover, summary
 #
 # The playbook collects results into _test_results and prints a summary table.
@@ -237,7 +237,7 @@
         container: postgresql
         command: >
           psql -U postgres -tAc
-          "SELECT datname FROM pg_database WHERE datname IN ('netbird','netbird_dex','netbird_events','pdns','pdnsadmin','zitadel','gatus') ORDER BY datname"
+          "SELECT datname FROM pg_database WHERE datname IN ('netbird','netbird_dex','netbird_events','pdns','pdnsadmin','zitadel','gatus','ntfy') ORDER BY datname"
       register: _t_pg_dbs
       ignore_errors: true
       changed_when: false
@@ -809,6 +809,32 @@
       tags: [dns, tls, postgresql, netbird, zitadel, gatus, portainer]
 
     # ------------------------------------------------------------------
+    # ntfy fencing (per-host; cluster-level ntfy tests live in Play 2)
+    # ------------------------------------------------------------------
+    # Fencing: ntfy runs ONLY on the PG primary. It has no clustering — a
+    # live instance on the standby accepts subscriptions and delivers nothing
+    # (silent failure), so "stopped on standby" is a correctness assertion,
+    # not tidiness.
+    - name: "ntfy | Container state (fencing)"
+      community.docker.docker_container_info:
+        name: ntfy
+      register: _t_ntfy_container
+      ignore_errors: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    - name: "ntfy | Record result — fenced to primary"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'ntfy fencing ('
+              + ('running on primary' if inventory_hostname == _pg_primary else 'stopped on standby') + ')',
+              'host': inventory_hostname,
+              'passed': ((_t_ntfy_container.container.State.Status | default('')) == 'running')
+                        == (inventory_hostname == _pg_primary)}] }}
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    # ------------------------------------------------------------------
     # Store per-host results for final aggregation
     # ------------------------------------------------------------------
     - name: "Store per-host test results"
@@ -907,6 +933,96 @@
       run_once: true
       when: gatus_external_token | default('') | length > 0
       tags: [gatus]
+
+    # ------------------------------------------------------------------
+    # ntfy Service Tests
+    # ------------------------------------------------------------------
+    # The role sets ntfy_publish_token, but the test suite does not run roles —
+    # read the provisioned value straight from the controller's secret store.
+    - name: "ntfy | Load provisioned publish token"
+      set_fact:
+        ntfy_publish_token: "{{ lookup('file', playbook_dir + '/.generated_secrets/ntfy_publish_token', errors='ignore') | default('', true) | trim }}"
+      run_once: true
+      no_log: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    - name: "ntfy | Health endpoint reports healthy"
+      uri:
+        url: "https://{{ ntfy_domain | default('ntfy.' + platform_domain) }}/v1/health"
+        status_code: 200
+        timeout: 10
+      register: _t_ntfy_health
+      ignore_errors: true
+      run_once: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    - name: "ntfy | Record result — health endpoint"
+      set_fact:
+        _cluster_results: >-
+          {{ _cluster_results + [{'name': 'ntfy reports healthy', 'host': 'cluster',
+              'passed': (_t_ntfy_health is success)
+                        and ((_t_ntfy_health.json.healthy | default(false)) | bool)}] }}
+      run_once: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    # The server must stay closed: auth-default-access is deny-all, so an
+    # unauthenticated publish has to be refused. A 200 here means the ACL
+    # regressed and anyone can push notifications to the platform's topics.
+    - name: "ntfy | Anonymous publish is rejected (deny-all)"
+      uri:
+        url: "https://{{ ntfy_domain | default('ntfy.' + platform_domain) }}/{{ ntfy_alert_topic | default('platform-alerts') }}"
+        method: POST
+        body: "test-suite anonymous publish probe"
+        status_code: [401, 403]
+        timeout: 10
+      register: _t_ntfy_anon
+      ignore_errors: true
+      run_once: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    - name: "ntfy | Record result — anonymous publish rejected"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'ntfy rejects anonymous publish (deny-all)', 'host': 'cluster', 'passed': _t_ntfy_anon is success}] }}"
+      run_once: true
+      when: ntfy_enabled | default(false) | bool
+      tags: [ntfy]
+
+    # End-to-end: the provisioned token from the config file must actually
+    # publish. This proves the declarative auth-tokens block was accepted —
+    # a malformed token (not exactly 32 chars, missing tk_) makes ntfy drop
+    # the whole block, which would otherwise only surface as missing alerts.
+    - name: "ntfy | Provisioned token can publish"
+      uri:
+        url: "https://{{ ntfy_domain | default('ntfy.' + platform_domain) }}/{{ ntfy_alert_topic | default('platform-alerts') }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ ntfy_publish_token }}"
+          Title: "Test suite probe"
+          Tags: "white_check_mark"
+        body: "Platform test-suite publish probe from {{ inventory_hostname }}"
+        status_code: 200
+        timeout: 10
+      register: _t_ntfy_publish
+      ignore_errors: true
+      run_once: true
+      no_log: true
+      when:
+        - ntfy_enabled | default(false) | bool
+        - ntfy_publish_token | default('') | length > 0
+      tags: [ntfy]
+
+    - name: "ntfy | Record result — token publish"
+      set_fact:
+        _cluster_results: "{{ _cluster_results + [{'name': 'ntfy accepts publish with provisioned token', 'host': 'cluster', 'passed': _t_ntfy_publish is success}] }}"
+      run_once: true
+      when:
+        - ntfy_enabled | default(false) | bool
+        - ntfy_publish_token | default('') | length > 0
+      tags: [ntfy]
 
     # ------------------------------------------------------------------
     # Portainer Service Tests

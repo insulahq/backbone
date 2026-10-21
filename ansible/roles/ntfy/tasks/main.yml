@@ -1,0 +1,506 @@
+---
+# ntfy Role — Main Tasks
+# Self-hosted push notification server on the PostgreSQL HA backend.
+# Deployed on both nodes, FENCED to the PG primary — see defaults/main.yml.
+
+- name: Create ntfy installation directory
+  file:
+    path: "{{ ntfy_install_dir }}"
+    state: directory
+    mode: '0755'
+  tags: [ntfy]
+
+# --- Secret generation (idempotent, persisted to .generated_secrets/) ------
+
+- name: Ensure secrets directory exists on controller
+  file:
+    path: "{{ playbook_dir }}/.generated_secrets"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [ntfy]
+
+- name: Generate ntfy database password if not set
+  set_fact:
+    postgresql_ntfy_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/postgresql_ntfy_password length=32 chars=ascii_letters,digits') }}"
+  when: postgresql_ntfy_password is not defined or postgresql_ntfy_password | length == 0
+  no_log: true
+  tags: [ntfy]
+
+- name: Generate ntfy admin password if not set
+  set_fact:
+    ntfy_admin_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/ntfy_admin_password length=24 chars=ascii_letters,digits') }}"
+  when: ntfy_admin_password is not defined or ntfy_admin_password | length == 0
+  no_log: true
+  tags: [ntfy]
+
+# Declarative auth-tokens must be exactly 32 chars and start with "tk_",
+# so the generated part is 29 chars. The seed file holds those 29 chars;
+# ntfy_publish_token below is the usable value, also written out for the
+# operator to paste into clients.
+- name: Generate ntfy publish token seed if not set
+  set_fact:
+    _ntfy_token_seed: "{{ lookup('password', playbook_dir + '/.generated_secrets/ntfy_publish_token_seed length=29 chars=ascii_lowercase,digits') }}"
+  no_log: true
+  tags: [ntfy]
+
+- name: Assemble publish token
+  set_fact:
+    ntfy_publish_token: "tk_{{ _ntfy_token_seed }}"
+  no_log: true
+  tags: [ntfy]
+
+# ntfy does NOT degrade gracefully on a bad provisioned token: it refuses to
+# start ("invalid auth-tokens: ... use 'ntfy token generate'") and exits. With
+# the fence in play the watchdog would then restart a container that dies every
+# cycle. Validate here so a typo fails the deploy instead of the service.
+- name: Assert the publish token matches ntfy's token format
+  assert:
+    that:
+      - ntfy_publish_token is match('^tk_[a-z0-9]{29}$')
+    fail_msg: >-
+      ntfy_publish_token must be 'tk_' + 29 lowercase alphanumerics (32 chars
+      total), matching `ntfy token generate`. ntfy refuses to START otherwise.
+  tags: [ntfy]
+
+- name: Assert any extra provisioned tokens are well-formed
+  assert:
+    that:
+      - item.split(':') | length >= 2
+      - item.split(':')[1] is match('^tk_[a-z0-9]{29}$')
+    fail_msg: >-
+      ntfy_extra_tokens entry '{{ item }}' is malformed. Expected
+      'username:tk_<29 lowercase alphanumerics>:label'. A bad token makes ntfy
+      refuse to start — generate one with:
+      docker run --rm {{ ntfy_image }} token generate
+  loop: "{{ ntfy_extra_tokens }}"
+  when: ntfy_extra_tokens | length > 0
+  tags: [ntfy]
+
+- name: Assert any extra provisioned users carry a bcrypt hash
+  assert:
+    that:
+      - item.split(':') | length >= 3
+      - item.split(':')[1].startswith('$2')
+      - item.split(':')[1] | length == 60
+    fail_msg: >-
+      ntfy_extra_users entry is malformed (expected
+      'username:<60-char bcrypt hash>:role'). Generate the hash with:
+      printf '%s\n%s\n' 'pw' 'pw' | docker run --rm -i {{ ntfy_image }} user hash 2>/dev/null
+  loop: "{{ ntfy_extra_users }}"
+  when: ntfy_extra_users | length > 0
+  no_log: true
+  tags: [ntfy]
+
+- name: Write usable publish token for the operator
+  copy:
+    content: "{{ ntfy_publish_token }}\n"
+    dest: "{{ playbook_dir }}/.generated_secrets/ntfy_publish_token"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  tags: [ntfy]
+
+# --- Subscriber (read-only) token ----------------------------------------
+# Same shape as the publish token, different identity and a read-only ACL.
+
+- name: Generate ntfy subscriber token seed if not set
+  set_fact:
+    _ntfy_sub_seed: "{{ lookup('password', playbook_dir + '/.generated_secrets/ntfy_subscriber_token_seed length=29 chars=ascii_lowercase,digits') }}"
+  when: ntfy_subscriber_enabled | bool
+  no_log: true
+  tags: [ntfy]
+
+- name: Assemble subscriber token
+  set_fact:
+    ntfy_subscriber_token: "tk_{{ _ntfy_sub_seed }}"
+  when: ntfy_subscriber_enabled | bool
+  no_log: true
+  tags: [ntfy]
+
+- name: Assert the subscriber token matches ntfy's token format
+  assert:
+    that:
+      - ntfy_subscriber_token is match('^tk_[a-z0-9]{29}$')
+    fail_msg: "ntfy_subscriber_token is malformed — ntfy refuses to START on a bad token."
+  when: ntfy_subscriber_enabled | bool
+  tags: [ntfy]
+
+- name: Write usable subscriber token for the operator
+  copy:
+    content: "{{ ntfy_subscriber_token }}\n"
+    dest: "{{ playbook_dir }}/.generated_secrets/ntfy_subscriber_token"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: ntfy_subscriber_enabled | bool
+  tags: [ntfy]
+
+- name: Generate ntfy subscriber password if not set
+  set_fact:
+    ntfy_subscriber_password: "{{ lookup('password', playbook_dir + '/.generated_secrets/ntfy_subscriber_password length=24 chars=ascii_letters,digits') }}"
+  when: ntfy_subscriber_enabled | bool
+  no_log: true
+  tags: [ntfy]
+
+- name: Check for persisted subscriber password hash
+  stat:
+    path: "{{ playbook_dir }}/.generated_secrets/ntfy_subscriber_password_hash"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _ntfy_sub_hash_file
+  when: ntfy_subscriber_enabled | bool
+  tags: [ntfy]
+
+- name: Generate bcrypt hash for the ntfy subscriber user
+  shell: |
+    set -o pipefail
+    printf '%s\n%s\n' '{{ ntfy_subscriber_password }}' '{{ ntfy_subscriber_password }}' \
+      | docker run --rm -i {{ ntfy_image }} user hash 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: _ntfy_sub_hash_out
+  changed_when: true
+  run_once: true
+  no_log: true
+  when:
+    - ntfy_subscriber_enabled | bool
+    - not _ntfy_sub_hash_file.stat.exists
+  tags: [ntfy]
+
+- name: Persist subscriber password hash
+  copy:
+    content: "{{ _ntfy_sub_hash_out.stdout | trim }}\n"
+    dest: "{{ playbook_dir }}/.generated_secrets/ntfy_subscriber_password_hash"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when:
+    - ntfy_subscriber_enabled | bool
+    - not _ntfy_sub_hash_file.stat.exists
+  tags: [ntfy]
+
+- name: Load subscriber password hash
+  set_fact:
+    ntfy_subscriber_password_hash: "{{ lookup('file', playbook_dir + '/.generated_secrets/ntfy_subscriber_password_hash') | trim }}"
+  when: ntfy_subscriber_enabled | bool
+  no_log: true
+  tags: [ntfy]
+
+# --- Admin password hash --------------------------------------------------
+# bcrypt is salted, so hashing on every run would produce a new hash, rewrite
+# server.yml and bounce the container each deploy. Hash ONCE and persist.
+#
+# `ntfy user hash` prompts for password AND confirmation, both on stderr; the
+# bare hash goes to stdout. It must therefore be fed the password TWICE —
+# piping it once fails with "password cannot be empty" (gotcha 157).
+
+- name: Check for persisted ntfy admin password hash
+  stat:
+    path: "{{ playbook_dir }}/.generated_secrets/ntfy_admin_password_hash"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _ntfy_hash_file
+  tags: [ntfy]
+
+- name: Generate bcrypt hash for the ntfy admin user
+  shell: |
+    set -o pipefail
+    printf '%s\n%s\n' '{{ ntfy_admin_password }}' '{{ ntfy_admin_password }}' \
+      | docker run --rm -i {{ ntfy_image }} user hash 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: _ntfy_hash_out
+  changed_when: true
+  run_once: true
+  no_log: true
+  when: not _ntfy_hash_file.stat.exists
+  tags: [ntfy]
+
+- name: Persist ntfy admin password hash
+  copy:
+    content: "{{ _ntfy_hash_out.stdout | trim }}\n"
+    dest: "{{ playbook_dir }}/.generated_secrets/ntfy_admin_password_hash"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: not _ntfy_hash_file.stat.exists
+  tags: [ntfy]
+
+- name: Load ntfy admin password hash
+  set_fact:
+    ntfy_admin_password_hash: "{{ lookup('file', playbook_dir + '/.generated_secrets/ntfy_admin_password_hash') | trim }}"
+  no_log: true
+  tags: [ntfy]
+
+- name: Assert the admin hash looks like bcrypt
+  assert:
+    that:
+      - ntfy_admin_password_hash | length == 60
+      - ntfy_admin_password_hash.startswith('$2')
+    fail_msg: >-
+      .generated_secrets/ntfy_admin_password_hash is not a 60-char bcrypt hash.
+      Delete it and re-run to regenerate.
+  tags: [ntfy]
+
+# --- Web Push VAPID keys (opt-in) -----------------------------------------
+
+- name: Check for persisted web push keys
+  stat:
+    path: "{{ playbook_dir }}/.generated_secrets/ntfy_web_push_keys"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _ntfy_webpush_file
+  when: ntfy_web_push_enabled | bool
+  tags: [ntfy]
+
+- name: Generate Web Push VAPID keypair
+  command: docker run --rm {{ ntfy_image }} webpush keys
+  register: _ntfy_webpush_out
+  changed_when: true
+  run_once: true
+  no_log: true
+  when:
+    - ntfy_web_push_enabled | bool
+    - not _ntfy_webpush_file.stat.exists
+  tags: [ntfy]
+
+- name: Persist Web Push VAPID keypair
+  copy:
+    content: "{{ _ntfy_webpush_out.stdout }}\n"
+    dest: "{{ playbook_dir }}/.generated_secrets/ntfy_web_push_keys"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when:
+    - ntfy_web_push_enabled | bool
+    - not _ntfy_webpush_file.stat.exists
+  tags: [ntfy]
+
+- name: Load Web Push VAPID keys
+  set_fact:
+    ntfy_web_push_public_key: >-
+      {{ (lookup('file', playbook_dir + '/.generated_secrets/ntfy_web_push_keys')
+          | regex_search('web-push-public-key:\s*(\S+)', '\1') | first) }}
+    ntfy_web_push_private_key: >-
+      {{ (lookup('file', playbook_dir + '/.generated_secrets/ntfy_web_push_keys')
+          | regex_search('web-push-private-key:\s*(\S+)', '\1') | first) }}
+  no_log: true
+  when: ntfy_web_push_enabled | bool
+  tags: [ntfy]
+
+# --- Database creation (on primary only, replicated to standby) -----------
+
+- name: Check if ntfy database user exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -tAc
+      "SELECT 1 FROM pg_roles WHERE rolname='{{ ntfy_db_user }}'"
+  register: ntfy_user_check
+  changed_when: false
+  when: inventory_hostname == postgresql_primary_node
+  tags: [ntfy]
+
+- name: Create ntfy database user
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      psql -U postgres -c
+      "CREATE USER {{ ntfy_db_user }} WITH PASSWORD '{{ postgresql_ntfy_password }}'"
+  when:
+    - inventory_hostname == postgresql_primary_node
+    - ntfy_user_check.stdout | default('') | trim == ""
+  no_log: true
+  tags: [ntfy]
+
+# ntfy migrates its own schema on startup (10 tables, no extensions and no
+# superuser — verified against v2.27.0), so an empty owned database is enough.
+- name: Create ntfy database if not exists
+  community.docker.docker_container_exec:
+    container: postgresql
+    command: >
+      bash -c "psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='{{ ntfy_db_name }}'\" | grep -q 1 || createdb -U postgres -O {{ ntfy_db_user }} {{ ntfy_db_name }}"
+  when: inventory_hostname == postgresql_primary_node
+  changed_when: false
+  tags: [ntfy]
+
+# --- Deploy configuration -------------------------------------------------
+
+- name: Deploy ntfy server config
+  template:
+    src: server.yml.j2
+    dest: "{{ ntfy_install_dir }}/server.yml"
+    mode: '0640'  # contains the DB DSN, the admin hash and the publish token
+  notify: restart ntfy
+  tags: [ntfy]
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ ntfy_install_dir }}/docker-compose.yml"
+    mode: '0640'
+  notify: restart ntfy
+  tags: [ntfy]
+
+# --- Start, then fence ----------------------------------------------------
+# Determine the LIVE role rather than trusting the inventory variable: a
+# failover may have moved the primary since the last deploy (the same reason
+# netbird detects it inline, gotcha 149). Bootstrap (no PG yet) counts as
+# not-standby so first installs come up normally.
+
+- name: Detect PostgreSQL role for fencing
+  shell: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "unknown"
+  register: _ntfy_pg_role
+  changed_when: false
+  failed_when: false
+  tags: [ntfy]
+
+- name: Set fencing-awareness fact
+  set_fact:
+    _ntfy_pg_standby: "{{ (_ntfy_pg_role.stdout | default('') | trim) == 't' }}"
+  tags: [ntfy]
+
+- name: Create/update ntfy stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ ntfy_install_dir }}"
+    pull: missing
+    state: present
+  tags: [ntfy]
+
+# `compose up` starts the container on BOTH nodes. On the standby that briefly
+# exposes a server which accepts subscriptions and delivers nothing, so stop it
+# immediately; the watchdog keeps it stopped from here on (and starts it on
+# promotion, after pgproxy has been retargeted).
+- name: Fence ntfy on the PG standby
+  shell: docker stop --time 5 ntfy >/dev/null 2>&1 || true
+  changed_when: false
+  when: _ntfy_pg_standby | bool
+  tags: [ntfy]
+
+- name: Wait for ntfy to be healthy
+  uri:
+    # Hit the node's public IP with a Host header rather than ntfy_domain:
+    # on a first deploy the A record is created further down, so resolving the
+    # name here would fail (gotcha 82 — the NetBird role does the same).
+    # validate_certs off because Traefik may still be issuing the ACME cert.
+    url: "https://{{ ansible_host }}/v1/health"
+    headers:
+      Host: "{{ ntfy_domain }}"
+    status_code: 200
+    validate_certs: false
+  retries: 20
+  delay: 3
+  register: _ntfy_health
+  until: _ntfy_health.status == 200
+  when: not (_ntfy_pg_standby | bool)
+  tags: [ntfy]
+
+- name: Assert ntfy reports healthy
+  assert:
+    that:
+      - _ntfy_health.json.healthy | default(false) | bool
+    fail_msg: "ntfy answered /v1/health but did not report healthy: {{ _ntfy_health.json | default('no body') }}"
+  when: not (_ntfy_pg_standby | bool)
+  tags: [ntfy]
+
+# --- DNS records (active-passive — points at the current primary) ---------
+
+- name: Create DNS A record for ntfy
+  when:
+    - ntfy_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ ntfy_domain }}."
+          type: A
+          ttl: 30
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['ansible_host'] }}"
+              disabled: false
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [ntfy, dns]
+
+- name: Create DNS AAAA record for ntfy
+  when:
+    - ntfy_create_dns_records | default(true)
+    - powerdns_api_key is defined
+    - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
+  run_once: true
+  uri:
+    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
+    method: PATCH
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      rrsets:
+        - name: "{{ ntfy_domain }}."
+          type: AAAA
+          ttl: 30
+          changetype: REPLACE
+          records:
+            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] }}"
+              disabled: false
+    status_code: [200, 204]
+  ignore_errors: true
+  tags: [ntfy, dns]
+
+- name: Increment SOA serial after DNS record changes
+  when:
+    - ntfy_create_dns_records | default(true)
+    - powerdns_api_key is defined
+  run_once: true
+  community.docker.docker_container_exec:
+    container: powerdns-auth
+    command: pdnsutil increase-serial {{ platform_domain }}
+  changed_when: true
+  ignore_errors: true
+  tags: [ntfy, dns]
+
+# --- Status ---------------------------------------------------------------
+
+- name: Display ntfy deployment status
+  debug:
+    msg:
+      - "ntfy {{ ntfy_version }} deployed on {{ inventory_hostname }} ({{ 'FENCED (standby)' if _ntfy_pg_standby | bool else 'ACTIVE (primary)' }})"
+      - "URL: https://{{ ntfy_domain }}   topic: {{ ntfy_alert_topic }}"
+      - ""
+      - "Credentials (values are in ansible/.generated_secrets/, never printed):"
+      - "  admin user     : {{ ntfy_admin_user }}  (password in ntfy_admin_password)"
+      - "  publish token  : ntfy_publish_token"
+      - ""
+      - "Point Gatus at it by setting in group_vars/all.yml:"
+      - "  gatus_alerting_ntfy_url: \"https://{{ ntfy_domain }}\""
+      - "  gatus_alerting_ntfy_topic: \"{{ ntfy_alert_topic }}\""
+      - "  gatus_alerting_ntfy_token: \"<contents of .generated_secrets/ntfy_publish_token>\""
+      - ""
+      - "KEEP AN OFF-PLATFORM SINK for infra-critical alerts: this server dies"
+      - "with the platform it monitors. See AGENTS.md (ntfy) for the rationale."
+  tags: [ntfy]

@@ -141,6 +141,10 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_discord_webhook: "https://discord.com/api/webhooks/..."
 # gatus_alerting_ntfy_url: "https://ntfy.sh"
 # gatus_alerting_ntfy_topic: "platform-alerts-sma98dalblk2anbc"
+# gatus_alerting_ntfy_token: "tk_..."   # REQUIRED for the self-hosted server
+#                                       # (deny-all); value is in
+#                                       # .generated_secrets/ntfy_publish_token
+# gatus_alerting_ntfy_priority: 4
 # gatus_alerting_telegram_token: "<BOT_TOKEN>"
 # gatus_alerting_telegram_id: "<CHAT_ID>"
 # gatus_alerting_email_host: "smtp.example.com"
@@ -149,6 +153,77 @@ gatus_domain: "status.{{ platform_domain }}"
 # gatus_alerting_email_password: "<SMTP_PASSWORD>"
 # gatus_alerting_email_from: "alerts@example.com"
 # gatus_alerting_email_to: "admin@example.com"
+
+# ============================================================================
+# ntfy — Self-Hosted Push Notifications (Optional)
+# ============================================================================
+# Push notification server on the PostgreSQL HA backend, behind Traefik.
+# Set to true to deploy (site.yml, or deploy-ntfy.yml standalone).
+#
+# HA MODEL: ntfy has NO clustering. It is deployed on both nodes but FENCED
+# to the PG primary by pg-role-watchdog — a live instance on the standby
+# would accept subscriptions and silently deliver nothing. Do not "fix" the
+# standby's stopped container.
+#
+# WARNING — do NOT make this your only alert sink. It runs on the platform it
+# reports on: if both nodes are down, or PostgreSQL is unwritable, the alert
+# telling you so dies with it. Keep an off-platform target configured in
+# gatus_alerting_* as well (public ntfy.sh topic, email, Telegram, ...).
+# ntfy_enabled: true
+# ntfy_domain: "ntfy.{{ platform_domain }}"
+# ntfy_alert_topic: "platform-alerts"
+#
+# Secrets are generated into .generated_secrets/ on first deploy:
+#   ntfy_admin_password        admin login for the web UI
+#   ntfy_admin_password_hash   bcrypt hash placed in the config (stable)
+#   ntfy_publish_token         tk_... token for Gatus / scripts
+#   postgresql_ntfy_password   PG role password
+#
+# A read-only 'subscriber' identity is provisioned by default for consumers
+# (Windows Scheduled Task, phone app, CLI). It can READ the alert topic and
+# nothing else — never give a workstation the publish token.
+#   .generated_secrets/ntfy_subscriber_token     -> for scripts/apps
+#   .generated_secrets/ntfy_subscriber_password  -> for the web UI login
+# ntfy_subscriber_enabled: true
+# ntfy_subscriber_user: subscriber
+#
+# Windows desktop notifications (always-on, no browser, no third party):
+#   powershell -ExecutionPolicy Bypass -File .\scripts\ntfy-notify-install.ps1 `
+#       -Server https://ntfy.<domain> -Topic platform-alerts -Token <subscriber token>
+#
+# Message retention in the cache (also how far back since= can replay).
+# This is also the replay window for a machine that was asleep/offline —
+# 12h may be short if you want weekend catch-up; 72h costs almost nothing.
+# ntfy_cache_duration: "12h"
+#
+# Attachments are DISABLED by default: ntfy writes them to local disk, never
+# to the database, so they would not survive a failover to the peer node.
+# ntfy_attachments_enabled: false
+#
+# Browser (Web Push) notifications — generates a VAPID keypair on first
+# deploy and stores subscriptions in PostgreSQL. Only works for this server.
+# ntfy_web_push_enabled: true
+# ntfy_web_push_email: "admin@{{ platform_domain }}"
+#
+# iOS instant delivery needs APNs, which cannot be self-hosted without an
+# Apple developer account and a custom app build. Setting an upstream makes
+# ntfy forward a poll request containing only the MESSAGE ID (bodies stay
+# local) so the stock iOS app can be woken. This is an EXTERNAL dependency
+# in the delivery path — leave empty unless you need iOS.
+# ntfy_upstream_base_url: "https://ntfy.sh"
+# ntfy_upstream_access_token: ""
+#
+# Extra provisioned users / ACLs / tokens. These are DECLARATIVE: entries
+# removed from here are deleted from the database on the next restart, and
+# users created with `ntfy user add` on the server will not survive a deploy.
+# Generate a password hash with:
+#   printf '%s\n%s\n' 'thepassword' 'thepassword' \
+#     | docker run --rm -i binwiederhier/ntfy:v2.27.0 user hash 2>/dev/null
+# (the password must be piped TWICE — the command asks for confirmation)
+# ntfy_extra_users:
+#   - "phone:$2a$10$<bcrypt-hash>:user"
+# ntfy_extra_access:
+#   - "phone:platform-alerts:read-only"
 
 # ============================================================================
 # OpenZiti — Zero-Trust Network Overlay (Optional)

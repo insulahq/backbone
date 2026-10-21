@@ -36,6 +36,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 | NetBird Reverse Proxy | 0.74.7 | Public HTTPS ingress to NetBird-mesh services. Sits behind Traefik in TCP-passthrough mode at `*.proxy.<domain>`; terminates TLS itself with ACME TLS-ALPN-01. Version must track the server (0.73.x showed skew breaks it). |
 | Zitadel | 4.16.1 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
 | Gatus | 5.36.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
+| ntfy | 2.27.0 | Push notifications, PostgreSQL backend, primary-only (fenced, gotcha 156). Optional — `ntfy_enabled` |
 | OpenZiti | 1.6.17 | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | Portainer | 2.39.5 | Docker management UI, WireGuard + NetBird access |
 | Restic | 0.19.1 | Incremental backup to SFTP backup server |
@@ -66,6 +67,21 @@ Host-side scripts use a shared library (`/usr/local/lib/platform-alert.sh`) that
 
 Gatus also performs **active monitoring**: DNS resolution on both servers, Traefik HTTPS, and Zitadel health checks.
 
+**Self-hosted ntfy (optional, `ntfy_enabled`)** adds a push-notification sink at `ntfy.<domain>`, backed by the same PostgreSQL HA cluster and fenced to the PG primary (gotcha 156). Gatus publishes to it with the provisioned `tk_` token from `.generated_secrets/ntfy_publish_token` — the server runs `auth-default-access: deny-all`, so an untokened Gatus is rejected outright.
+
+> **Keep an off-platform sink configured as well.** ntfy runs on the platform it reports on: if both nodes are down, or PostgreSQL is unwritable, the alert saying so cannot be delivered. Configure at least one `gatus_alerting_*` target that does not depend on this infrastructure (a public ntfy.sh topic, email, Telegram). The strongest form is a dead-man's-switch — something external that alerts when it *stops* hearing a heartbeat — because only that survives total platform loss.
+
+**Receiving the alerts.** Two identities are provisioned: `admin` holds the publish token Gatus uses, and `subscriber` (`ntfy_subscriber_enabled`, on by default) holds a **read-only** token scoped to the alert topic only — a workstation can read alerts but never forge one. Consumer options:
+
+| Consumer | Always-on? | Third party in the path |
+|---|---|---|
+| `scripts/ntfy-notify-install.ps1` (Windows Scheduled Task) | yes, no browser needed | none — direct to your server |
+| ntfy Android / iOS app | yes | FCM / APNs |
+| Web app in a browser tab | only while the tab is open | none |
+| Web Push (`ntfy_web_push_enabled`) | while the browser runs | Google FCM / Mozilla / Apple |
+
+The browser web app **only delivers while a tab is open** — that is ntfy's documented behaviour, not a misconfiguration. Web Push fixes it via a service worker but routes through the browser vendor's push service, and **Brave disables Web Push by default** (`brave://settings/privacy` → "Use Google services for push messaging"), so it silently does nothing there until that is enabled. The Windows Scheduled Task is the only always-on option with no third party in the delivery path; it runs as the **logged-in user** (a SYSTEM task is in session 0 and cannot raise a toast), holds `ntfy subscribe` open, replays anything missed via `--since`, and de-duplicates across reconnects.
+
 ---
 
 ## 3. How to Deploy
@@ -91,6 +107,7 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml # NetBird peers
 ansible-playbook -i inventory/hosts.yml deploy-netbird-ha.yml    # Traefik + PG + DNS + NetBird
 ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml       # Zitadel IAM
 ansible-playbook -i inventory/hosts.yml deploy-gatus.yml         # Gatus monitoring
+ansible-playbook -i inventory/hosts.yml deploy-ntfy.yml          # ntfy push notifications
 ansible-playbook -i inventory/hosts.yml deploy-portainer.yml     # Portainer Docker UI
 ansible-playbook -i inventory/hosts.yml deploy-backup.yml        # Backup only
 ```
@@ -386,6 +403,8 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 | 153 | **OpenZiti conflated its PREFERRED controller home with the node currently RUNNING the controller.** `openziti_primary_node` defaulted to `{{ dns_failover_primary }}`, but `dns_failover_primary` is a *runtime* value — site.yml's pre-flight sets it to whoever holds the PG primary, and RECOVERY tells you to override it during a rebuild. So a PG failover silently re-designated OpenZiti's preferred primary, templating `ziti-watchdog` into STANDBY mode on both nodes (failback can then never fire) and installing the standby DB-sync timer onto the real primary (found live on ns1 2026-07-23, pointed at ns2, self-skipping only because ns1's controller was up). Worse, the role's `Detect active controller node` task was a STUB returning the preferred primary, so rebuilding the *preferred primary* while the controller lived on the peer would have (a) re-run the PKI bootstrap on the empty node, minting a BRAND-NEW root CA that invalidates every enrolled router and identity, and (b) started a second controller = split-brain. | Split into two variables: `openziti_primary_node` = static preferred home (drives watchdog mode, DB-sync direction, DNS records — now defaults to `groups['dns_servers'] \| first`, NOT dns_failover_primary), and `_openziti_active_controller` = detected each run by probing both nodes' edge API over WireGuard (preferred wins when healthy, so steady state never flaps). Bootstrap/PKI-source/container-start/handlers all gate on the ACTIVE controller; PKI now syncs *from* it, so a rebuilt primary pulls the surviving CA instead of minting one. A hard guard refuses to bootstrap when the local CA is absent and the peer cannot be proven CA-free (`-e openziti_force_bootstrap=true` to override — greenfield only). The role also removes the stale standby DB-sync units from the preferred primary. **Sub-gotcha:** a delegated task's connection `vars:` are templated in the DELEGATE's context, so a plain `set_fact` is undefined there under `--limit` (`'_openziti_active_controller' is undefined`) — the old code only worked because it used a role default; publish the fact to the peer with `delegate_to` + `delegate_facts: true`. |
 | 154 | **`host_vars/` silently outranked the role default, so the 2026-07-22 backup-path fix was completely inert for a day.** The audit rewrote `roles/backup/defaults/main.yml` to back up all of `/opt`, but `host_vars/ns1.yml` and `host_vars/ns2.yml` each contained `restic_backup_paths: "{{ nsN_backup_paths }}"`, and host_vars beat role defaults. Every snapshot — including the "verified" post-audit ones — still used the stale list: no `/opt/openziti` (ziti controller DB **and** PKI, which are NOT in PostgreSQL), no `/opt/traefik`, no `/opt/netbird-proxy`, plus the long-removed `/opt/postgresql/backups`. Caught only by an actual restore: `restore.sh files --include /opt/openziti` returned "Restored 0 files". | Removed the `restic_backup_paths` line from both host_vars files (kept the files as tombstones explaining why). Root lesson: **a backup is only verified by restoring from it.** Checking the config, the exit code, or even `restic ls` of paths you expect to be there does not prove a path was ever *submitted* — read the path list echoed in restic's own `restoring snapshot ... of [<paths>]` output. Re-run `deploy-backup.yml` after any path change; the script on the node is what runs, not the repo. |
 | 155 | **A PG18 `pg_dumpall` restored into a postgres MISSING an extension silently drops whole databases after the failure point — psql does not stop.** Found during the 2026-07-25 isolated pgdump load-test: loading the cluster dump into a stock `postgres:18` (no `repmgr` extension) failed `CREATE EXTENSION repmgr`, so the following `COPY repmgr.events FROM stdin` had no target table; psql then reads the ~1500 COPY-data lines as SQL, and an unbalanced quote inside a repmgr *event message* swallowed the subsequent `CREATE DATABASE zitadel` — so **zitadel (the auth DB) was silently absent** while every other DB loaded with exact fidelity. Two compounding PG18 specifics: (a) `pg_dumpall` now wraps each DB section in `\restrict <token>`/`\unrestrict <token>` (psql hardening — blocks all backslash meta-commands except `\unrestrict` while restricted); (b) the official `postgres:18` image moved `PGDATA` to `/var/lib/postgresql/18/docker`, so mount the volume at the PARENT `/var/lib/postgresql`, not `…/data` (else the container exits on start). | Always restore the cluster dump into the SAME image production uses (`sourcemation/postgres-repmgr:5.5.0`, which has repmgr) — `restore.sh database --load` targets the live `postgresql` container, so real recovery is unaffected. But `restore.sh --load` pipes `psql` with no `ON_ERROR_STOP` and no post-load check, so a silent partial restore (missing extension, wrong image) would report success. **After any restore, verify per-database table counts** — a fresh cluster + `query_to_xml` count-all script is in the 2026-07-25 test (baseline had e.g. zitadel=149 tables/3794 rows, pdnsadmin≈1.39M rows). Recommended hardening (not yet done): have `restore.sh --load` assert the expected database list exists afterward and surface any psql errors. To inspect a cluster dump WITHOUT repmgr, strip the repmgr DB and all `\restrict`/`\unrestrict` lines first (`awk` filter in the test notes). |
+| 156 | **ntfy has NO clustering, and a second live instance fails SILENTLY rather than loudly.** ntfy's subscriber registry is per-process and in-memory; the PostgreSQL backend (`database-url`, non-experimental since v2.27.0) is a message *cache* for `since=`/`poll=` replay, NOT a delivery bus. Two instances sharing one database therefore do not fan out to each other's subscribers. Because Traefik never terminates established connections on router changes and `idleTimeout=0` (gotcha 150), a client that lands on the standby gets a valid `200 OK` subscription stream that receives nothing — indefinitely. Worse than a plain outage: a `poll=1` probe against that same standby *succeeds* (it reads the shared cache), so naive health checks report green while live delivery is dead. | ntfy is deployed on both nodes but FENCED to the PG primary by `enforce_ntfy_fence()` in `pg-role-watchdog.sh.j2` — stopped on the standby, started on the new primary only *after* pgproxy is retargeted (same pool-poisoning constraint as gotcha 148). Fenced, the standby carries no ntfy router at all, so a stale client fails fast and re-resolves the 30s-TTL record; already-pinned connections are cut by the existing `:443` conn-kill sweep. ntfy is deliberately NOT in the watchdog's `docker restart` cascade — the fence already gives it a clean start post-retarget. It holds no durable in-memory state, so stop/start costs only a client reconnect (verified: a message published before a container restart is still readable after). `deploy-ntfy.yml`, `site.yml` and `rolling-update.yml` all re-place the fence inline after `compose up`, which starts it on both nodes. The test suite asserts running-on-primary/stopped-on-standby. |
+| 157 | **`ntfy user hash` asks for the password AND a confirmation, so piping it once fails.** `echo "$pw" \| ntfy user hash` returns `confirm: password cannot be empty` and produces no hash — which, fed into a config template, silently yields a broken `auth-users` entry. The prompts go to **stderr** and the bare bcrypt hash to **stdout**. | Pipe the password twice and drop stderr: `printf '%s\n%s\n' "$pw" "$pw" \| docker run --rm -i binwiederhier/ntfy:vX user hash 2>/dev/null`. Related: declarative `auth-tokens` entries must match ntfy's own generator format **exactly — `tk_` + 29 lowercase-alphanumerics, 32 chars total** (verify with `ntfy token generate`). A malformed token does NOT degrade gracefully: **the server refuses to start**, logging `invalid auth-tokens: ... use 'ntfy token generate'` and exiting. Under fencing that means the watchdog restarts a container that dies every cycle, so a one-character typo in `ntfy_extra_tokens` takes ntfy down completely rather than just disabling that token. Gatus validates the same `tk_` prefix independently. The role asserts both the 32-char length and the 60-char bcrypt shape, and hashes ONCE into `.generated_secrets/ntfy_admin_password_hash` (bcrypt is salted; re-hashing every run would rewrite the config and bounce the container on every deploy). |
 
 ---
 
@@ -395,11 +414,12 @@ Lessons from deployment. These explain **why** the code is written a specific wa
 backbone/
 ├── AGENTS.md              # This file
 ├── README.md              # Project overview
-├── scripts/                         # Self-heal guard installers for unmanaged NetBird peers
+├── scripts/                         # Client-side installers for unmanaged machines
 │   ├── netbird-selfheal-install.sh  # Linux (systemd timer)
-│   ├── netbird-selfheal-install.ps1 # Windows (Scheduled Task)
+│   ├── netbird-selfheal-install.ps1 # Windows (Scheduled Task, SYSTEM)
 │   ├── netbird-selfheal-docker.sh   # Containerized client, host cron + docker restart
-│   └── netbird-selfheal-compose.example.yml  # Compose-only: healthcheck + autoheal
+│   ├── netbird-selfheal-compose.example.yml  # Compose-only: healthcheck + autoheal
+│   └── ntfy-notify-install.ps1      # Windows desktop notifier (Scheduled Task, USER)
 ├── .gitignore
 ├── .pre-commit-config.yaml # Pre-commit hooks (gitleaks, yamllint, ansible-lint)
 ├── .github/
@@ -436,6 +456,7 @@ backbone/
 │       ├── netbird_peer/      # NetBird peer enrollment
 │       ├── zitadel/           # Zitadel IAM (OIDC/OAuth2, multi-tenant)
 │       ├── gatus/             # Gatus monitoring (HA dashboard + alert receiver)
+│       ├── ntfy/              # ntfy push notifications (PG backend, fenced to primary)
 │       ├── portainer/         # Portainer CE Docker management (WireGuard-only)
 │       └── backup/            # Restic backup (with logrotate + notifications)
 └── docs/
@@ -461,7 +482,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --tags docker
 ansible-playbook -i inventory/hosts.yml site.yml --tags firewall
 
 # Other available tags: traefik, postgresql, powerdns, dns,
-#   netbird, netbird_management, netbird_peer, zitadel, gatus,
+#   netbird, netbird_management, netbird_peer, zitadel, gatus, ntfy,
 #   portainer, backup, security, ssh, fail2ban, packages, maintenance
 ```
 

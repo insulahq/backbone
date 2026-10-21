@@ -1,0 +1,12 @@
+---
+# Recreating is safe at any time: ntfy holds no durable in-memory state
+# (unlike netbird-server's signal registry, gotcha 148). Subscribers simply
+# reconnect and replay from the PostgreSQL-backed cache via since=.
+- name: restart ntfy
+  community.docker.docker_compose_v2:
+    project_src: "{{ ntfy_install_dir }}"
+    state: present
+    recreate: always
+  # Never start ntfy on the standby — that would expose a server that answers
+  # subscriptions and delivers nothing (see defaults/main.yml).
+  when: inventory_hostname == postgresql_primary_node
