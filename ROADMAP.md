@@ -16,15 +16,15 @@ Two-node active-passive backbone with full HA:
 
 | Service | Version | Both Nodes |
 |---------|---------|:----------:|
-| PostgreSQL + repmgr | 18 + 5.5 | Yes |
-| PowerDNS (Native mode) | 5.0 | Yes |
-| Traefik | 3.6 | Yes |
-| NetBird (management + mesh) | 0.67.0 | Yes |
-| Zitadel IAM | 4.12.3 | Yes |
-| Gatus monitoring | 5.14.0 | Yes |
-| ntfy (optional) | 2.27.0 | Yes (fenced to primary) |
-| Portainer | 2.39.0 | Yes |
-| Restic backup | 0.16.4 | Yes |
+| PostgreSQL + repmgr | 18.6 + 5.5 | Yes |
+| PowerDNS (Native mode) | 5.1.5 | Yes |
+| Traefik | 3.7.15 | Yes |
+| NetBird (management + mesh) | 0.80.0 | Yes |
+| Zitadel IAM | 4.19.5 | Yes |
+| Gatus monitoring | 5.37.0 | Yes |
+| ntfy (optional) | 2.32.0 | Yes (fenced to primary) |
+| Portainer | 2.45.2 | Yes |
+| Restic backup | 0.19.1 | Yes |
 
 ---
 

@@ -11,15 +11,15 @@ Two Debian 13 servers (`ns1` and `ns2`) with automatic failover, encrypted backu
 | Component | Description |
 |-----------|-------------|
 | **WireGuard** | Infrastructure backbone tunnel (zero-dependency private network) |
-| **PowerDNS 5.0** | Authoritative DNS, Native mode (read-write on both nodes), PostgreSQL HA backend |
+| **PowerDNS 5.1** | Authoritative DNS, Native mode (read-write on both nodes), PostgreSQL HA backend |
 | **Traefik 3.7** | Reverse proxy with automatic TLS via DNS-01 ACME, rate limiting |
 | **PostgreSQL 18** | Streaming replication with repmgr 5.5, auto-failover (~60s), split-brain prevention |
-| **NetBird 0.67.0** | WireGuard VPN mesh (management + signal + relay), embedded Dex IdP |
+| **NetBird 0.80.0** | WireGuard VPN mesh (management + signal + relay), embedded Dex IdP |
 | **Zitadel** | Central IAM (OIDC/OAuth2) for service authentication |
 | **Gatus** | HA monitoring dashboard, active health checks, multi-channel alerting |
-| **ntfy 2.27.0** | Optional self-hosted push notifications, PostgreSQL backend, fenced to the PG primary |
+| **ntfy 2.32.0** | Optional self-hosted push notifications, PostgreSQL backend, fenced to the PG primary |
 | **Portainer** | Docker management UI (VPN-only access) |
-| **OpenZiti 1.4.1** | Zero-trust network overlay, active-standby controller, active-active edge routers |
+| **OpenZiti 1.6.21** | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | **Uptime Kuma** | Optional UI-based monitoring for user-managed checks (supplements Gatus) |
 | **Restic** | Encrypted incremental backups to SFTP or S3-compatible storage |
 | **OS hardening** | nftables firewall, fail2ban, SSH hardening, Docker CE |
@@ -85,7 +85,7 @@ Restic backs up to **SFTP** or **S3-compatible storage** (AWS, MinIO, Wasabi, Ba
 ansible-playbook -i inventory/hosts.yml restore.yml --limit ns1
 ```
 
-See [docs/RECOVERY.md](docs/RECOVERY.md) for 13 detailed disaster recovery scenarios.
+See [docs/RECOVERY.md](docs/RECOVERY.md) for 13 detailed disaster recovery scenarios, and [docs/UPGRADING.md](docs/UPGRADING.md) for how version changes are rolled out.
 
 > **CRITICAL:** Back up `ansible/.generated_secrets/` offline — it contains the restic password and Zitadel masterkey (both irrecoverable if lost). See the [Offline Secrets Procedure](docs/RECOVERY.md#offline-secrets-procedure).
 
@@ -189,6 +189,7 @@ ansible/
 docs/
 ├── BOOTSTRAP.md             # Fresh deployment procedure
 ├── RECOVERY.md              # Disaster recovery runbook (13 scenarios)
+├── UPGRADING.md             # Version-change rules + upgrade runbook
 └── DISPERSED_DNS_ARCHITECTURE.md  # PowerDNS architecture
 ```
 

@@ -29,16 +29,16 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 |-----------|---------|-------------|
 | OS | Debian 13 | Hardened with nftables + fail2ban |
 | WireGuard | kernel | Infrastructure backbone tunnel, zero-dependency private network |
-| PowerDNS | 5.1.3 | Both nodes Native (read-write), shared PostgreSQL HA backend |
-| Traefik | 3.7 | Reverse proxy, DNS-01 ACME via PowerDNS API |
-| PostgreSQL | 18 | Streaming replication via repmgr 5.5, auto-failover |
-| NetBird | 0.74.7 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS, primary-only (fenced, gotchas 149/150) |
-| NetBird Reverse Proxy | 0.74.7 | Public HTTPS ingress to NetBird-mesh services. Sits behind Traefik in TCP-passthrough mode at `*.proxy.<domain>`; terminates TLS itself with ACME TLS-ALPN-01. Version must track the server (0.73.x showed skew breaks it). |
-| Zitadel | 4.16.1 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
-| Gatus | 5.36.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
-| ntfy | 2.27.0 | Push notifications, PostgreSQL backend, primary-only (fenced, gotcha 156). Optional — `ntfy_enabled` |
-| OpenZiti | 1.6.17 | Zero-trust network overlay, active-standby controller, active-active edge routers |
-| Portainer | 2.39.5 | Docker management UI, WireGuard + NetBird access |
+| PowerDNS | 5.1.5 | Both nodes Native (read-write), shared PostgreSQL HA backend |
+| Traefik | 3.7.15 | Reverse proxy, DNS-01 ACME via PowerDNS API |
+| PostgreSQL | 18.6 | Streaming replication via repmgr 5.5, auto-failover. Image pinned to a dated build (gotcha 158) |
+| NetBird | 0.80.0 | Combined management+signal+relay, PostgreSQL backend, active-passive DNS, primary-only (fenced, gotchas 149/150) |
+| NetBird Reverse Proxy | 0.80.0 | Public HTTPS ingress to NetBird-mesh services. Sits behind Traefik in TCP-passthrough mode at `*.proxy.<domain>`; terminates TLS itself with ACME TLS-ALPN-01. Version must track the server (0.73.x showed skew breaks it). |
+| Zitadel | 4.19.5 | Central IAM (OIDC/OAuth2), PostgreSQL backend, multi-tenant |
+| Gatus | 5.37.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
+| ntfy | 2.32.0 | Push notifications, PostgreSQL backend, primary-only (fenced, gotcha 156). Optional — `ntfy_enabled` |
+| OpenZiti | 1.6.21 | Zero-trust network overlay, active-standby controller, active-active edge routers |
+| Portainer | 2.45.2 | Docker management UI, WireGuard + NetBird access |
 | Restic | 0.19.1 | Incremental backup to SFTP backup server |
 
 ### Maintenance Automation
@@ -464,6 +464,7 @@ backbone/
 └── docs/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
     ├── RECOVERY.md                # Disaster recovery runbook
+    ├── UPGRADING.md               # Version-change rules + runbook for the current pins
     └── DISPERSED_DNS_ARCHITECTURE.md
 ```
 

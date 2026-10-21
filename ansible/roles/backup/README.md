@@ -1,7 +1,7 @@
 # Backup Role
 
 > **Status:** COMPLETE — Ready for deployment
-> **Tool:** Restic 0.16.4
+> **Tool:** Restic 0.19.1
 > **Backends:** SFTP or S3-compatible storage (AWS, MinIO, Wasabi, Backblaze B2)
 
 ## Overview
@@ -83,7 +83,7 @@ restic_password: "<64-char-random-string>"
 See `defaults/main.yml` for all options.
 
 **Key defaults:**
-- `restic_version: "0.16.4"`
+- `restic_version: "0.19.1"`
 - `restic_backup_time: "02:00"` (2 AM daily)
 - `restic_keep_daily: 7`
 - `restic_keep_weekly: 4`
