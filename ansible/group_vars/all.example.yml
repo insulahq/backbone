@@ -221,7 +221,7 @@ gatus_domain: "status.{{ platform_domain }}"
 # users created with `ntfy user add` on the server will not survive a deploy.
 # Generate a password hash with:
 #   printf '%s\n%s\n' 'thepassword' 'thepassword' \
-#     | docker run --rm -i binwiederhier/ntfy:v2.27.0 user hash 2>/dev/null
+#     | docker run --rm -i binwiederhier/ntfy:v2.32.0 user hash 2>/dev/null
 # (the password must be piped TWICE — the command asks for confirmation)
 # ntfy_extra_users:
 #   - "phone:$2a$10$<bcrypt-hash>:user"

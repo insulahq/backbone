@@ -26,7 +26,7 @@
 # Tunables:
 #   -Topic        platform-alerts   topic to subscribe to
 #   -MinPriority  1                 ignore messages below this priority (1-5)
-#   -Version      2.27.0            ntfy release to install
+#   -Version      2.32.0            ntfy release to install
 #
 # The token is stored DPAPI-encrypted (decryptable only by this user on this
 # machine) and passed to ntfy via the environment, never on the command line
@@ -42,7 +42,7 @@ param(
     [string]$Server,
     [string]$Topic = 'platform-alerts',
     [string]$Token,
-    [string]$Version = '2.27.0',
+    [string]$Version = '2.32.0',
     [ValidateRange(1, 5)][int]$MinPriority = 1,
     [switch]$Uninstall
 )

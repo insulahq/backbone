@@ -31,8 +31,9 @@ services:
       - traefik.http.routers.ntfy.service=ntfy
       - traefik.http.services.ntfy.loadbalancer.server.port={{ ntfy_port }}
     # The image is Alpine/busybox: no curl, but wget IS present (verified
-    # against v2.27.0 — unlike the gatus image, gotcha 74). /v1/health returns
-    # {"healthy":true}. Gatus additionally probes the public URL.
+    # against v2.27.0 and v2.32.0 — unlike the gatus image, gotcha 74).
+    # /v1/health returns {"healthy":true} (v2.30+ appends "role":"active").
+    # Gatus additionally probes the public URL.
     healthcheck:
       test:
         - CMD-SHELL

@@ -23,7 +23,14 @@
 # v2.27.0 is the release that dropped the "experimental" label from
 # PostgreSQL support ("has been running ntfy.sh for a while now"), which is
 # what makes the HA model above possible — never pin below it.
-ntfy_version: "v2.27.0"
+# v2.32.0: message store schema 15 → 17 (additive: claimed_at column + a
+# since=<id> index). From v2.31.1 on, an older ntfy starts with a warning on
+# a newer schema, so rollbacks to >= v2.31.1 need no manual step; rolling
+# back to an older release first needs
+# `UPDATE schema_version SET version = 15 WHERE store = 'message'`.
+# Skip v2.29.0 (PostgreSQL memory growth) and v2.31.0 (since= reconnects
+# read whole topics) — both fixed in later releases.
+ntfy_version: "v2.32.0"
 ntfy_image: "binwiederhier/ntfy:{{ ntfy_version }}"
 
 # Installation directory (under /opt — covered by the backup role's sweep)
