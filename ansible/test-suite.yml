@@ -147,13 +147,17 @@
       run_once: true
       tags: [tls]
 
+    # Record on the host that ran the check — NOT run_once: set_fact with
+    # run_once assigns the fact to EVERY host in the play, which overwrote the
+    # other node's accumulated _test_results with this node's list (all of
+    # the other node's earlier results silently vanished from the summary).
     - name: "TLS | Record result — valid certificates"
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'Valid TLS cert (' + item.item + ')', 'host': inventory_hostname, 'passed': item is success}] }}"
       loop: "{{ _t_tls_certs.results }}"
       loop_control:
         label: "{{ item.item }}"
-      run_once: true
+      when: inventory_hostname == ansible_play_batch | first
       tags: [tls]
 
     - name: "TLS | HTTP→HTTPS redirect"
@@ -266,6 +270,25 @@
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'Replication streaming (' + (_t_pg_repl_primary.stdout | default('none') | trim) + ')', 'host': inventory_hostname, 'passed': 'streaming' in (_t_pg_repl_primary.stdout | default(''))}] }}"
       when: inventory_hostname == _pg_primary
+      tags: [postgresql]
+
+    # No replication slots are used, so wal_keep_size is the only WAL kept for
+    # a reconnecting standby; at 0 one primary restart strands it (gotcha 151).
+    # Checked on both nodes — the standby becomes the primary after a failover.
+    - name: "PostgreSQL | WAL retention for standby reconnects"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >
+          psql -U postgres -tAc
+          "SELECT current_setting('wal_keep_size') || '|' || (pg_size_bytes(current_setting('wal_keep_size')) >= pg_size_bytes('1GB'))"
+      register: _t_pg_wal_keep
+      ignore_errors: true
+      changed_when: false
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — WAL retention"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'WAL retention wal_keep_size >= 1GB (' + (_t_pg_wal_keep.stdout | default('?|') | trim).split('|')[0] + ')', 'host': inventory_hostname, 'passed': (_t_pg_wal_keep.stdout | default('') | trim).endswith('|true')}] }}"
       tags: [postgresql]
 
     # ------------------------------------------------------------------
@@ -546,8 +569,10 @@
     - name: "OpenZiti | Record result — Edge API"
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'OpenZiti Edge API reachable', 'host': inventory_hostname, 'passed': _t_ziti_api is success}] }}"
-      run_once: true
-      when: openziti_enabled | default(false) | bool
+      # Not run_once — see "TLS | Record result".
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname == ansible_play_batch | first
       tags: [openziti]
 
     # ------------------------------------------------------------------
@@ -787,6 +812,25 @@
       set_fact:
         _test_results: "{{ _test_results + [{'name': 'PG maintenance timer', 'host': inventory_hostname, 'passed': _t_maint_pg.rc | default(1) == 0}] }}"
       tags: [maintenance]
+
+    # An alert name without a matching Gatus external endpoint 404s on every
+    # push and never reaches anyone — PG-Standby-Streaming did exactly that for
+    # weeks (gotcha 151). platform-alert.sh logs each rejected push.
+    - name: "Maintenance | Alert pushes rejected by Gatus (last 2h)"
+      # Endpoint keys are [a-z0-9_.-]; the class also keeps this command's own
+      # text (Ansible logs module invocations to the journal) from matching.
+      shell: >-
+        journalctl --since -2h --no-pager -o cat 2>/dev/null
+        | grep -oE 'WARNING: Failed to push to Gatus \(endpoint: [a-z0-9_.-]+\)' | sort -u
+      register: _t_maint_gatus_push
+      changed_when: false
+      failed_when: false
+      tags: [maintenance, gatus]
+
+    - name: "Maintenance | Record result — alert pushes accepted by Gatus"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Alert pushes accepted by Gatus' + (' (rejected: ' + (_t_maint_gatus_push.stdout_lines | map('regex_replace', '^.*endpoint: ', '') | join(', ')) + ')' if _t_maint_gatus_push.stdout_lines | length > 0 else ''), 'host': inventory_hostname, 'passed': _t_maint_gatus_push.stdout_lines | length == 0}] }}"
+      tags: [maintenance, gatus]
 
     # ------------------------------------------------------------------
     # Container Health Tests (all Docker containers)
