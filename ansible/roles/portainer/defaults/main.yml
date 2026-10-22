@@ -8,9 +8,12 @@
 # 2.45.x is the current LTS line (rolls up 2.40-2.44 STS). 2.45.2 fixes
 # GHSA-9gxj-xvxm-77rj and GHSA-jmr9-98g4-2phv (critical, need a logged-in
 # non-admin user — none exist here) that the 2.39 LTS line never received.
+# 2.45.3 moves to Go 1.26.10 (critical stdlib / x/net CVEs) and drops the
+# eMudhra CA (CVE-2026-111943) — no OAuth/LDAP is configured here, so that
+# breaking change does not apply.
 # Each node has its own DB; Portainer backs it up before migrating, so
 # rollback = old image (or restore /opt/portainer/data).
-portainer_version: "2.45.2"
+portainer_version: "2.45.3"
 portainer_image: "portainer/portainer-ce:{{ portainer_version }}"
 
 # Installation directory

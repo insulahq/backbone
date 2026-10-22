@@ -118,7 +118,7 @@ ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml -e dns_failover_prima
 - Rollback: restore the `zitadel` dump + `v4.16.1` on both nodes (no
   downgrade path otherwise).
 
-### 4. Traefik v3.7.15, Gatus v5.37.0, Portainer 2.45.2, ntfy v2.32.0
+### 4. Traefik v3.7.15, Gatus v5.37.0, Portainer 2.45.3, ntfy v2.32.0
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <standby>

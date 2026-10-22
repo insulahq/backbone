@@ -23,7 +23,7 @@ Two-node active-passive backbone with full HA:
 | Zitadel IAM | 4.19.5 | Yes |
 | Gatus monitoring | 5.37.0 | Yes |
 | ntfy (optional) | 2.32.0 | Yes (fenced to primary) |
-| Portainer | 2.45.2 | Yes |
+| Portainer | 2.45.3 | Yes |
 | Restic backup | 0.19.1 | Yes |
 
 ---

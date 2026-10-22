@@ -38,7 +38,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 | Gatus | 5.37.0 | HA monitoring dashboard + alert receiver, PostgreSQL backend |
 | ntfy | 2.32.0 | Push notifications, PostgreSQL backend, primary-only (fenced, gotcha 156). Optional — `ntfy_enabled` |
 | OpenZiti | 1.6.21 | Zero-trust network overlay, active-standby controller, active-active edge routers |
-| Portainer | 2.45.2 | Docker management UI, WireGuard + NetBird access |
+| Portainer | 2.45.3 | Docker management UI, WireGuard + NetBird access |
 | Restic | 0.19.1 | Incremental backup to SFTP backup server |
 
 ### Maintenance Automation
