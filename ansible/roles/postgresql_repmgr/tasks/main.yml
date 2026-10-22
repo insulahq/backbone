@@ -108,18 +108,17 @@
     dest: /usr/local/bin/netbird-peer-wakeup.sh
     mode: '0755'
 
-- name: Deploy NetBird peer health check script (periodic)
+- name: Deploy NetBird connectivity check script (periodic)
   template:
     src: netbird-peer-health.sh.j2
     dest: /usr/local/bin/netbird-peer-health.sh
     mode: '0755'
 
-# API token unlocks the health checker's management-API mode (authoritative
-# `connected` flag per peer instead of ping-based guessing). Create a PAT via
-# a NetBird service user (dashboard: Team > Service Users) and set
-# `netbird_admin_pat` in group_vars/all.yml. Without it the checker falls
-# back to ping mode.
-- name: Deploy NetBird API token for peer health checks (management-API mode)
+# Management-API token for the destructive failover drill's mesh-reconvergence
+# checks (test-suite.yml --tags failover). Create a PAT via a NetBird service
+# user (dashboard: Team > Service Users) and set `netbird_admin_pat` in
+# group_vars/all.yml; without it those drill checks skip themselves.
+- name: Deploy NetBird API token for the failover drill
   copy:
     content: "{{ netbird_admin_pat }}"
     dest: /etc/netbird-api-token
@@ -129,8 +128,8 @@
   no_log: true
   when: netbird_admin_pat is defined and netbird_admin_pat | length > 0
 
-# Explicitly emptying the var ("netbird_admin_pat: ''") revokes API mode and
-# removes the stale credential file; leaving it undefined leaves any existing
+# Explicitly emptying the var ("netbird_admin_pat: ''") removes the stale
+# credential file; leaving it undefined leaves any existing
 # file alone.
 - name: Remove NetBird API token when explicitly cleared
   file:
@@ -138,19 +137,19 @@
     state: absent
   when: netbird_admin_pat is defined and netbird_admin_pat | length == 0
 
-- name: Deploy NetBird peer health systemd timer
+- name: Deploy NetBird connectivity check systemd timer
   template:
     src: netbird-peer-health.timer.j2
     dest: /etc/systemd/system/netbird-peer-health.timer
     mode: '0644'
 
-- name: Deploy NetBird peer health systemd service
+- name: Deploy NetBird connectivity check systemd service
   template:
     src: netbird-peer-health.service.j2
     dest: /etc/systemd/system/netbird-peer-health.service
     mode: '0644'
 
-- name: Enable + start NetBird peer health timer
+- name: Enable + start NetBird connectivity check timer
   systemd:
     name: netbird-peer-health.timer
     daemon_reload: true

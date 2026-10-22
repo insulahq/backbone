@@ -152,8 +152,8 @@ ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <primary>
 ```
 
 - A Traefik restart on the primary closes every client connection; NetBird
-  peers redial (clean resets recover in ~30 s). Watch the
-  `NetBird-Mesh-Peers-Healthy` Gatus check afterwards.
+  peers redial (clean resets recover in ~30 s). Check the peer list in the
+  NetBird dashboard afterwards.
 
 ### 5. Zitadel v4.19.5
 
@@ -207,9 +207,12 @@ ansible-playbook -i inventory/hosts.yml deploy-netbird-proxy.yml -e dns_failover
 ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
 ```
 
-- A server restart wipes in-memory signal state (gotcha 148): watch
-  `NetBird-Mesh-Peers-Healthy`; peers without the self-heal guard may need
-  `netbird down && netbird up`.
+- A server restart wipes in-memory signal state (gotcha 148): check the
+  dashboard's peer list (or `peer_status_last_seen` in the `netbird` DB's
+  `peers` table — `peer_status_connected` is unreliable right after a server
+  restart);
+  peers without the self-heal guard may need `netbird down && netbird up`.
+  `NetBird-Connected` in Gatus covers only the servers' own clients.
 - Unmanaged peers: owners install exactly 0.80.0 (`apt install
   netbird=0.80.0 && apt-mark hold netbird`, or the 0.80.0 Windows installer).
 - Check the dashboard login callback (`/nb-auth`). The repo's nginx override

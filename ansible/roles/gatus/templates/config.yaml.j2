@@ -156,7 +156,8 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: NetBird-Mesh-Peers-Healthy
+  # This server's own NetBird client (management + signal), not other peers.
+  - name: NetBird-Connected
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:

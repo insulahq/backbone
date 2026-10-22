@@ -58,8 +58,9 @@ Before any recovery, ensure you have:
   On the standby, both containers being **stopped is expected** — do not start them manually.
 - NetBird external peers: clients with the self-heal guard (`netbird-selfheal.timer`)
   reconnect automatically within ~6 min of a hard failover; unguarded clients recover via
-  their own reconnect logic or a manual `netbird down && netbird up` (watch the
-  `NetBird-Mesh-Peers-Healthy` Gatus endpoint for stragglers)
+  their own reconnect logic or a manual `netbird down && netbird up` (find
+  stragglers in the NetBird dashboard's peer list; the `NetBird-Connected` Gatus
+  endpoint covers only the servers' own clients)
 - OpenZiti: Router on surviving node stays healthy. If controller was on the failed node,
   the watchdog on the surviving node promotes itself (~90s). Routers reconnect via
   `127.0.0.1` (host network). Edge API and ZAC console resume on the surviving node.
