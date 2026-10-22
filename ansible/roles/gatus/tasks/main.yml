@@ -253,28 +253,6 @@
     mode: '0640'  # sourced by host root scripts only; contains Gatus webhook URL
   tags: [gatus]
 
-# --- Restart PostgreSQL so it can deliver alerts to Gatus ---
-# PostgreSQL's entrypoint uses GATUS_URL/GATUS_TOKEN env vars. On initial deploy
-# (before Gatus existed), the Gatus container wasn't reachable. Recreating
-# PostgreSQL now reconnects it to the Gatus network endpoint.
-
-- name: Check if PostgreSQL container is running
-  community.docker.docker_container_info:
-    name: postgresql
-  register: pg_container_info
-  ignore_errors: true
-  tags: [gatus]
-
-- name: Recreate PostgreSQL to connect to Gatus for alert delivery
-  community.docker.docker_compose_v2:
-    project_src: /opt/postgresql
-    state: present
-    recreate: always
-  when:
-    - pg_container_info is success
-    - pg_container_info.container.State.Running | default(false)
-  tags: [gatus]
-
 # --- Status display ---
 
 - name: Display Gatus deployment status

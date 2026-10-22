@@ -58,6 +58,11 @@
   notify: restart netbird-proxy
   tags: [netbird-proxy, proxy]
 
+# Same as netbird_management: apply the "restart netbird-proxy" handler before
+# the fence below, not after it at the end of the play.
+- name: Apply pending netbird-proxy restarts before fencing
+  meta: flush_handlers
+
 - name: Start netbird-proxy stack
   community.docker.docker_compose_v2:
     project_src: "{{ netbird_proxy_install_dir }}"
