@@ -22,6 +22,7 @@
 | 11 | [Backup repository issues](#scenario-11-backup-issues) | Manual | Varies | Previous backup |
 | 12 | [Control machine lost](#scenario-12-control-machine-lost) | Manual | 1-4 hours | 0 (if servers up) |
 | 13 | [OpenZiti controller down](#scenario-13-openziti-controller-down) | Automatic | ~90s | 0 (DB synced) |
+| 14 | [Zitadel DB password exposed](#scenario-14-zitadel-db-password-exposed) | Manual (one deploy) | ~5 min | N/A |
 
 ---
 
@@ -261,7 +262,7 @@ where no PKI survives anywhere. It invalidates every enrolled identity.
    ```
    Otherwise `openziti PKI rsync` (delegated to surviving node) fails with "REMOTE HOST IDENTIFICATION HAS CHANGED" or "No ED25519 host key is known".
 
-2. **Zitadel DB password may not be in `.generated_secrets/`.** On clusters set up before this drill fix, `.generated_secrets/zitadel_db_password` is missing — Ansible will generate a *new* password and ns2's Zitadel will fail to authenticate against the existing PG user. Before running `site.yml`, extract the real password from the surviving node:
+2. **Zitadel DB password may not be in `.generated_secrets/`.** The role fails fast when `.generated_secrets/zitadel_db_password` is missing. Either recover the value from the surviving node:
    ```bash
    # On surviving node (ns1):
    grep '^      Password:' /opt/zitadel/config.yaml | head -1 | sed 's/^ *Password: *//;s/"//g'
@@ -269,6 +270,7 @@ where no PKI survives anywhere. It invalidates every enrolled identity.
    printf '%s' '<THE_PASSWORD>' > ansible/.generated_secrets/zitadel_db_password
    chmod 600 ansible/.generated_secrets/zitadel_db_password
    ```
+   or put a new value there ([Scenario 14](#scenario-14-zitadel-db-password-exposed)): the zitadel role sets the PG role's password from the file on every deploy. The masterkey has no such way out — it must be recovered.
 
 3. **NetBird peer enrollment is manual.** `deploy-netbird-peers.yml` installs the client but does not auto-enroll. Create a setup key in the dashboard, then on the new node:
    ```bash
@@ -572,6 +574,29 @@ If the PKI directory (`/opt/openziti/pki/`) is lost on both nodes, a full re-boo
 ansible-playbook -i inventory/hosts.yml deploy-openziti.yml
 ```
 This regenerates all certificates and re-enrolls routers. Existing enrolled tunneler identities will need re-enrollment.
+
+---
+
+## Scenario 14: Zitadel DB Password Exposed
+
+**Symptoms:** the `zitadel` PostgreSQL role's password showed up somewhere it should not (a log, a transcript, a screen share), or it is due for rotation.
+
+The file `ansible/.generated_secrets/zitadel_db_password` is authoritative. On every run the zitadel role logs in as `zitadel` with the file's value and, if PostgreSQL answers "password authentication failed", sets the role's password from the file (`roles/zitadel/tasks/db_password.yml`). It connects the way Zitadel does — local node, then the peer, read-write only — so it always reaches the primary.
+
+1. Replace the file's content with a new value, generated the way `setup.sh` does (32 alphanumeric characters; see its `zitadel_db_password` block). Keep the file mode `0600`.
+2. Deploy, primary first (the playbook's default order):
+   ```bash
+   cd ansible
+   ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml
+   ```
+   The first play changes the role's password and recreates Zitadel with the new config. In between (~20-30 s) the primary's Zitadel keeps its open DB connections but cannot open new ones; the standby's Zitadel cannot open new ones until the second play recreates it, which clients do not see.
+3. Verify:
+   ```bash
+   ansible-playbook -i inventory/hosts.yml test-suite.yml --tags zitadel,postgresql
+   ```
+   The `postgresql` tests include a check that no PG log line carries a `PASSWORD '...'` clause.
+
+Do not scrub a leaked line out of a running container's log file — Docker tracks the file's size in memory, and editing it in place breaks `docker logs --tail` and `-f` for that container (gotcha 163). Rotate instead; the old lines go when the container is next recreated or its log rotates.
 
 ---
 
