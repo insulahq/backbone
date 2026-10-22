@@ -263,6 +263,26 @@
   ignore_errors: true
   when: not (postgresql_auto_failback | bool)
 
+# Before compose up: a pin change recreates the container below, and the
+# primary's restart is exactly when the standby needs the retained WAL
+# (gotcha 151). Fresh clusters get the value from initdb's postgresql.conf;
+# a clone copies it from the primary. ALTER SYSTEM also works on a standby.
+- name: Ensure WAL retention for standby reconnects (wal_keep_size)
+  shell: |
+    set -euo pipefail
+    docker inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' postgresql 2>/dev/null | grep -qx true || exit 0
+    ok=$(docker exec postgresql psql -U postgres -tAc \
+      "SELECT pg_size_bytes(current_setting('wal_keep_size')) = pg_size_bytes('{{ postgresql_wal_keep_size }}')")
+    if [ "$ok" != "t" ]; then
+      docker exec postgresql psql -U postgres -qc "ALTER SYSTEM SET wal_keep_size = '{{ postgresql_wal_keep_size }}'"
+      docker exec postgresql psql -U postgres -qtAc "SELECT pg_reload_conf()" >/dev/null
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: _pg_wal_keep
+  changed_when: "'changed' in _pg_wal_keep.stdout"
+
 - name: Start PostgreSQL stack
   community.docker.docker_compose_v2:
     project_src: "{{ postgresql_install_dir }}"

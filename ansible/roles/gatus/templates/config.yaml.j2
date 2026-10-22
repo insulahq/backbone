@@ -148,6 +148,14 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
+  # Pushed every watchdog cycle: the standby reports its own WAL receiver, the
+  # primary reports whether a standby streams from it (gotcha 151). Without
+  # this entry every push 404s and the alert only ever reached the journal.
+  - name: PG-Standby-Streaming
+    group: {{ host }}
+    token: "{{ gatus_external_token }}"
+    conditions:
+      - "[CONNECTED] == true"
   - name: NetBird-Mesh-Peers-Healthy
     group: {{ host }}
     token: "{{ gatus_external_token }}"

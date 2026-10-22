@@ -181,6 +181,10 @@ ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <primary> 
 - The primary's container restart normally completes inside repmgrd's 60 s
   failover debounce. If a failover does happen, auto-failback returns the
   primary role afterwards.
+- No replication slots are used, so `wal_keep_size` is the only WAL the
+  primary keeps for the standby across its restart (gotcha 151). The role sets
+  it before recreating the container; confirm `SHOW wal_keep_size` is not `0`
+  on the primary before its run, and that the standby streams again after it.
 - After both nodes: `SELECT version();` → 18.6 on both; then check GIN
   `reltuples` (18.6 release note — a parallel GIN build could store Infinity
   or NaN, which stops autovacuum on that table) in every database, and

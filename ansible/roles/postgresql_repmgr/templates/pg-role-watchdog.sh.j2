@@ -128,28 +128,53 @@ if [ -n "$GATUS_TOKEN" ]; then
     >/dev/null 2>&1 || true
 fi
 
-# Standby replication watch (gotcha 151) — a WAL gap that develops while the
-# standby is LIVE (walreceiver dead, primary already recycled the segment)
-# is NOT caught by the entrypoint's startup-replay detector: PG stays up,
-# serves reads, retries forever, and silently falls behind. Observed
-# 2026-07-22 after back-to-back node reboots. Alert so the operator can
+# Replication watch (gotcha 151) — a WAL gap that develops while the standby
+# is LIVE (walreceiver dead, primary already recycled the segment) is NOT
+# caught by the entrypoint's startup-replay detector: PG stays up, serves
+# reads, retries forever, and silently falls behind. Alert so the operator can
 # re-clone (docker stop postgresql; wipe postgresql_postgresql_data; start —
 # the entrypoint's fresh-standby path clones from the primary).
+#   standby: is my WAL receiver streaming?
+#   primary: is a standby streaming from me? (also catches a dead standby)
+# Healthy only when the SAME receiver/sender pid streamed on two consecutive
+# cycles: a standby stuck on a removed segment reconnects every 5 s, and each
+# short-lived attempt can read as 'streaming' for an instant — a bare
+# status='streaming' check kept resetting the counter, so the alert rarely
+# fired. The state is pushed to Gatus every cycle so the alert also resolves.
 if [ "$PG_ROLE" = "t" ]; then
-  _WAL_STREAMING=$(docker exec postgresql psql -U postgres -tAc "SELECT count(*) FROM pg_stat_wal_receiver WHERE status='streaming';" 2>/dev/null | tr -d ' ' || echo "0")
-  if [ "${_WAL_STREAMING:-0}" = "0" ]; then
-    STREAM_FAILS=$(cat /var/run/pg-stream-fails 2>/dev/null || echo 0)
-    STREAM_FAILS=$((STREAM_FAILS + 1))
-    echo "$STREAM_FAILS" > /var/run/pg-stream-fails
-    # ~2 min of confirmed non-streaming before alerting; re-alert ~20-minutely
-    if [ "$STREAM_FAILS" -eq 4 ] || [ $((STREAM_FAILS % 40)) -eq 0 ]; then
-      echo "$(date): WARNING — standby has no streaming WAL receiver ($STREAM_FAILS consecutive checks)"
-      source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
-      platform_alert "warning" "PG-Standby-Streaming" "Standby {{ inventory_hostname }} has NO streaming WAL receiver (${STREAM_FAILS} checks ≈ $((STREAM_FAILS / 2)) min). Likely WAL gap — see gotcha 151 for the re-clone procedure."
-    fi
+  _STREAM_SQL="SELECT pid FROM pg_stat_wal_receiver WHERE status = 'streaming'"
+  _STREAM_MSG="Standby {{ inventory_hostname }} has no stable streaming WAL receiver"
+else
+  _STREAM_SQL="SELECT pid FROM pg_stat_replication WHERE state = 'streaming' ORDER BY pid LIMIT 1"
+  _STREAM_MSG="Primary {{ inventory_hostname }} has no standby streaming from it"
+fi
+_STREAM_PID=$(docker exec postgresql psql -U postgres -tAc "$_STREAM_SQL" 2>/dev/null | tr -d ' ' || true)
+_LAST_STREAM_PID=$(cat /var/run/pg-stream-pid 2>/dev/null || true)
+echo "${_STREAM_PID}" > /var/run/pg-stream-pid
+if [ -n "$_STREAM_PID" ] && [ "$_STREAM_PID" = "$_LAST_STREAM_PID" ]; then
+  rm -f /var/run/pg-stream-fails
+  STREAM_OK=true
+else
+  STREAM_FAILS=$(cat /var/run/pg-stream-fails 2>/dev/null || echo 0)
+  STREAM_FAILS=$((STREAM_FAILS + 1))
+  echo "$STREAM_FAILS" > /var/run/pg-stream-fails
+  # ~2 min of confirmed non-streaming before alerting; re-alert ~20-minutely
+  if [ "$STREAM_FAILS" -lt 4 ]; then
+    STREAM_OK=true
   else
-    rm -f /var/run/pg-stream-fails
+    STREAM_OK=false
   fi
+  if [ "$STREAM_FAILS" -eq 4 ] || [ $((STREAM_FAILS % 40)) -eq 0 ]; then
+    echo "$(date): WARNING — ${_STREAM_MSG} ($STREAM_FAILS consecutive checks)"
+    source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
+    platform_alert "warning" "PG-Standby-Streaming" "${_STREAM_MSG} (${STREAM_FAILS} checks ≈ $((STREAM_FAILS / 2)) min). Standby side: likely WAL gap — see gotcha 151 for the re-clone procedure."
+  fi
+fi
+if [ -n "$GATUS_TOKEN" ]; then
+  curl -fsS --max-time 3 -X POST \
+    "http://127.0.0.1:8080/api/v1/endpoints/{{ inventory_hostname }}_pg-standby-streaming/external?success=${STREAM_OK}" \
+    -H "Authorization: Bearer ${GATUS_TOKEN}" \
+    >/dev/null 2>&1 || true
 fi
 
 # ==========================================================================

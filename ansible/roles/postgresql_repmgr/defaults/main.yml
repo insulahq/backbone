@@ -77,6 +77,13 @@ postgresql_max_slot_wal_keep_size: "10GB"   # Cap WAL retained by replication sl
                                             # Prevents unbounded WAL growth when standby
                                             # is offline. Standby must re-clone if it falls
                                             # behind this limit.
+# WAL the primary keeps for a disconnected standby (gotcha 151). repmgr runs
+# without replication slots here, so this is the ONLY retention: at the
+# PostgreSQL default of 0, a single primary restart can recycle the segment the
+# standby resumes from, and the standby then retries a removed segment forever.
+# ~370 MB/day of WAL at current load → 2GB covers several days of disconnect.
+# Applied to running clusters with ALTER SYSTEM + reload (no restart).
+postgresql_wal_keep_size: "2GB"
 
 # Connection limit — the default 100 was exhausted in production (2026-07-21:
 # 2x zitadel pools + pdnsadmin + netbird + pdns + gatus hit 100/100 during the
