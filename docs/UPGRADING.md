@@ -12,6 +12,13 @@ pinned versions.
 - Role deploys (`deploy-*.yml`, `site.yml`) template a new compose file and
   pull with `pull: missing`, so **running the deploy playbook after a pin
   change is the upgrade**.
+- **Role dependencies redeploy shared services.** `zitadel`, `gatus`, `ntfy`
+  and `netbird_management` declare `traefik` and `postgresql_repmgr` (plus
+  `common`) in `meta/main.yml`, so `deploy-zitadel.yml`, `deploy-gatus.yml`,
+  `deploy-ntfy.yml` and `deploy-netbird.yml` also apply any pending Traefik
+  and PostgreSQL pin — on the primary first, breaking rules 3 and 5. Upgrade
+  PostgreSQL and Traefik before any of those (the runbook order below), so
+  the dependency runs find nothing to change.
 - `rolling-update.yml` reuses the compose files already on the node and
   re-pulls the **same** tags (`pull: always`). It cannot change a pinned
   version, and it refuses `openziti` (its `compose up` would start a second
@@ -28,11 +35,11 @@ pinned versions.
    the new image starts first, and clients are served by the primary.
 3. **PostgreSQL itself: standby first**, then the primary.
 4. **One-way migrations need a dump first** (restic snapshots alone are a
-   slow way back). Before upgrading Zitadel, PowerDNS-Admin or NetBird, dump
+   slow way back). Before upgrading Zitadel, PowerDNS-Admin, NetBird or ntfy, dump
    the affected databases on the primary:
 
    ```bash
-   for db in zitadel pdnsadmin netbird netbird_dex netbird_events; do
+   for db in zitadel pdnsadmin netbird netbird_dex netbird_events ntfy; do
      docker exec postgresql pg_dump -U postgres -Fc "$db" > "/root/pre-upgrade-$db-$(date +%F).dump"
    done
    ```
@@ -48,8 +55,9 @@ pinned versions.
 
 ## Runbook — current pins
 
-Each step stands alone; do them in this order (security urgency first) and
-verify before moving on.
+Do the steps in this order and verify before moving on. Security urgency
+sets the order of 1–2; PostgreSQL and Traefik come before the application
+services because of the role dependencies above.
 
 ### 0. Pre-flight
 
@@ -96,83 +104,16 @@ ansible-playbook -i inventory/hosts.yml deploy-openziti.yml
 - Verify: `test-suite.yml --tags openziti`, console login, routers online.
 - Rollback: previous tags (DB schema unchanged within 1.6.x).
 
-### 3. Zitadel v4.19.5
-
-Security: Login V1 unauthenticated account takeover (GHSA-45f2-5q3r-xgg6,
-critical) and user rename (GHSA-4hgj-wm6c-q7p2).
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml -e dns_failover_primary=<primary>
-```
-
-- On the primary the role pulls the new image, stops the standby's
-  old-version Zitadel (gotcha 159), then runs setup steps 77–79. Expect a
-  short login outage while the primary's instance runs setup; the standby
-  comes back on its own run. Started from a standby by mistake (wrong
-  `dns_failover_primary`), the play fails rather than stop the serving
-  instance.
-- Don't start this during cluster instability: a PG role change mid-upgrade
-  makes the watchdog `docker restart` the quiesced old instance.
-- Verify: `https://<zitadel_domain>/debug/ready` → 200, console login,
-  `test-suite.yml --tags zitadel`.
-- Rollback: restore the `zitadel` dump + `v4.16.1` on both nodes (no
-  downgrade path otherwise).
-
-### 4. Traefik v3.7.15, Gatus v5.37.0, Portainer 2.45.3, ntfy v2.32.0
-
-```bash
-ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <standby>
-ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <primary>
-ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
-ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
-ansible-playbook -i inventory/hosts.yml deploy-ntfy.yml
-```
-
-- A Traefik restart on the primary closes every client connection; NetBird
-  peers redial (clean resets recover in ~30 s). Watch the
-  `NetBird-Mesh-Peers-Healthy` Gatus check afterwards.
-- Portainer backs up its own DB before migrating (rollback: previous tag).
-- ntfy migrates its message store 15 → 17 (additive). Rollback to ≥ v2.31.1
-  is automatic; to v2.27.0 first run
-  `UPDATE schema_version SET version = 15 WHERE store = 'message'`.
-
-### 5. NetBird 0.80.0 (server, reverse proxy, dashboard v2.94.0, clients)
-
-Security: relay pre-auth decoding (server), local root via the client daemon
-socket (client). **Do not take 0.81.x** — see `netbird_management` defaults.
-
-```bash
-# server: PG primary first (migrations run where the new image starts)
-ansible-playbook -i inventory/hosts.yml deploy-netbird.yml -e dns_failover_primary=<primary>
-# reverse proxy right after — rolling-update never touches it, and
-# server/proxy version skew has broken the proxy before
-ansible-playbook -i inventory/hosts.yml deploy-netbird-proxy.yml -e dns_failover_primary=<primary>
-# managed clients (incl. ns1/ns2): installs 0.80.0, downgrades any 0.81.x, holds it
-ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
-```
-
-- A server restart wipes in-memory signal state (gotcha 148): watch
-  `NetBird-Mesh-Peers-Healthy`; peers without the self-heal guard may need
-  `netbird down && netbird up`.
-- Unmanaged peers: owners install exactly 0.80.0 (`apt install
-  netbird=0.80.0 && apt-mark hold netbird`, or the 0.80.0 Windows installer).
-- Check the dashboard login callback (`/nb-auth`) — the dashboard image moved
-  to a newer Alpine/nginx while the repo mounts its own nginx config.
-- Check the self-heal guard on one managed peer: `bash -x
-  /usr/local/bin/netbird-selfheal.sh` (client 0.78+ refuses `netbird up` as
-  root when the active profile belongs to another user; the guard must still
-  reach its remedy).
-- Rollback: restore the three netbird dumps + 0.74.7 / v2.90.5, clients
-  `netbird=0.74.7`.
-
-### 6. PostgreSQL 18.6 + pgproxy socat 1.8.1.3 (maintenance window)
+### 3. PostgreSQL 18.6 + pgproxy socat 1.8.1.3 (maintenance window)
 
 Both change the PostgreSQL compose project, so this recreates `postgresql`
 and `pgproxy` — writes blip on the primary. Security: ~24 CVEs fixed since
 18.4.
 
 ```bash
-# standby first; wait until it streams again before touching the primary
+# standby first; wait until it streams again before touching the primary.
+# Do this BEFORE Zitadel/Gatus/ntfy/NetBird — their role dependencies would
+# otherwise recreate PostgreSQL on the primary first.
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <standby> -e postgresql_primary_node=<primary>
 docker exec postgresql psql -U postgres -c 'SELECT client_addr, state FROM pg_stat_replication'   # on the primary
 ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <primary> -e postgresql_primary_node=<primary>
@@ -203,7 +144,89 @@ ansible-playbook -i inventory/hosts.yml deploy-postgresql.yml --limit <primary> 
 - Rollback: the previous dated tag (any 18.x minor runs on the same data
   directory).
 
-### 7. Afterwards
+### 4. Traefik v3.7.15
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <standby>
+ansible-playbook -i inventory/hosts.yml deploy-traefik.yml --limit <primary>
+```
+
+- A Traefik restart on the primary closes every client connection; NetBird
+  peers redial (clean resets recover in ~30 s). Watch the
+  `NetBird-Mesh-Peers-Healthy` Gatus check afterwards.
+
+### 5. Zitadel v4.19.5
+
+Security: Login V1 unauthenticated account takeover (GHSA-45f2-5q3r-xgg6,
+critical) and user rename (GHSA-4hgj-wm6c-q7p2).
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-zitadel.yml -e dns_failover_primary=<primary>
+```
+
+- On the primary the role pulls the new image, stops the standby's
+  old-version Zitadel (gotcha 159), then runs setup steps 77–79. Expect a
+  short login outage while the primary's instance runs setup; the standby
+  comes back on its own run. Started from a standby by mistake (wrong
+  `dns_failover_primary`), the play fails rather than stop the serving
+  instance.
+- Don't start this during cluster instability: a PG role change mid-upgrade
+  makes the watchdog `docker restart` the quiesced old instance.
+- Verify: `https://<zitadel_domain>/debug/ready` → 200, console login,
+  `test-suite.yml --tags zitadel`.
+- Rollback: restore the `zitadel` dump + `v4.16.1` on both nodes (no
+  downgrade path otherwise).
+
+### 6. Gatus v5.37.0, Portainer 2.45.3, ntfy v2.32.0
+
+```bash
+ansible-playbook -i inventory/hosts.yml deploy-gatus.yml
+ansible-playbook -i inventory/hosts.yml deploy-portainer.yml
+ansible-playbook -i inventory/hosts.yml deploy-ntfy.yml
+```
+
+- Portainer backs up its own DB before migrating (rollback: previous tag).
+- ntfy migrates its message store 15 → 17 (additive). Rollback to ≥ v2.31.1
+  is automatic; to v2.27.0 first run
+  `UPDATE schema_version SET version = 15 WHERE store = 'message'`.
+- `deploy-gatus.yml` used to recreate PostgreSQL on both nodes at the end of
+  every run; that obsolete step is gone.
+
+### 7. NetBird 0.80.0 (server, reverse proxy, dashboard v2.94.0, clients)
+
+Security: relay pre-auth decoding (server), local root via the client daemon
+socket (client). **Do not take 0.81.x** — see `netbird_management` defaults.
+
+```bash
+# server: PG primary first (migrations run where the new image starts)
+ansible-playbook -i inventory/hosts.yml deploy-netbird.yml -e dns_failover_primary=<primary>
+# reverse proxy right after — rolling-update never touches it, and
+# server/proxy version skew has broken the proxy before
+ansible-playbook -i inventory/hosts.yml deploy-netbird-proxy.yml -e dns_failover_primary=<primary>
+# managed clients (incl. ns1/ns2): installs 0.80.0, downgrades any 0.81.x, holds it
+ansible-playbook -i inventory/hosts.yml deploy-netbird-peers.yml
+```
+
+- A server restart wipes in-memory signal state (gotcha 148): watch
+  `NetBird-Mesh-Peers-Healthy`; peers without the self-heal guard may need
+  `netbird down && netbird up`.
+- Unmanaged peers: owners install exactly 0.80.0 (`apt install
+  netbird=0.80.0 && apt-mark hold netbird`, or the 0.80.0 Windows installer).
+- Check the dashboard login callback (`/nb-auth`). The repo's nginx override
+  is mounted at `conf.d/default.conf`, which the image's `nginx.conf` does not
+  include (only `http.d/*.conf` — the same on v2.90.5 and v2.94.0), so the
+  image's own config serves `/nb-auth` as HTTP 404 with the dashboard app
+  shell, before and after this upgrade. Confirm with a real browser login.
+- Peers re-converge after the managed clients restart: expect 0/8 for a few
+  minutes (3–4.5 min observed) before 7/8.
+- Check the self-heal guard on one managed peer: `bash -x
+  /usr/local/bin/netbird-selfheal.sh` (client 0.78+ refuses `netbird up` as
+  root when the active profile belongs to another user; the guard must still
+  reach its remedy).
+- Rollback: restore the three netbird dumps + 0.74.7 / v2.90.5, clients
+  `netbird=0.74.7`.
+
+### 8. Afterwards
 
 - Full `test-suite.yml`.
 - Update the version tables in `AGENTS.md`, `README.md` and `ROADMAP.md` if
