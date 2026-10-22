@@ -167,29 +167,44 @@
   failed_when: false
   tags: [zitadel]
 
-- name: Read the Zitadel image running on the other nodes
+- name: Identify the peer node
+  set_fact:
+    # Two-node platform (same peer derivation as the watchdog's PEER_NAME).
+    _zitadel_peer: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+  tags: [zitadel]
+
+# A delegated task's connection `vars:` are templated in the DELEGATE's
+# variable context, where neither a loop `item` nor a fact set on this host
+# exists ("'item' is undefined"). Publish the key path into the peer's
+# hostvars, as the openziti role does; set_fact opens no connection.
+- name: Publish the peer's SSH key path into its hostvars
+  set_fact:
+    _zitadel_peer_key: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _zitadel_peer }}"
+  delegate_to: "{{ _zitadel_peer }}"
+  delegate_facts: true
+  tags: [zitadel]
+
+- name: Read the Zitadel image running on the peer node
   command: docker inspect zitadel --format '{{ '{{' }}.Config.Image{{ '}}' }}'
-  delegate_to: "{{ item }}"
+  delegate_to: "{{ _zitadel_peer }}"
   vars:
-    # Same delegate_to + --limit key-resolution pitfall as the openziti role.
-    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ item }}"
-  loop: "{{ groups['dns_servers'] | difference([inventory_hostname]) }}"
-  register: _zitadel_peer_images
+    ansible_ssh_private_key_file: "{{ _zitadel_peer_key }}"
+  register: _zitadel_peer_image
   changed_when: false
   failed_when: false
   ignore_unreachable: true
   tags: [zitadel]
 
-- name: List the other nodes still on a different Zitadel image
+- name: Decide whether the peer still runs a different Zitadel image
   set_fact:
-    # Unreachable results carry no rc; a peer without a zitadel container
+    # An unreachable peer carries no rc; a peer without a zitadel container
     # returns rc 1. Only a reachable peer with a running-or-stopped zitadel on
     # another image counts.
     _zitadel_stale_peers: >-
-      {{ _zitadel_peer_images.results
-         | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0)
-         | rejectattr('stdout', 'equalto', zitadel_image)
-         | map(attribute='item') | list }}
+      {{ [_zitadel_peer]
+         if (_zitadel_peer_image.rc | default(1)) == 0
+            and (_zitadel_peer_image.stdout | default('') | trim) != zitadel_image
+         else [] }}
   tags: [zitadel]
 
 - name: Refuse to quiesce the serving instance from a standby
@@ -207,12 +222,12 @@
     - not (zitadel_force_quiesce | bool)
   tags: [zitadel]
 
-- name: Stop Zitadel on other nodes still running a different version
-  command: docker stop --time 30 zitadel
-  delegate_to: "{{ item }}"
+- name: Stop Zitadel on the peer while it runs a different version
+  command: docker stop --timeout 30 zitadel
+  delegate_to: "{{ _zitadel_peer }}"
   vars:
-    ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ item }}"
-  loop: "{{ _zitadel_stale_peers }}"
+    ansible_ssh_private_key_file: "{{ _zitadel_peer_key }}"
+  when: _zitadel_stale_peers | length > 0
   tags: [zitadel]
 
 - name: Start Zitadel stack
