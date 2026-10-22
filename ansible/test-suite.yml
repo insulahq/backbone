@@ -291,6 +291,24 @@
         _test_results: "{{ _test_results + [{'name': 'WAL retention wal_keep_size >= 1GB (' + (_t_pg_wal_keep.stdout | default('?|') | trim).split('|')[0] + ')', 'host': inventory_hostname, 'passed': (_t_pg_wal_keep.stdout | default('') | trim).endswith('|true')}] }}"
       tags: [postgresql]
 
+    # PG logs every failing statement in full (log_min_error_statement=error),
+    # so a CREATE/ALTER ROLE ... PASSWORD that errors writes the password to
+    # the container log — Zitadel's start-from-init did so on every start
+    # before 4.17.0 (gotcha 162). Counts only; matching lines are never shown.
+    - name: "PostgreSQL | No plaintext passwords in the PG log"
+      shell: >-
+        docker inspect postgresql >/dev/null &&
+        docker logs postgresql 2>&1 | grep -ciE "password[[:space:]]*'"
+      register: _t_pg_pwlog
+      failed_when: false
+      changed_when: false
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — no plaintext passwords in the PG log"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'No plaintext passwords in the PG log (' + (_t_pg_pwlog.stdout | default('?') | trim) + ' lines)', 'host': inventory_hostname, 'passed': (_t_pg_pwlog.stdout | default('') | trim) == '0'}] }}"
+      tags: [postgresql]
+
     # ------------------------------------------------------------------
     # PG Write Proxy Tests (pgproxy)
     # ------------------------------------------------------------------

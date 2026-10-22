@@ -16,7 +16,9 @@
 # takeover, fixed 4.16.2; GHSA-4hgj-wm6c-q7p2, fixed only in 4.19.1+). Skip
 # 4.18.0 (setup broke on upgrade, #12780, fixed 4.19.0). Setup steps 77-79
 # run on first start; pool/Database defaults are unchanged, so the 12/4 pool
-# below still holds.
+# below still holds. Never pin below 4.17.0: older start-from-init re-ran
+# CREATE USER ... PASSWORD on every start, and PG logged the failing
+# statement with the DB password in plaintext (gotcha 162).
 zitadel_version: "v4.19.5"
 zitadel_image: "ghcr.io/zitadel/zitadel:{{ zitadel_version }}"
 
