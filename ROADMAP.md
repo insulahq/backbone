@@ -24,6 +24,7 @@ Two-node active-passive backbone with full HA:
 | Gatus monitoring | 5.37.0 | Yes |
 | ntfy (optional) | 2.32.0 | Yes (fenced to primary) |
 | Portainer | 2.45.3 | Yes |
+| Uptime Kuma (optional) | 2.5.8 | No (`uptime_kuma_node` only) |
 | Restic backup | 0.19.1 | Yes |
 
 ---

@@ -39,6 +39,7 @@ Ansible automation for deploying two fully redundant DNS + VPN mesh servers on t
 | ntfy | 2.32.0 | Push notifications, PostgreSQL backend, primary-only (fenced, gotcha 156). Optional — `ntfy_enabled` |
 | OpenZiti | 1.6.21 | Zero-trust network overlay, active-standby controller, active-active edge routers |
 | Portainer | 2.45.3 | Docker management UI, WireGuard + NetBird access |
+| Uptime Kuma | 2.5.8 | UI-based monitors for user checks, SQLite, on `uptime_kuma_node` only. Optional — `uptime_kuma_enabled` |
 | Restic | 0.19.1 | Incremental backup to SFTP backup server |
 
 ### Maintenance Automation

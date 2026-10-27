@@ -59,6 +59,7 @@
       register: _uk_users
       changed_when: false
       failed_when: false
+      check_mode: false  # read-only; skipped, --check would print the warning
       tags: [uptime-kuma]
 
     - name: Warn that Uptime Kuma has no admin account
