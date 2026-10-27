@@ -9,8 +9,10 @@
 uptime_kuma_enabled: false
 
 # Version
-# v2 line (2.4.0 era). Not deployed anywhere yet (opt-in) — a future first
-# deploy starts directly on v2, avoiding the one-way v1->v2 DB migration.
+# v2 line. Runs SQLite (pinned in docker-compose.yml.j2, so v2's "choose a
+# database" page never appears); the role and test-suite read the admin
+# count from that file. The data lives only on uptime_kuma_node: after a
+# rebuild, restore it from backup (docs/RECOVERY.md Scenario 3, pitfall 5).
 uptime_kuma_version: "2"
 uptime_kuma_image: "louislam/uptime-kuma:{{ uptime_kuma_version }}"
 

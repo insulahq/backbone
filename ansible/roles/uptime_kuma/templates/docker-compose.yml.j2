@@ -8,6 +8,10 @@ services:
     image: {{ uptime_kuma_image }}
     container_name: uptime-kuma
     restart: unless-stopped
+    environment:
+      # Skips v2's public "choose a database" page; only "create admin" is left
+      # for the first visit (the role warns until an admin exists).
+      UPTIME_KUMA_DB_TYPE: sqlite
     volumes:
       - {{ uptime_kuma_install_dir }}/data:/app/data
     networks:

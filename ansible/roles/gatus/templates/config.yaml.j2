@@ -225,6 +225,21 @@ endpoints:
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 2m
 {% endif %}
+{% if uptime_kuma_enabled | default(false) | bool %}
+  - name: "Uptime Kuma"
+    group: platform
+    # Runs on uptime_kuma_node only, while its DNS record follows failover, so
+    # this goes red while the platform is failed over. Availability only: the
+    # role and test-suite check that an admin account exists.
+    url: "https://{{ uptime_kuma_domain | default('monitor.' + platform_domain) }}/api/entry-page"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].type == entryPage"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 5m
+{% endif %}
   - name: "Status Dashboard"
     group: platform
     url: "https://{{ gatus_domain }}/health"

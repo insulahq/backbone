@@ -279,6 +279,14 @@ where no PKI survives anywhere. It invalidates every enrolled identity.
 
 4. **`--start-at-task` resume is dangerous.** If `site.yml` fails mid-run, resume with a full re-run of `site.yml --limit NEW_NODE` instead of `--start-at-task=...`. Skipping earlier systemd unit installs leaves the node half-provisioned (OpenZiti standby timers were missed in the drill using `--start-at-task`).
 
+5. **Uptime Kuma's data exists only on its own node and in that node's backups** (`uptime_kuma_node`, default the first DNS server; gotcha 164). On that node `site.yml` starts an EMPTY instance, whose public page lets whoever opens it first create the admin (the role prints a warning). Restore the data right after `site.yml` and before the next nightly backup, which would make the empty instance `latest`:
+   ```bash
+   ssh root@<NEW_NODE> "/etc/restic/restore.sh files --include /opt/uptime-kuma/data --target /root/kuma-restore"
+   ssh root@<NEW_NODE> "cd /opt/uptime-kuma && docker compose stop && mv data data.empty \
+     && cp -a /root/kuma-restore/opt/uptime-kuma/data data && docker compose up -d"
+   ```
+   Then log in with the existing admin; `test-suite.yml --tags uptime-kuma` checks that it exists.
+
 ---
 
 ## Scenario 4: Both Nodes Down

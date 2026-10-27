@@ -897,6 +897,32 @@
       tags: [ntfy]
 
     # ------------------------------------------------------------------
+    # Uptime Kuma (single node: uptime_kuma_node)
+    # ------------------------------------------------------------------
+    # Until an admin account exists, the public domain serves the "create
+    # admin" page and whoever completes it first owns the instance.
+    - name: "Uptime Kuma | Count admin accounts"
+      shell: docker exec uptime-kuma sqlite3 -readonly /app/data/kuma.db 'SELECT count(*) FROM user'
+      register: _t_uk_users
+      failed_when: false
+      changed_when: false
+      when:
+        - uptime_kuma_enabled | default(false) | bool
+        - inventory_hostname == (uptime_kuma_node | default(groups['dns_servers'] | first))
+      tags: [uptime-kuma]
+
+    - name: "Uptime Kuma | Record result — admin account exists"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'Uptime Kuma has an admin account (' + (_t_uk_users.stdout | default('?') | trim) + ')',
+              'host': inventory_hostname,
+              'passed': (_t_uk_users.stdout | default('0') | trim | int) > 0}] }}
+      when:
+        - uptime_kuma_enabled | default(false) | bool
+        - inventory_hostname == (uptime_kuma_node | default(groups['dns_servers'] | first))
+      tags: [uptime-kuma]
+
+    # ------------------------------------------------------------------
     # Store per-host results for final aggregation
     # ------------------------------------------------------------------
     - name: "Store per-host test results"
