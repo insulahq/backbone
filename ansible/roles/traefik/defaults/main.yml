@@ -50,6 +50,21 @@ traefik_wildcard_cert: true
 # Traefik container joins powerdns_internal (see docker-compose.yml.j2).
 traefik_pdns_api_url: "http://powerdns-nginx:8081"
 
+# DNS-01 challenges (gotcha 165). Both nodes' PowerDNS read one database, but
+# an API write clears only the cache of the node it went to, so the other node
+# keeps serving what it cached before the write: "does not exist" for up to
+# negquery-cache-ttl + cache-ttl (60 + 20 s; measured 70-85 s), or the record
+# without the second challenge value (wildcard and apex share one TXT name;
+# ~20 s). Any lookup of the name can plant that, Traefik's own SOA lookup to
+# find the zone included, and Let's Encrypt's resolvers keep what they saw for
+# the record TTL, failing the other challenge. So the first propagation check
+# waits until nothing cached before the writes can be served (must exceed
+# those PowerDNS TTLs, roles/powerdns/templates/pdns.conf.j2), then checks
+# every authoritative nameserver for the value. Seconds.
+traefik_acme_delay_before_checks: 90
+# Whole wait per challenge, delay included; lego retries the check every 2 s.
+traefik_acme_propagation_timeout: 300
+
 # Rate limiting middleware (applied to public service routers)
 traefik_ratelimit_average: 100        # Requests per second average
 traefik_ratelimit_burst: 200          # Maximum burst size

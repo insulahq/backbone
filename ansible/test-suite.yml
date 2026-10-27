@@ -132,6 +132,49 @@
         _test_results: "{{ _test_results + [{'name': 'Traefik healthcheck', 'host': inventory_hostname, 'passed': _t_traefik_ping.rc | default(1) == 0}] }}"
       tags: [tls]
 
+    # A renewal that keeps failing shows only as a shrinking expiry date:
+    # Traefik renews at 30 days left and retries daily, so under 28 days left
+    # means renewals have been failing for days (gotcha 165). Each node's
+    # Traefik holds its own certificate.
+    - name: "TLS | Days left on this node's certificate"
+      shell: >-
+        set -o pipefail;
+        end=$(echo | timeout 10 openssl s_client -connect {{ ansible_host }}:443
+        -servername {{ platform_domain }} 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+        && echo $(( ($(date -d "$end" +%s) - $(date +%s)) / 86400 ))
+      args:
+        executable: /bin/bash
+      register: _t_tls_days
+      changed_when: false
+      failed_when: false
+      tags: [tls]
+
+    - name: "TLS | Record result — certificate renewed in time"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'TLS cert renewed in time (' + (_t_tls_days.stdout | default('?') | trim) + ' days left)',
+              'host': inventory_hostname,
+              'passed': (_t_tls_days.stdout | default('0') | trim | int) >= 28}] }}
+      tags: [tls]
+
+    - name: "TLS | Traefik container args"
+      community.docker.docker_container_info:
+        name: traefik
+      register: _t_traefik_info
+      ignore_errors: true
+      tags: [tls]
+
+    # The traefik role turns the check off only while a nameserver does not
+    # answer (first build); a redeploy turns it back on.
+    - name: "TLS | Record result — ACME propagation check on"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'ACME waits for every nameserver',
+              'host': inventory_hostname,
+              'passed': (_t_traefik_info.container.Args | default(['disablechecks=true'])
+                         | select('search', 'disablechecks=true|disablepropagationcheck=true') | list | length) == 0}] }}
+      tags: [tls]
+
     - name: "TLS | Valid certificate for all service domains"
       uri:
         url: "https://{{ item }}"

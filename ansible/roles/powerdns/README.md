@@ -76,3 +76,4 @@ Set in `group_vars/all.yml` or vault:
 - `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0; manually increment after zone creation (gotcha 33)
 - PowerDNS webserver restricted to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` (gotcha 46)
 - `pdns.conf` deployed with mode `0640, group: 953` to protect API key (gotcha 45, 71)
+- Each node caches on its own (`cache-ttl`, `query-cache-ttl`, `negquery-cache-ttl` in `pdns.conf.j2`) and an API write clears only the cache of the node it went to, so the other node can serve pre-write answers for up to `negquery-cache-ttl + cache-ttl`. Traefik's `traefik_acme_delay_before_checks` must exceed that (gotcha 165)

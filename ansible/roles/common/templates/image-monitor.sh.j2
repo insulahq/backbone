@@ -1,8 +1,13 @@
 #!/bin/bash
 # Container image update monitor — deployed by Ansible (common role).
-# Compares running container image digests against registry manifests.
+# Compares each running container's image with the digest the registry now
+# serves for its tag. It never pulls: a pull moves the local tag, so the next
+# unrelated `docker compose up` recreated the container with the new image,
+# and comparing the tag before and after the pull reported "up to date" from
+# the day after on (gotcha 166).
 # Reports via platform_alert (Gatus external endpoint + fallback webhook).
 # Runs daily via systemd timer.
+{% raw %}
 
 set -euo pipefail
 source /usr/local/lib/platform-alert.sh
@@ -11,48 +16,115 @@ log() {
     echo "[$(date -Iseconds)] IMAGE-MONITOR: $*"
 }
 
+# Digest the registry serves for an image tag: a HEAD on the manifest, with an
+# anonymous token when the registry asks for one. Downloads nothing, and HEAD
+# requests do not count toward Docker Hub's pull rate limit.
+remote_digest() {
+    python3 - "$1" <<'PY'
+import json, re, sys, urllib.error, urllib.parse, urllib.request
+
+ref = sys.argv[1]
+name, _, tag = ref.rpartition(':')
+if not name or '/' in tag:
+    name, tag = ref, 'latest'
+first = name.split('/')[0]
+if '/' in name and ('.' in first or ':' in first or first == 'localhost'):
+    registry, repo = name.split('/', 1)
+else:
+    registry, repo = 'registry-1.docker.io', name if '/' in name else 'library/' + name
+url = 'https://%s/v2/%s/manifests/%s' % (registry, repo, tag)
+accept = ', '.join([
+    'application/vnd.oci.image.index.v1+json',
+    'application/vnd.docker.distribution.manifest.list.v2+json',
+    'application/vnd.oci.image.manifest.v1+json',
+    'application/vnd.docker.distribution.manifest.v2+json',
+])
+
+
+def head(token=None):
+    headers = {'Accept': accept}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    return urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=headers), timeout=20)
+
+
+try:
+    resp = head()
+except urllib.error.HTTPError as e:
+    if e.code != 401:
+        raise
+    params = dict(re.findall(r'(\w+)="([^"]*)"', e.headers.get('WWW-Authenticate', '')))
+    query = urllib.parse.urlencode([(k, params[k]) for k in ('service', 'scope') if k in params])
+    with urllib.request.urlopen(params['realm'] + '?' + query, timeout=20) as r:
+        body = json.load(r)
+    resp = head(body.get('token') or body.get('access_token'))
+print(resp.headers['Docker-Content-Digest'])
+PY
+}
+
 OUTDATED=""
 OUTDATED_COUNT=0
 CHECKED_COUNT=0
-ERRORS=""
+SKIPPED=""
+MOVED=""
 
-while IFS='|' read -r CONTAINER_NAME IMAGE; do
-    # Skip images without a tag (local builds, sha256 references)
-    if [[ "$IMAGE" == *"sha256:"* ]]; then
+while read -r CONTAINER_NAME; do
+    # The configured reference: `docker ps` shows an image ID instead once
+    # the tag has moved off the running image.
+    IMAGE=$(docker inspect --format='{{.Config.Image}}' "$CONTAINER_NAME")
+    # Skip images referenced by ID or digest (no tag to compare against)
+    if [[ "$IMAGE" == *"sha256:"* || "$IMAGE" == *"@"* ]]; then
         continue
     fi
 
+    RUNNING_ID=$(docker inspect --format='{{.Image}}' "$CONTAINER_NAME")
+
+    # The local tag no longer names the running image (someone pulled it):
+    # the next `docker compose up` for this service recreates the container.
+    if [ "$(docker image inspect --format='{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)" != "$RUNNING_ID" ]; then
+        log "TAG MOVED: ${CONTAINER_NAME} (${IMAGE}) — the next deploy recreates it"
+        MOVED="${MOVED}${CONTAINER_NAME} "
+    fi
+
+    RUNNING_DIGESTS=$(docker image inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$RUNNING_ID" 2>/dev/null | sed -n 's/.*@//p')
+    if [ -z "$RUNNING_DIGESTS" ]; then
+        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — running image has no registry digest"
+        SKIPPED="${SKIPPED}${CONTAINER_NAME} "
+        continue
+    fi
+
+    if ! REMOTE=$(remote_digest "$IMAGE" 2>/dev/null); then
+        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — could not read the registry digest"
+        SKIPPED="${SKIPPED}${CONTAINER_NAME} "
+        continue
+    fi
     CHECKED_COUNT=$((CHECKED_COUNT + 1))
 
-    # Get local image ID
-    LOCAL_ID=$(docker image inspect --format='{% raw %}{{.Id}}{% endraw %}' "$IMAGE" 2>/dev/null || echo "unknown")
-
-    # Pull latest manifest (metadata only, does not download layers)
-    if docker pull --quiet "$IMAGE" > /dev/null 2>&1; then
-        REMOTE_ID=$(docker image inspect --format='{% raw %}{{.Id}}{% endraw %}' "$IMAGE" 2>/dev/null || echo "unknown")
+    if grep -qxF "$REMOTE" <<< "$RUNNING_DIGESTS"; then
+        log "UP TO DATE: ${CONTAINER_NAME} (${IMAGE})"
     else
-        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — could not pull manifest"
-        ERRORS="${ERRORS}${CONTAINER_NAME} "
-        continue
-    fi
-
-    if [ "$LOCAL_ID" = "unknown" ] || [ "$REMOTE_ID" = "unknown" ]; then
-        log "SKIP: ${CONTAINER_NAME} (${IMAGE}) — could not compare"
-        continue
-    fi
-
-    if [ "$LOCAL_ID" != "$REMOTE_ID" ]; then
         log "UPDATE AVAILABLE: ${CONTAINER_NAME} (${IMAGE})"
         OUTDATED="${OUTDATED}${CONTAINER_NAME} "
         OUTDATED_COUNT=$((OUTDATED_COUNT + 1))
-    else
-        log "UP TO DATE: ${CONTAINER_NAME} (${IMAGE})"
     fi
-done < <(docker ps --format '{% raw %}{{.Names}}|{{.Image}}{% endraw %}')
+done < <(docker ps --format '{{.Names}}')
 
+MSG=""
 if [ "$OUTDATED_COUNT" -gt 0 ]; then
-    platform_alert "warning" "Images-Up-to-Date" "${OUTDATED_COUNT}/${CHECKED_COUNT} containers have updates: ${OUTDATED}"
-else
-    log "All ${CHECKED_COUNT} containers are up to date"
-    platform_alert "info" "Images-Up-to-Date" "All ${CHECKED_COUNT} container images are up to date"
+    MSG="${OUTDATED_COUNT}/${CHECKED_COUNT} containers have updates: ${OUTDATED}"
 fi
+if [ -n "$MOVED" ]; then
+    MSG="${MSG:+${MSG}; }local tag moved, next deploy recreates: ${MOVED}"
+fi
+if [ "$CHECKED_COUNT" -eq 0 ]; then
+    MSG="${MSG:+${MSG}; }no image could be checked (skipped: ${SKIPPED})"
+fi
+
+if [ -n "$MSG" ]; then
+    log "$MSG"
+    platform_alert "warning" "Images-Up-to-Date" "$MSG"
+else
+    log "All ${CHECKED_COUNT} checked containers are up to date${SKIPPED:+ (skipped: ${SKIPPED})}"
+    platform_alert "info" "Images-Up-to-Date" "All ${CHECKED_COUNT} checked container images are up to date"
+fi
+{% endraw %}
