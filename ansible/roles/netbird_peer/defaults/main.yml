@@ -29,11 +29,19 @@ netbird_selfheal_interval: "2min"    # timer cadence
 netbird_selfheal_fail_threshold: 3   # consecutive failed checks before restart (~6 min)
 netbird_selfheal_cooldown_secs: 900  # min seconds between restarts (flap guard)
 
-# Minimum client version — keeps clients current for relay/lazy-connection
-# fixes and security patches. NOTE (2026-07-22): a version floor does NOT
-# prevent the management-reconnect wedge — a 0.74.7 (current) client was
-# observed wedging permanently after a 90s endpoint outage, same as older
-# ones. The self-heal guard above is the effective protection; this floor
-# is hygiene. When set (e.g. "0.74.7"), peers below it are upgraded from
-# the NetBird apt repo. Empty = disabled.
+# Exact client version (apt "netbird=<version>"), held with dpkg so manual
+# `apt upgrade` OS passes cannot move it. Without a pin, every install or
+# node rebuild takes whatever the `stable` channel ships that day — which
+# can be a release held back on the server side (e.g. 0.81.x, see
+# netbird_management defaults). Downgrades to the pin are allowed. A literal
+# on purpose: netbird_server_version is a netbird_management role default and
+# is not defined in the peer plays — keep this in step with it by hand.
+# Empty = unpinned (latest at install).
+netbird_peer_version: "0.80.0"
+
+# Minimum client version — only used when netbird_peer_version is empty.
+# NOTE: a version floor does NOT prevent the management-reconnect wedge
+# (gotcha 150) — current clients wedge the same way. The self-heal guard
+# above is the effective protection; this floor is hygiene. When set (e.g.
+# "0.80.0"), peers below it are upgraded from the NetBird apt repo.
 netbird_peer_min_version: ""

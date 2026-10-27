@@ -7,9 +7,16 @@
 # The other node is automatically configured as standby.
 # repmgrd handles auto-failover with 60s debounce (6 attempts x 10s interval).
 
-# Image — pinned to specific version to prevent breakage
-# sourcemation/postgres-repmgr bundles PG18 + repmgr 5.5
-postgresql_image: "sourcemation/postgres-repmgr:5.5.0"
+# Image — pinned to a DATED build (gotcha 158). The bare "5.5.0" tag is
+# rebuilt about every two weeks and floats across PostgreSQL versions: it has
+# already jumped PG 17.6 → 18.0 once, and the next rebuild after PG 19 GA can
+# carry 19 — which cannot clone from an 18 primary or start on an 18 data
+# directory. Changing this value recreates the PG container on the next role
+# run, i.e. it IS a PG minor upgrade: standby first, then switch over, then
+# the old primary (see docs/UPGRADING.md).
+# 5.5.0-20261005 = PostgreSQL 18.6-1.pgdg13+2, repmgr 5.5.0 (same contents as
+# 5.5.0-20261020; the older build is preferred for soak time).
+postgresql_image: "sourcemation/postgres-repmgr:5.5.0-20261005"
 
 # Installation directory
 postgresql_install_dir: /opt/postgresql
@@ -70,6 +77,13 @@ postgresql_max_slot_wal_keep_size: "10GB"   # Cap WAL retained by replication sl
                                             # Prevents unbounded WAL growth when standby
                                             # is offline. Standby must re-clone if it falls
                                             # behind this limit.
+# WAL the primary keeps for a disconnected standby (gotcha 151). repmgr runs
+# without replication slots here, so this is the ONLY retention: at the
+# PostgreSQL default of 0, a single primary restart can recycle the segment the
+# standby resumes from, and the standby then retries a removed segment forever.
+# ~370 MB/day of WAL at current load → 2GB covers several days of disconnect.
+# Applied to running clusters with ALTER SYSTEM + reload (no restart).
+postgresql_wal_keep_size: "2GB"
 
 # Connection limit — the default 100 was exhausted in production (2026-07-21:
 # 2x zitadel pools + pdnsadmin + netbird + pdns + gatus hit 100/100 during the

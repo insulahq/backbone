@@ -11,14 +11,30 @@
 openziti_enabled: false
 
 # Version pins
-# 1.4.1 -> 1.6.17 (2026-07-22): latest 1.x line; breaking changes begin in
-# the 1.7 line / 2.0 (deprecated-feature removals) — hold at 1.6.x until the
-# 2.0 upgrade is planned. Controller upgrades before routers (play order).
-openziti_version: "1.6.17"
+# Hold at the 1.6.x line until the 2.0 upgrade is planned: 2.0 migrates the
+# controller DB (schema 41 → 44), drops sessions and auto-enables OIDC, and
+# 1.6 refuses to start on the migrated DB — one-way, so a 2.0 move needs a
+# cold copy of ctrl.db first. Within 1.6.x the schema is unchanged (41), so
+# rollback is reverting the tag. Controller upgrades before routers (play
+# order). Deploy with deploy-openziti.yml — never rolling-update.yml, whose
+# `compose up` would also start the standby's controller (split-brain).
+# 1.6.21: security — GHSA-mrpr-756c-xm47 + GHSA-cc5m-7mhm-xh9f (fixed
+# 1.6.18), GHSA-q8g9-jc4c-jp6q + GHSA-j952-6x8x-jmj6 (unauthenticated memory
+# exhaustion on the public edge API, fixed 1.6.20 — a prerelease, so take
+# the stable 1.6.21 that carries it).
+openziti_version: "1.6.21"
 openziti_controller_image: "openziti/ziti-controller:{{ openziti_version }}"
 openziti_router_image: "openziti/ziti-router:{{ openziti_version }}"
 openziti_cli_image: "openziti/ziti-cli:{{ openziti_version }}"
-openziti_console_image: "openziti/zac:latest"  # ZAC only publishes :latest (no version tags)
+# ZAC is versioned independently of the controller and DOES publish version
+# tags (an unpinned :latest is never re-pulled under `pull: missing`, so it
+# silently froze at whatever was current on first deploy). It is public on
+# openziti_domain: < 4.5.3 has an unauthenticated /sso endpoint
+# (GHSA-p7rg-vcfw-3gx7, critical) plus file-read/SSRF (GHSA-mwjf-9478-gjmc,
+# GHSA-37wj-4gv3-98rj). 4.5.5 is the last release before 4.6.0 replaced the
+# console's Node server with a pass-through proxy.
+openziti_console_version: "4.5.5"
+openziti_console_image: "openziti/zac:{{ openziti_console_version }}"
 
 # Installation directories
 openziti_install_dir: /opt/openziti

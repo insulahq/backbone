@@ -8,11 +8,12 @@
 # Best-effort — peers behind symmetric NAT or with truly stale signal
 # sessions recover via their netbird-selfheal.timer (~6 min) where installed,
 # or need a manual `netbird down/up` on their machine.
+# The ping results are logged only, not pushed to Gatus: an unreachable peer
+# is as likely to be a switched-off laptop as a stranded one, so it is no
+# signal about this platform's health (see netbird-peer-health.sh).
 
 set -euo pipefail
-source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
 
-ALERT_NAME="NetBird-Mesh-Peers-Healthy"
 WAIT_SECS={{ netbird_peer_wakeup_wait_secs | default(60) }}
 
 sleep "$WAIT_SECS"
@@ -38,10 +39,4 @@ done
 sleep 5
 {% raw %}AFTER=$(netbird status 2>/dev/null | grep -E "^Peers count:" | awk '{print $3}' | head -1 || echo "?"){% endraw %}
 
-echo "$(date): netbird-peer-wakeup: post-count=$AFTER stale=$STALE_COUNT (${STALE_LIST# })"
-
-if [ "$STALE_COUNT" -gt 0 ]; then
-  platform_alert "warning" "$ALERT_NAME" "$STALE_COUNT NetBird peers stale post-failover:${STALE_LIST} — guard-equipped peers (netbird-selfheal.timer) recover within ~6 min; others need a manual 'netbird down && netbird up'"
-else
-  platform_alert "info" "$ALERT_NAME" "All NetBird peers reachable post-failover (count: $AFTER)"
-fi
+echo "$(date): netbird-peer-wakeup: post-count=$AFTER unreachable=$STALE_COUNT (${STALE_LIST# })"

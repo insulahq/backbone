@@ -94,8 +94,12 @@ case "$MODE" in
     ;;
 esac
 
-# Service domains to update
-DOMAINS="vpn.${PLATFORM_DOMAIN} auth.${PLATFORM_DOMAIN} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} {{ openziti_domain | default('ziti.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+# Service domains to update.
+# ntfy is listed unconditionally, like monitor/ziti: it is fenced to the PG
+# primary, so if its record kept pointing at the demoted node after a failover
+# the fence would have stopped the only server that record resolves to —
+# a silent, total ntfy outage until the next deploy rewrote the record.
+DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} {{ openziti_domain | default('ziti.' + platform_domain) }} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
 
 # Build rrsets payload — delete any LUA records first, then set A/AAAA
 RRSETS="["

@@ -1,6 +1,6 @@
 # Traefik Role
 
-Deploys Traefik v3.6 as a shared reverse proxy with automatic TLS via DNS-01 ACME challenges against the local PowerDNS API.
+Deploys Traefik v3.7 as a shared reverse proxy with automatic TLS via DNS-01 ACME challenges against the local PowerDNS API.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ Should be deployed before:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `traefik_version` | `v3.6` | Traefik Docker image tag |
+| `traefik_version` | `v3.7.15` | Traefik Docker image tag (exact patch pin) |
 | `traefik_install_dir` | `/opt/traefik` | Host directory for compose + acme.json |
 | `traefik_public_network` | `traefik_public` | Shared Docker network name |
 | `traefik_public_subnet` | `172.31.0.0/24` | Docker network subnet |

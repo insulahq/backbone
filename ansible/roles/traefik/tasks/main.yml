@@ -65,6 +65,39 @@
   notify: restart traefik
   tags: [traefik]
 
+# The propagation check queries every authoritative nameserver and cannot pass
+# while one does not answer. That happens only while the platform is first
+# built (site.yml starts the primary's Traefik before the secondary's PowerDNS
+# exists), and then no nameserver can hold a stale "does not exist" for the
+# challenge name either. So the check is on when all answer and off otherwise;
+# test-suite fails on a Traefik left with it off (gotcha 165).
+- name: Check that every platform nameserver answers (ACME propagation check)
+  command: >-
+    dig +short +norec +time=3 +tries=2 SOA {{ platform_domain }}
+    @{{ hostvars[item]['ansible_host'] }}
+  loop: "{{ groups['dns_servers'] }}"
+  register: _traefik_ns_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false  # read-only; --check must see the real answer
+  tags: [traefik]
+
+- name: Decide whether ACME waits for every nameserver
+  set_fact:
+    _traefik_acme_propagation_check: >-
+      {{ (_traefik_ns_probe.results | selectattr('rc', 'equalto', 0) | map(attribute='stdout')
+          | select('match', '[^ ]+ [^ ]+ [0-9]+ ') | list | length) == (groups['dns_servers'] | length) }}
+  tags: [traefik]
+
+- name: Warn that the ACME propagation check is off
+  debug:
+    msg: >-
+      WARNING: not every nameserver answers for {{ platform_domain }}, so the ACME
+      propagation check is OFF on {{ inventory_hostname }}. Re-run deploy-traefik.yml
+      once they all do; test-suite fails until then.
+  when: not _traefik_acme_propagation_check | bool
+  tags: [traefik]
+
 - name: Deploy Traefik docker-compose.yml
   template:
     src: docker-compose.yml.j2

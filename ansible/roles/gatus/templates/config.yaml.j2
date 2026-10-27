@@ -43,6 +43,12 @@ alerting:
   ntfy:
     url: "{{ gatus_alerting_ntfy_url }}"
     topic: "{{ gatus_alerting_ntfy_topic }}"
+{% if gatus_alerting_ntfy_token %}
+    # Required against the self-hosted server, which runs auth-default-access:
+    # deny-all. Gatus validates the "tk_" prefix and sends it as a bearer token.
+    token: "{{ gatus_alerting_ntfy_token }}"
+{% endif %}
+    priority: {{ gatus_alerting_ntfy_priority | default(4) }}
     default-alert:
       enabled: true
       failure-threshold: 1
@@ -142,7 +148,16 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
-  - name: NetBird-Mesh-Peers-Healthy
+  # Pushed every watchdog cycle: the standby reports its own WAL receiver, the
+  # primary reports whether a standby streams from it (gotcha 151). Without
+  # this entry every push 404s and the alert only ever reached the journal.
+  - name: PG-Standby-Streaming
+    group: {{ host }}
+    token: "{{ gatus_external_token }}"
+    conditions:
+      - "[CONNECTED] == true"
+  # This server's own NetBird client (management + signal), not other peers.
+  - name: NetBird-Connected
     group: {{ host }}
     token: "{{ gatus_external_token }}"
     conditions:
@@ -194,6 +209,36 @@ endpoints:
       - "[STATUS] < 500"
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 2m
+{% endif %}
+{% if ntfy_enabled | default(false) | bool %}
+  - name: "Push Notifications"
+    group: platform
+    # ntfy is fenced to the PG primary, so this probe follows the active-passive
+    # DNS record. A 200 with healthy=false, or no answer at all, means alerts
+    # published to the self-hosted server are going nowhere.
+    url: "https://{{ ntfy_domain | default('ntfy.' + platform_domain) }}/v1/health"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].healthy == true"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 2m
+{% endif %}
+{% if uptime_kuma_enabled | default(false) | bool %}
+  - name: "Uptime Kuma"
+    group: platform
+    # Runs on uptime_kuma_node only, while its DNS record follows failover, so
+    # this goes red while the platform is failed over. Availability only: the
+    # role and test-suite check that an admin account exists.
+    url: "https://{{ uptime_kuma_domain | default('monitor.' + platform_domain) }}/api/entry-page"
+    client:
+      insecure: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].type == entryPage"
+      - "[CERTIFICATE_EXPIRATION] > 720h"
+    interval: 5m
 {% endif %}
   - name: "Status Dashboard"
     group: platform

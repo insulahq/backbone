@@ -37,6 +37,10 @@
 set -euo pipefail
 
 export REPMGR_CONFIG_FILE="${REPMGR_CONFIG_FILE:-/etc/repmgr/repmgr.conf}"
+# Every libpq client in this script sends this password — pg_isready too, which
+# completes authentication when a password is available. Peer probes must name
+# the repmgr user: a bare `pg_isready -h <peer>` logs in as postgres with the
+# repmgr password and leaves a failed-login line on the peer every 15 s.
 export PGPASSWORD="${REPMGR_PASSWORD}"
 
 PROMOTE_CHECK="/tmp/promote-check.sh"
@@ -315,7 +319,7 @@ determine_role() {
   local peer_is_primary=false
 
   for attempt in 1 2 3; do
-    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 >/dev/null 2>&1; then
+    if pg_isready -h "$PEER_NAME" -p 5432 -U "$REPMGR_USER" -d "$REPMGR_DB" -t 5 >/dev/null 2>&1; then
       peer_reachable=true
       break
     fi
@@ -385,7 +389,7 @@ determine_role() {
   # win. We wait to give the peer time to start and identify itself.
   echo "==> Timeline=1, initial primary, peer unreachable — waiting for peer before deciding..." >&2
   for i in $(seq 1 18); do  # 18 × 5s = 90s
-    if pg_isready -h "$PEER_NAME" -p 5432 -t 5 >/dev/null 2>&1; then
+    if pg_isready -h "$PEER_NAME" -p 5432 -U "$REPMGR_USER" -d "$REPMGR_DB" -t 5 >/dev/null 2>&1; then
       local pr
       pr=$(psql -h "$PEER_NAME" -U "$REPMGR_USER" -d "$REPMGR_DB" \
         -tAc "SELECT pg_is_in_recovery()" 2>/dev/null || echo "error")
@@ -440,6 +444,9 @@ min_wal_size = '{{ postgresql_min_wal_size }}'
 # standby causes unbounded WAL growth on primary until disk fills.
 # Standby must re-clone if it falls behind this limit.
 max_slot_wal_keep_size = '{{ postgresql_max_slot_wal_keep_size }}'
+# No replication slots are in use, so this is what keeps a standby able to
+# resume after the primary restarts (gotcha 151).
+wal_keep_size = '{{ postgresql_wal_keep_size }}'
 
 # Connection limit — default 100 proved too small for the consumer fleet
 # (2x zitadel + pdnsadmin + netbird + pdns + gatus), see role defaults.
@@ -526,7 +533,7 @@ start_as_standby() {
   local max_wait=300
   local waited=0
   echo "==> Waiting for primary ($PEER_NAME) — timeout ${max_wait}s..."
-  until pg_isready -h "$PEER_NAME" -p 5432 -t 5 2>/dev/null; do
+  until pg_isready -h "$PEER_NAME" -p 5432 -U "$REPMGR_USER" -d "$REPMGR_DB" -t 5 2>/dev/null; do
     waited=$((waited + 5))
     if [ "$waited" -ge "$max_wait" ]; then
       # Before self-promoting, validate external connectivity — if both nodes
@@ -748,7 +755,7 @@ split_brain_watchdog() {
     [ "$local_recovery" != "f" ] && continue
 
     # Check if peer is reachable and also primary
-    if ! pg_isready -h "$PEER_NAME" -p 5432 -t 3 2>/dev/null; then
+    if ! pg_isready -h "$PEER_NAME" -p 5432 -U "$REPMGR_USER" -d "$REPMGR_DB" -t 3 2>/dev/null; then
       continue  # Peer unreachable — nothing to check
     fi
 

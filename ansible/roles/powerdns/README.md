@@ -29,7 +29,7 @@ ns1                                ns2
 |-----------|-------|---------|
 | `powerdns-auth` | `powerdns/pdns-auth-50` | Authoritative DNS server |
 | `powerdns-nginx` | `nginx:alpine` | API proxy, binds to WireGuard IP only |
-| `powerdns-admin` | `powerdnsadmin/pda-legacy:v0.4.1` | Web UI (ns1 only) |
+| `powerdns-admin` | `powerdnsadmin/pda-legacy:v2026.08.1` | Web UI (both nodes, shared `pdnsadmin` DB) |
 
 ## Dependencies
 
@@ -66,7 +66,7 @@ Set in `group_vars/all.yml` or vault:
 
 - **DNS (port 53):** Bound to `0.0.0.0` -- serves public DNS queries
 - **API (port 8081):** Bound to WireGuard IP -- accessible only via WireGuard tunnel
-- **Admin UI (port 8080):** Bound to WireGuard IP, ns1 only -- accessible only via VPN
+- **Admin UI (port 8080):** Bound to WireGuard IP on each node -- accessible only via VPN
 - **PostgreSQL:** Connected via `postgresql_default` Docker network (internal)
 
 ## Gotchas
@@ -76,3 +76,4 @@ Set in `group_vars/all.yml` or vault:
 - `soa_edit_api: INCEPTION-INCREMENT` doesn't fire when serial is 0; manually increment after zone creation (gotcha 33)
 - PowerDNS webserver restricted to `127.0.0.0/8,172.16.0.0/12,10.0.0.0/8` (gotcha 46)
 - `pdns.conf` deployed with mode `0640, group: 953` to protect API key (gotcha 45, 71)
+- Each node caches on its own (`cache-ttl`, `query-cache-ttl`, `negquery-cache-ttl` in `pdns.conf.j2`) and an API write clears only the cache of the node it went to, so the other node can serve pre-write answers for up to `negquery-cache-ttl + cache-ttl`. Traefik's `traefik_acme_delay_before_checks` must exceed that (gotcha 165)

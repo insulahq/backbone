@@ -40,9 +40,23 @@
 
 - name: Install NetBird client
   apt:
-    name: netbird
+    name: "netbird{{ ('=' + netbird_peer_version) if netbird_peer_version | length > 0 else '' }}"
     state: present
     update_cache: true
+    allow_downgrade: "{{ netbird_peer_version | length > 0 }}"
+    allow_change_held_packages: true
+  notify: restart netbird
+
+- name: Hold the NetBird client at the pinned version
+  dpkg_selections:
+    name: netbird
+    selection: "{{ 'hold' if netbird_peer_version | length > 0 else 'install' }}"
+
+# Restart onto a changed binary NOW, not at the end of the play — otherwise
+# the enrollment checks below talk to the pre-change daemon and a successful
+# `netbird up` is followed by a needless restart.
+- name: Apply a client version change before the enrollment checks
+  meta: flush_handlers
 
 # Old clients have engine bugs where signal reconnection silently fails after
 # a server failover — the "dangling client" class (gotcha 148). Enforce a
@@ -52,7 +66,9 @@
   register: _nb_client_version
   changed_when: false
   failed_when: false
-  when: netbird_peer_min_version | length > 0
+  when:
+    - netbird_peer_version | length == 0
+    - netbird_peer_min_version | length > 0
 
 - name: Upgrade NetBird client below minimum version
   apt:
@@ -61,6 +77,7 @@
     update_cache: true
   notify: restart netbird
   when:
+    - netbird_peer_version | length == 0
     - netbird_peer_min_version | length > 0
     - _nb_client_version.rc | default(1) == 0
     # trim first, then default(..., true) so empty/whitespace-only output falls

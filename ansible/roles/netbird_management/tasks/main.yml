@@ -85,6 +85,14 @@
     mode: '0644'
   notify: restart netbird
 
+# Run the "restart netbird" handler HERE, before the fence below. Left to the
+# end of the play it recreated the stack a second time after fencing: the
+# primary's netbird-server restarted twice (two signal-state wipes, gotcha
+# 148) and the standby's server and dashboard ran until the watchdog's next
+# cycle. Flushed first, the compose up below finds everything current.
+- name: Apply pending NetBird restarts before fencing
+  meta: flush_handlers
+
 - name: Start NetBird stack
   community.docker.docker_compose_v2:
     project_src: "{{ netbird_install_dir }}"

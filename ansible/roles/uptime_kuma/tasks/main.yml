@@ -48,6 +48,29 @@
       until: (_uk_health.container.State.Health.Status | default('')) == 'healthy'
       tags: [uptime-kuma]
 
+    # Until an admin account exists, the public domain serves the "create
+    # admin" page and whoever completes it first owns the instance. A warning,
+    # not a failure: failing here would skip the roles after this one in
+    # site.yml (openziti, backup) on a node being rebuilt.
+    - name: Count Uptime Kuma admin accounts
+      community.docker.docker_container_exec:
+        container: uptime-kuma
+        command: sqlite3 -readonly /app/data/kuma.db "SELECT count(*) FROM user"
+      register: _uk_users
+      changed_when: false
+      failed_when: false
+      check_mode: false  # read-only; skipped, --check would print the warning
+      tags: [uptime-kuma]
+
+    - name: Warn that Uptime Kuma has no admin account
+      debug:
+        msg:
+          - "WARNING: Uptime Kuma on {{ inventory_hostname }} has no admin account."
+          - "Whoever opens https://{{ uptime_kuma_domain }} first can create one and own the instance."
+          - "Create the admin now, or restore the data from backup (docs/RECOVERY.md Scenario 3, pitfall 5)."
+      when: (_uk_users.stdout | default('') | trim) in ['', '0']
+      tags: [uptime-kuma]
+
     # DNS record for Uptime Kuma (active-passive, primary IP only)
     - name: Create DNS A record for Uptime Kuma
       uri:

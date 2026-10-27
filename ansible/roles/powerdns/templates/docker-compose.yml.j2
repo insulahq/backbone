@@ -55,21 +55,25 @@ services:
     restart: unless-stopped
     environment:
       SECRET_KEY: "{{ powerdns_admin_secret_key }}"
-      BIND_ADDRESS: "0.0.0.0"
-      PORT: "{{ powerdns_admin_port }}"
+      # The image passes BIND_ADDRESS verbatim to gunicorn --bind and never
+      # reads PORT, so a bare host meant gunicorn's default :8000 — spelled
+      # out here because nginx and the healthcheck both target :8000.
+      BIND_ADDRESS: "0.0.0.0:8000"
       # PDA connects to PG via pgproxy (always routes to current primary)
       SQLALCHEMY_DATABASE_URI: "postgresql://{{ powerdns_admin_sqla_db_user }}:{{ powerdns_admin_sqla_db_password }}@pgproxy:5432/{{ powerdns_admin_sqla_db_name }}"
       PDNS_API_KEY: "{{ powerdns_api_key }}"
       # PDNS is now on the same Docker network — use container name directly
+      # No PDNS_VERSION: v0.5+ removed the pdns_version setting along with all
+      # backward-compatibility checks for older PowerDNS releases.
       PDNS_API_URL: "http://pdns:{{ powerdns_webserver_internal_port | default(8091) }}"
-      PDNS_VERSION: "{{ powerdns_version }}"
     volumes:
       - {{ powerdns_install_dir }}/admin-data:/data
     networks:
       - powerdns_internal
       - postgresql_default  # For PowerDNS-Admin database
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8000/ || exit 1"]
+      # The image (Debian slim since v0.5) ships curl but not wget.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8000/healthcheck || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

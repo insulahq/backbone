@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: ntfy
+  description: ntfy push notification server — PostgreSQL HA backend, fenced to the PG primary
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies:
+  - role: traefik
+  - role: postgresql_repmgr

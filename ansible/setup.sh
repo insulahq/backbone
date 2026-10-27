@@ -396,7 +396,7 @@ postgresql_gatus_password: "${PG_GATUS_PASS}"
 powerdns_api_key: "${PDNS_API_KEY}"
 
 # Zitadel IAM
-zitadel_domain: "auth.{{ platform_domain }}"
+zitadel_domain: "account.{{ platform_domain }}"
 zitadel_org_name: "${ORG_NAME}"
 zitadel_admin_username: "admin"
 zitadel_admin_email: "${ADMIN_EMAIL}"

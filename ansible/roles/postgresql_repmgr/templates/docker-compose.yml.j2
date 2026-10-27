@@ -71,7 +71,10 @@ services:
   # Target is read from /pgproxy-target at startup (mounted from host).
   # The PG entrypoint-wrapper updates this file after failover and restarts pgproxy.
   pgproxy:
-    image: alpine/socat:1.8.0.1
+    # 1.8.1.x: no change to fork/child semantics or the syntax used below
+    # (TCP-LISTEN,fork,reuseaddr; -T1; connect-timeout). Recreating pgproxy
+    # drops write connections — change this only in a maintenance window.
+    image: alpine/socat:1.8.1.3
     container_name: pgproxy
     restart: unless-stopped
     extra_hosts:

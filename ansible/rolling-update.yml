@@ -23,6 +23,17 @@
   serial: 1
   gather_facts: false
   pre_tasks:
+    # OpenZiti is deliberately NOT rolling-updatable: `compose up` in
+    # /opt/openziti also starts the standby's ziti-controller (its lifecycle
+    # belongs to ziti-watchdog, restart: "no"), giving two live controllers —
+    # split-brain. deploy-openziti.yml handles the active/standby split.
+    - name: "Refuse services that must not be rolling-updated"
+      assert:
+        that: "'openziti' not in _update_services"
+        fail_msg: "openziti cannot be rolling-updated (it would start a second controller on the standby) — use deploy-openziti.yml"
+      run_once: true
+      tags: [rolling-update]
+
     - name: "Detect PG role for this host"
       command: docker exec postgresql psql -U postgres -tAc "SELECT pg_is_in_recovery();"
       register: _is_recovery
@@ -36,7 +47,9 @@
         _is_primary: "{{ (_is_recovery.stdout | default('') | trim) == 'f' }}"
       tags: [rolling-update]
   vars:
-    _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer,powerdns')) | split(',') }}"
+    # ntfy joins the default set only when deployed — otherwise /opt/ntfy is
+    # absent and the compose step below would fail on an unrelated update.
+    _update_services: "{{ (services | default('netbird,gatus,zitadel,traefik,portainer,powerdns' + (',ntfy' if (ntfy_enabled | default(false) | bool) else ''))) | split(',') }}"
     _service_dirs:
       netbird: /opt/netbird
       gatus: /opt/gatus
@@ -44,14 +57,14 @@
       traefik: /opt/traefik
       portainer: /opt/portainer
       powerdns: /opt/powerdns
-      openziti: /opt/openziti
+      ntfy: /opt/ntfy
     _health_checks:
       netbird:
         url: "https://{{ ansible_host }}/api/instance"
         host_header: "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}"
       zitadel:
         url: "https://{{ ansible_host }}/debug/ready"
-        host_header: "{{ zitadel_domain | default('auth.' + platform_domain) }}"
+        host_header: "{{ zitadel_domain | default('account.' + platform_domain) }}"
       gatus:
         url: "https://{{ ansible_host }}/health"
         host_header: "{{ gatus_domain | default('status.' + platform_domain) }}"
@@ -61,6 +74,9 @@
       powerdns:
         url: "http://{{ hostvars[inventory_hostname]['wireguard_ip'] | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost"
         host_header: "localhost"
+      ntfy:
+        url: "https://{{ ansible_host }}/v1/health"
+        host_header: "{{ ntfy_domain | default('ntfy.' + platform_domain) }}"
   tasks:
 
     # --- Step 1: Drain DNS traffic from this node (primary only; standby doesn't own DNS) ---
@@ -111,8 +127,20 @@
       when: "'netbird' in _update_services"
       tags: [rolling-update]
 
+    # --- Step 2c: Re-fence ntfy on the standby (primary-only service) ---
+    # `compose up -d` just restarted ntfy here too. On the standby it must not
+    # serve: it has no clustering, so it would accept subscriptions and deliver
+    # nothing. Inline, for the same anti-race reason as the netbird fence above.
+    - name: "Fence | Stop ntfy on the standby after recreate"
+      shell: docker stop --time 5 ntfy >/dev/null 2>&1 || true
+      changed_when: true
+      when:
+        - "'ntfy' in _update_services"
+        - not _is_primary
+      tags: [rolling-update]
+
     # --- Step 3: Health checks ---
-    # netbird is skipped on the standby — its server is fenced there by design.
+    # netbird and ntfy are skipped on the standby — both are fenced by design.
     - name: "Health | Verify services on {{ inventory_hostname }}"
       uri:
         url: "{{ _health_checks[item].url }}"
@@ -126,7 +154,7 @@
       until: _health_result is success
       register: _health_result
       loop: "{{ _update_services | select('in', _health_checks.keys()) | list }}"
-      when: item != 'netbird' or _is_primary
+      when: item not in ['netbird', 'ntfy'] or _is_primary
       tags: [rolling-update]
 
     # --- Step 4: Restore DNS (primary only; standby must NOT redirect DNS to itself) ---

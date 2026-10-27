@@ -3,11 +3,16 @@
 # Deploys a shared Traefik reverse proxy with a public Docker network
 # that other stacks (NetBird, PowerDNS-Admin, etc.) can attach to for TLS termination.
 
-# Version — floating minor tag (patches auto-applied on pull).
-# v3.7 behavior changes reviewed 2026-07: Host(`*`) catch-all, StripPrefix
-# 400s, BasicAuth empty-user unmount — none of these features are used here
-# (TCP passthrough uses HostSNI, which is unaffected).
-traefik_version: "v3.7"
+# Version — pinned to an exact patch release. A floating minor tag only
+# moves on rolling-update.yml (pull: always) — role deploys use
+# pull: missing — so it was neither "auto-patched" nor predictable: a
+# rolling update could pull a patch published hours earlier.
+# v3.7 behavior changes: Host(`*`) catch-all, StripPrefix 400s, BasicAuth
+# empty-user unmount — none of these features are used here (TCP passthrough
+# uses HostSNI, which is unaffected). 3.7.13 stopped forwarding
+# `Upgrade: h2c`; NetBird is unaffected because its service sets scheme=h2c
+# explicitly. 3.7.15 carries the 3.7.9-3.7.14 security fixes.
+traefik_version: "v3.7.15"
 
 # Installation directory
 traefik_install_dir: /opt/traefik
@@ -44,6 +49,21 @@ traefik_wildcard_cert: true
 #
 # Traefik container joins powerdns_internal (see docker-compose.yml.j2).
 traefik_pdns_api_url: "http://powerdns-nginx:8081"
+
+# DNS-01 challenges (gotcha 165). Both nodes' PowerDNS read one database, but
+# an API write clears only the cache of the node it went to, so the other node
+# keeps serving what it cached before the write: "does not exist" for up to
+# negquery-cache-ttl + cache-ttl (60 + 20 s; measured 70-85 s), or the record
+# without the second challenge value (wildcard and apex share one TXT name;
+# ~20 s). Any lookup of the name can plant that, Traefik's own SOA lookup to
+# find the zone included, and Let's Encrypt's resolvers keep what they saw for
+# the record TTL, failing the other challenge. So the first propagation check
+# waits until nothing cached before the writes can be served (must exceed
+# those PowerDNS TTLs, roles/powerdns/templates/pdns.conf.j2), then checks
+# every authoritative nameserver for the value. Seconds.
+traefik_acme_delay_before_checks: 90
+# Whole wait per challenge, delay included; lego retries the check every 2 s.
+traefik_acme_propagation_timeout: 300
 
 # Rate limiting middleware (applied to public service routers)
 traefik_ratelimit_average: 100        # Requests per second average
