@@ -66,6 +66,7 @@
     src: nftables.conf.j2
     dest: /etc/nftables.conf
     mode: '0644'
+    validate: /usr/sbin/nft -c -f %s
   notify: reload nftables
   tags: [common, security, firewall]
 

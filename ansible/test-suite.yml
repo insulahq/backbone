@@ -636,6 +636,34 @@
         - inventory_hostname == ansible_play_batch | first
       tags: [openziti]
 
+    # Clients dial the router's advertised public address, which the input
+    # chain drops unless the common role opens it (gotcha 167). Each node probes
+    # the OTHER node: a probe of its own address would arrive on lo.
+    - name: "OpenZiti | Peer's edge router port reachable on its public address"
+      wait_for:
+        host: "{{ hostvars[_ziti_peer]['ansible_host'] }}"
+        port: "{{ openziti_router_port | default(3022) }}"
+        timeout: 5
+      vars:
+        _ziti_peer: "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+      register: _t_ziti_edge_public
+      ignore_errors: true
+      when:
+        - openziti_enabled | default(false) | bool
+        - groups['dns_servers'] | length > 1
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — peer's public edge port"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'OpenZiti edge port ' ~ (openziti_router_port | default(3022))
+              ~ ' open on ' ~ (groups['dns_servers'] | difference([inventory_hostname]) | first),
+              'host': inventory_hostname, 'passed': _t_ziti_edge_public is success}] }}
+      when:
+        - openziti_enabled | default(false) | bool
+        - groups['dns_servers'] | length > 1
+      tags: [openziti]
+
     # ------------------------------------------------------------------
     # NetBird Reverse Proxy
     # ------------------------------------------------------------------
