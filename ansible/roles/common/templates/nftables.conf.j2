@@ -4,7 +4,12 @@
 # Lesson from previous deployment: Complex NAT rules broke ns1 access after NetBird changes
 # This configuration keeps firewall rules simple and lets Docker and NetBird manage their own NAT
 
-flush ruleset
+# Replace only this file's table, atomically. `flush ruleset` also wiped the
+# tables Docker (ip/ip6 filter, nat, raw), fail2ban (inet f2b-table) and
+# NetBird (ip netbird) keep, so every reload needed a Docker restart and left
+# bans and NetBird's rules gone until those services restarted (gotcha 167).
+table inet filter
+delete table inet filter
 
 table inet filter {
   chain input {
@@ -37,6 +42,13 @@ table inet filter {
     
     # NetBird STUN
     udp dport {{ netbird_stun_port | default(3478) }} accept
+{% endif %}
+
+{% if 'dns_servers' in group_names and openziti_enabled | default(false) | bool %}
+    # OpenZiti edge router (host network). Clients dial the address the router
+    # advertises: the public IP (router.yaml.j2). Its link listener (6262)
+    # advertises the WireGuard IP and stays closed here (gotcha 167).
+    tcp dport {{ openziti_router_port | default(3022) }} accept
 {% endif %}
     
     # WireGuard infrastructure tunnel (wg0)

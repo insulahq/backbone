@@ -21,10 +21,11 @@ The firewall is deliberately simple (gotcha 7: complex NAT rules broke server ac
 | DNS (53/tcp+udp) | Host in `dns_servers` group |
 | HTTPS (443/tcp) | Host in `dns_servers` group |
 | TURN relay (10000/udp) | Host in `dns_servers` group |
+| OpenZiti edge router (`openziti_router_port`, 3022/tcp) | Host in `dns_servers` group and `openziti_enabled` |
 | WireGuard (51810/udp) | Always |
 | SSH | When `ssh_break_glass_enabled: true` |
 
-**Critical:** After nftables reload, Docker is also restarted because `flush ruleset` wipes Docker's iptables chains (gotcha 2).
+The file replaces only its own `inet filter` table (`table` + `delete table` in one transaction), so a reload leaves Docker's, fail2ban's and NetBird's tables alone and needs no Docker restart (gotcha 167). The template is checked with `nft -c` before it is installed. Never `systemctl restart nftables`: the unit's stop step is `nft flush ruleset`.
 
 ## Dependencies
 
@@ -41,5 +42,6 @@ None -- this is the first role in the deployment order.
 ## Gotchas
 
 - Docker `0.0.0.0` port binding bypasses nftables INPUT chain; traffic goes through FORWARD chain (gotcha 1)
-- `flush ruleset` in nftables wipes Docker's iptables chains; always restart Docker after nftables changes (gotcha 2)
+- `flush ruleset` wipes Docker's, fail2ban's and NetBird's tables; the file no longer uses it (gotchas 2, 167)
+- A host-network service's port needs its own input rule: the input chain drops everything else, and only Docker-published ports bypass it (gotchas 1, 167)
 - Docker repo has no `trixie` codename yet; role falls back to `bookworm` (gotcha in tasks)
