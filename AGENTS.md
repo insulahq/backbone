@@ -475,7 +475,8 @@ backbone/
     ├── BOOTSTRAP.md               # Fresh deployment procedure
     ├── RECOVERY.md                # Disaster recovery runbook
     ├── UPGRADING.md               # Version-change rules + runbook for the current pins
-    └── DISPERSED_DNS_ARCHITECTURE.md
+    ├── DISPERSED_DNS_ARCHITECTURE.md
+    └── REMOTE-SUPPORT-RESEARCH.md # Remote-desktop support findings; not built
 ```
 
 ---

@@ -190,7 +190,8 @@ docs/
 ├── BOOTSTRAP.md             # Fresh deployment procedure
 ├── RECOVERY.md              # Disaster recovery runbook (13 scenarios)
 ├── UPGRADING.md             # Version-change rules + upgrade runbook
-└── DISPERSED_DNS_ARCHITECTURE.md  # PowerDNS architecture
+├── DISPERSED_DNS_ARCHITECTURE.md  # PowerDNS architecture
+└── REMOTE-SUPPORT-RESEARCH.md     # Remote-desktop support: findings (dropped for now)
 ```
 
 ## Configuration
@@ -213,6 +214,7 @@ Copy to non-example counterparts and fill in your values, or run `setup.sh` for 
 | [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) | Step-by-step fresh deployment |
 | [docs/RECOVERY.md](docs/RECOVERY.md) | Disaster recovery (13 scenarios + offline secrets) |
 | [docs/DISPERSED_DNS_ARCHITECTURE.md](docs/DISPERSED_DNS_ARCHITECTURE.md) | PowerDNS dual-primary Native mode |
+| [docs/REMOTE-SUPPORT-RESEARCH.md](docs/REMOTE-SUPPORT-RESEARCH.md) | Self-hosted remote-desktop support (RustDesk): research and build plan, dropped for now |
 
 ## License
 
