@@ -101,6 +101,14 @@ esac
 # the fence would have stopped the only server that record resolves to —
 # a silent, total ntfy outage until the next deploy rewrote the record.
 DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ openziti_domain | default('ziti.' + platform_domain) }} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+{% if netbird_proxy_create_dns_records | default(true) | bool %}
+# netbird-proxy is fenced to the PG primary like netbird-server, but the role
+# wrote its records once, at deploy time, for the node active then — after a
+# failover they pointed at the node where the fence had stopped the proxy
+# (gotcha 172). They follow the serving node like the rest.
+{% set proxy_apex = netbird_proxy_apex | default('proxy.' + platform_domain) %}
+DOMAINS="${DOMAINS} {{ proxy_apex }} *.{{ proxy_apex }}"
+{% endif %}
 
 # Uptime Kuma is the exception: it runs on ONE node (uptime_kuma_node) with no
 # hot standby and no fence (gotcha 164), so its record must not follow the
@@ -115,6 +123,7 @@ PINNED_AAAA="{% if hostvars[kuma_node]['public_ipv6'] is defined %}[{\"content\"
 # Build rrsets payload — delete any LUA records first, then set A/AAAA
 RRSETS="["
 FIRST=true
+set -f  # no pathname expansion: the list can hold a wildcard name
 for DOMAIN in $DOMAINS; do
   if [ "$FIRST" = true ]; then FIRST=false; else RRSETS="${RRSETS},"; fi
   RRSETS="${RRSETS}{\"name\":\"${DOMAIN}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
