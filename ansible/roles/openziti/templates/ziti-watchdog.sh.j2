@@ -6,12 +6,16 @@
 # Monitors the controller health and handles failover/failback.
 #
 # On the PREFERRED PRIMARY ({{ openziti_primary_node }}):
-#   - If controller is running locally: check health, push Gatus status
+#   - If controller is running locally: check health
 #   - If controller is running on peer: wait settling, then failback
 #
 # On the STANDBY:
 #   - If preferred primary's controller is reachable: do nothing
 #   - If unreachable for {{ openziti_failover_threshold }} cycles: promote self
+#
+# On BOTH, if both controllers serve at once (a healed partition): the
+# preferred primary wins unless it was offline when the standby promoted
+# (gotcha 177, see dual_active_loser).
 # ==========================================================================
 
 set -euo pipefail
@@ -39,6 +43,7 @@ fi
 
 INSTALL_DIR="{{ openziti_install_dir }}"
 CTRL_DIR="{{ openziti_controller_dir }}"
+NODE_NAME="{{ inventory_hostname }}"
 PREFERRED_PRIMARY="{{ openziti_primary_node }}"
 PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
 PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
@@ -55,6 +60,64 @@ check_controller() {
     curl -fsSk --max-time 5 "https://${ip}:${EDGE_PORT}/edge/client/v1/version" >/dev/null 2>&1
 }
 
+# A controller container's StartedAt as epoch seconds, empty when unreadable.
+local_started() {
+    local at
+    at=$(docker inspect ziti-controller --format '{% raw %}{{.State.StartedAt}}{% endraw %}' 2>/dev/null || true)
+    [ -n "$at" ] && date -d "$at" +%s 2>/dev/null || true
+}
+peer_started() {
+    local at
+    at=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
+        "docker inspect ziti-controller --format '{% raw %}{{.State.StartedAt}}{% endraw %}'" 2>/dev/null || true)
+    [ -n "$at" ] && date -d "$at" +%s 2>/dev/null || true
+}
+
+# Both controllers serving, each on its own DB (gotcha 177). A partition that
+# heals leaves the standby's promoted controller next to the preferred
+# primary's, which never stopped, and nothing used to stop either of them.
+# The preferred primary wins unless it was offline when the standby promoted.
+# Offline shows in the start times: a preferred controller that started after
+# the standby's was down while the standby took over, so its DB is the older
+# one. Both nodes apply this rule to the same two start times and each only
+# ever stops its own controller, so exactly one of them stands down.
+# Prints the node that stands down, or nothing when a start time is unreadable.
+dual_active_loser() {
+    local mine theirs preferred_start standby_start standby_node
+    mine=$(local_started)
+    theirs=$(peer_started)
+    if [ -z "$mine" ] || [ -z "$theirs" ]; then
+        return 0
+    fi
+    if [ "$NODE_NAME" = "$PREFERRED_PRIMARY" ]; then
+        preferred_start=$mine; standby_start=$theirs; standby_node=$PEER_NAME
+    else
+        preferred_start=$theirs; standby_start=$mine; standby_node=$NODE_NAME
+    fi
+    if [ "$preferred_start" -gt "$standby_start" ]; then
+        echo "$PREFERRED_PRIMARY"
+    else
+        echo "$standby_node"
+    fi
+}
+
+# Stop the local controller and keep the DB it wrote, which the next db-sync
+# (standby) or failback sync (preferred primary) replaces. The three newest
+# copies are kept. A failed copy must not stop the router from moving over.
+stand_down_local() {
+    local archive
+    archive="${STATE_DIR}/stood-down-$(date +%Y%m%dT%H%M%S)"
+    (cd "${INSTALL_DIR}" && docker compose stop ziti-controller ziti-console)
+    if mkdir -p "$archive" && cp -a "${CTRL_DIR}/db/." "$archive/"; then
+        log "Local controller stopped; the DB it wrote is kept in ${archive}"
+    else
+        log "WARNING: local controller stopped, but its DB could not be copied to ${archive}"
+    fi
+    find "$STATE_DIR" -maxdepth 1 -type d -name 'stood-down-*' | sort -r | tail -n +4 | xargs -r rm -rf || true
+    rm -f {{ openziti_router_dir }}/endpoints 2>/dev/null || true
+    (cd "${INSTALL_DIR}" && docker compose restart ziti-router) || log "WARNING: router restart failed"
+}
+
 # Get current failure count
 FAILURES=$(cat "$FAILURE_FILE" 2>/dev/null || echo "0")
 
@@ -68,6 +131,19 @@ if [ "$LOCAL_RUNNING" = "true" ] && check_controller "$LOCAL_WG_IP"; then
     # Controller healthy locally — normal state
     echo "0" > "$FAILURE_FILE"
     rm -f "$PROMOTED_FILE"
+    if check_controller "$PEER_WG_IP"; then
+        LOSER=$(dual_active_loser)
+        if [ "$LOSER" = "$NODE_NAME" ]; then
+            log "=== DUAL ACTIVE: ${PEER_NAME} promoted while this controller was down — standing down (gotcha 177) ==="
+            stand_down_local
+            # The failback settling starts now; the failback syncs the peer's DB back.
+            touch "$PROMOTED_FILE"
+        elif [ -n "$LOSER" ]; then
+            log "DUAL ACTIVE: this controller ran throughout — ${PEER_NAME} stands down (gotcha 177)"
+        else
+            log "DUAL ACTIVE: cannot read both controller start times — no action this cycle"
+        fi
+    fi
     exit 0
 fi
 
@@ -108,10 +184,13 @@ if check_controller "$PEER_WG_IP"; then
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
         "systemctl stop ziti-db-sync.timer 2>/dev/null || true" 2>/dev/null || true
 
-    # 2. Stop controller on peer FIRST (must quiesce writes before DB copy)
+    # 2. Stop controller on peer FIRST (must quiesce writes before DB copy).
+    # Zero the peer's failure count with it: it grew every cycle the peer
+    # served, so the peer's next cycle, which finds neither controller
+    # healthy while this one starts, would promote it straight back.
     log "Stopping controller on peer"
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -i /root/.ssh/peer_key "root@${PEER_WG_IP}" \
-        "cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || {
+        "echo 0 > ${FAILURE_FILE}; cd ${INSTALL_DIR} && docker compose stop ziti-controller ziti-console 2>/dev/null || true" 2>/dev/null || {
         log "ERROR: Could not stop controller on peer — aborting failback to prevent split-brain"
         exit 1
     }
@@ -164,6 +243,10 @@ if check_controller "$PEER_WG_IP"; then
 
     log "=== FAILBACK COMPLETE ==="
     {% endif %}
+    # The peer serves (or just handed over). The self-heal below would start a
+    # second controller, and after a failback it recreated the one just
+    # started, because LOCAL_RUNNING still holds the value from before.
+    exit 0
 fi
 
 # Neither local nor peer controller is running — self-heal
@@ -189,6 +272,20 @@ fi
 if check_controller "{{ hostvars[openziti_primary_node]['wireguard_ip'] }}"; then
     # Primary is healthy — reset failure count
     echo "0" > "$FAILURE_FILE"
+    if [ "$LOCAL_RUNNING" = "true" ]; then
+        LOSER=$(dual_active_loser)
+        if [ "$LOSER" = "$NODE_NAME" ]; then
+            log "=== DUAL ACTIVE: ${PREFERRED_PRIMARY}'s controller ran throughout — standing down (gotcha 177) ==="
+            stand_down_local
+            rm -f "$PROMOTED_FILE"
+            systemctl start ziti-db-sync.timer 2>/dev/null || true
+        elif [ -n "$LOSER" ]; then
+            log "DUAL ACTIVE: ${PREFERRED_PRIMARY}'s controller started after this one — it stands down, and its failback syncs this DB (gotcha 177)"
+        else
+            log "DUAL ACTIVE: cannot read both controller start times — no action this cycle"
+        fi
+        exit 0
+    fi
     rm -f "$PROMOTED_FILE"
     exit 0
 fi
