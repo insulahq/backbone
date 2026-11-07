@@ -4,14 +4,18 @@
 # ==========================================================================
 # Runs every 60s via systemd timer on the PREFERRED PRIMARY node only.
 # If this node is standby but should be primary (and conditions are safe),
-# performs a coordinated repmgr switchover to reclaim the primary role.
+# it promotes itself with pg_promote() WHILE THE PEER IS STILL PRIMARY, then
+# restarts the peer's PostgreSQL over SSH so it rewinds and rejoins as
+# standby. This is a forced promotion, not a coordinated switchover: for a
+# few seconds both nodes are primary, and whatever the peer writes in that
+# window is rolled back by pg_rewind (gotcha 171).
 #
 # Safety guards:
 #   1. Only runs on the preferred primary node ({{ dns_failover_primary | default('ns1') }})
 #   2. Both nodes must be healthy and streaming
-#   3. 5-minute settling delay — node must have been standby for >5 min
-#   4. 30-minute cooldown — no switchover if a failover event happened recently
-#   5. Coordinated switchover (not forced promotion) — zero data loss
+#   3. Settling delay (SETTLING_MIN) — the PG container must have run that long
+#   4. Cooldown (COOLDOWN_MIN) — no failback if one was attempted recently
+#   5. /etc/platform-maintenance-mode holds it (self-cleans after 24h)
 # ==========================================================================
 
 set -euo pipefail
