@@ -358,6 +358,24 @@ enforce_ntfy_fence() {
   return 0
 }
 
+# Kill established client TLS connections in Traefik's netns, once per call,
+# while /var/run/pg-transition-sweep counts passes down (set to 3 on a role
+# transition at the end of the script). Why the kill and why several passes:
+# see the comment at that call.
+transition_sweep() {
+  local sweep traefik_pid conns
+  sweep=$(cat /var/run/pg-transition-sweep 2>/dev/null || echo 0)
+  [ "${sweep:-0}" -gt 0 ] || return 0
+  echo $((sweep - 1)) > /var/run/pg-transition-sweep
+  traefik_pid=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
+  if [ -n "$traefik_pid" ] && [ "$traefik_pid" != "0" ]; then
+    conns=$(nsenter -t "$traefik_pid" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
+    nsenter -t "$traefik_pid" -n ss -K 'sport = :443' >/dev/null 2>&1 || true
+    echo "$(date): Killed ${conns:-0} established :443 connections in Traefik netns (transition sweep, $((sweep - 1)) passes left)"
+  fi
+  return 0
+}
+
 # Steady-state fence enforcement (before the early exit below). During a role
 # transition this only applies the stop direction — the start direction waits
 # for pgproxy to be retargeted and runs via the end-of-script call.
@@ -374,6 +392,12 @@ DNS_NEEDS_UPDATE=false
 [ "$DNS_OK" != "true" ] && DNS_NEEDS_UPDATE=true
 
 if ! $PGPROXY_NEEDS_UPDATE && ! $DNS_NEEDS_UPDATE && ! $ROLE_TRANSITIONED; then
+  # The cycles after a transition are steady-state ones, so the sweep's
+  # follow-up passes have to run here. They used to sit only at the end of the
+  # script, past this exit, and never ran: every transition got one pass, and
+  # external peers that redialed into the router-rebuild gap stayed pinned to
+  # the demoted node's 404s (gotcha 175).
+  transition_sweep
   exit 0  # Everything already correct
 fi
 
@@ -451,20 +475,12 @@ enforce_ntfy_fence
 # NEW connection that a single kill pass misses (observed: moodle re-pinned
 # within seconds of the 19:00 failback kill and hammered 404s for 46 min).
 # By the following cycles the sentinel/server routers are definitively
-# active, so post-sweep redials land correctly.
+# active, so post-sweep redials land correctly. The first pass runs here; the
+# other two run from the steady-state exit above on the next cycles.
 if $ROLE_TRANSITIONED; then
   echo 3 > /var/run/pg-transition-sweep
 fi
-SWEEP=$(cat /var/run/pg-transition-sweep 2>/dev/null || echo 0)
-if [ "${SWEEP:-0}" -gt 0 ]; then
-  echo $((SWEEP - 1)) > /var/run/pg-transition-sweep
-  TRAEFIK_PID=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
-  if [ -n "$TRAEFIK_PID" ] && [ "$TRAEFIK_PID" != "0" ]; then
-    _CONNS=$(nsenter -t "$TRAEFIK_PID" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
-    nsenter -t "$TRAEFIK_PID" -n ss -K 'sport = :443' >/dev/null 2>&1 || true
-    echo "$(date): Killed ${_CONNS:-0} established :443 connections in Traefik netns (transition sweep, $SWEEP passes left)"
-  fi
-fi
+transition_sweep
 
 # Restart the local NetBird peer client AFTER the fence pass and the conn
 # kill, so its fresh management channel dials into a settled topology
