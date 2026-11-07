@@ -53,8 +53,12 @@ fi
 # promotions the repmgr post-promote hook retargets before our next cycle,
 # so PGPROXY_NEEDS_UPDATE stays false and gating post-transition actions on
 # it silently skips them (observed: conn-kill never fired during the
-# 2026-07-22 drill). /var/run is tmpfs: cleared on boot, and boot already
-# breaks all connections, so skip-when-empty is correct.
+# 2026-07-22 drill). /var/run is tmpfs, so an empty LAST_ROLE means the first
+# run since boot: not a transition (no cascade), but it still arms the :443
+# sweep. Boot breaks every connection, yet clients redial at once, and
+# Traefik (restart unless-stopped) is serving before this run starts the
+# netbird-fence sentinel (restart no). On a standby those redials got 404s
+# and pinned, the gotcha-150 pattern (gotcha 176).
 LAST_ROLE=$(cat /var/run/pg-last-role 2>/dev/null || echo "")
 ROLE_TRANSITIONED=false
 if [ "$PG_ROLE" != "$LAST_ROLE" ]; then
@@ -62,6 +66,9 @@ if [ "$PG_ROLE" != "$LAST_ROLE" ]; then
   if [ -n "$LAST_ROLE" ]; then
     ROLE_TRANSITIONED=true
     echo "$(date): Role transition detected: $LAST_ROLE -> $PG_ROLE"
+  else
+    echo 3 > /var/run/pg-transition-sweep
+    echo "$(date): First run since boot (role $PG_ROLE) — arming the :443 sweep"
   fi
 fi
 
