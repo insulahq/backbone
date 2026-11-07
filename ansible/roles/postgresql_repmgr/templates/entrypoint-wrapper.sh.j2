@@ -820,13 +820,19 @@ self_demote() {
   # Stop PostgreSQL to prevent further writes
   pg_ctl -D "$PGDATA" -m fast -w stop 2>/dev/null || true
 
-  # Kill repmgrd
-  [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
-
   # Update pgproxy target — watchdog handles DNS + consumer restarts
   echo "${PEER_NAME}" > /opt/postgresql/pgproxy-target
 
+  # This runs inside split_brain_watchdog's background subshell. An `exit`
+  # here ends only that subshell, and REPMGRD_PID is the empty value it had
+  # when the subshell forked, so repmgrd could not be killed from here. The
+  # main shell (PID 1, waiting on repmgrd) then kept the container up with
+  # PostgreSQL stopped: no restart, no rejoin, for days (gotcha 169). Signal
+  # the main shell instead — `$$` is its PID even in a subshell — so
+  # shutdown_handler stops repmgrd and exits, and the restart policy brings
+  # the container back as a standby.
   echo "==> Container will restart and rejoin as standby" >&2
+  kill -TERM "$$"
   exit 1
 }
 
