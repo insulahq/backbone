@@ -874,6 +874,34 @@
         _test_results: "{{ _test_results + [{'name': 'PG maintenance timer', 'host': inventory_hostname, 'passed': _t_maint_pg.rc | default(1) == 0}] }}"
       tags: [maintenance]
 
+    # unattended-upgrades ran twice a day and "succeeded" for months while its
+    # origin filter matched nothing (gotcha 174), so a timer check proves
+    # nothing. Compare what it would install with what is pending: every
+    # pending Debian-Security update must be in its dry-run selection.
+    - name: "Maintenance | unattended-upgrades selects pending security updates"
+      shell: |
+        set -o pipefail
+        PENDING=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null \
+          | awk '/^Inst .*Debian-Security/{print $2}' | sort -u)
+        if [ -z "$PENDING" ]; then echo "no security updates pending"; exit 0; fi
+        SELECTED=$(timeout 600 unattended-upgrade --dry-run -v 2>&1 \
+          | sed -n 's/.*Packages that will be upgraded: //p' | tr ' ' '\n' | sort -u)
+        MISSING=$(comm -23 <(echo "$PENDING") <(echo "$SELECTED"))
+        if [ -z "$MISSING" ]; then echo "all $(echo "$PENDING" | wc -l) selected"; exit 0; fi
+        echo "not selected:" $MISSING
+        exit 1
+      args:
+        executable: /bin/bash
+      register: _t_maint_uu
+      changed_when: false
+      ignore_errors: true
+      tags: [maintenance]
+
+    - name: "Maintenance | Record result — unattended-upgrades selects security updates"
+      set_fact:
+        _test_results: "{{ _test_results + [{'name': 'Security updates selected', 'host': inventory_hostname, 'passed': _t_maint_uu.rc | default(1) == 0}] }}"
+      tags: [maintenance]
+
     # An alert name without a matching Gatus external endpoint 404s on every
     # push and never reaches anyone — PG-Standby-Streaming did exactly that for
     # weeks (gotcha 151). platform-alert.sh logs each rejected push.

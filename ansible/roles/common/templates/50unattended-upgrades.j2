@@ -1,6 +1,11 @@
-// Automatically install security updates only
-Unattended-Upgrade::Allowed-Origins {
-    "${distro_id}:${distro_codename}-security";
+// Automatically install security updates only.
+// Debian's security suite is archive "stable-security" with codename
+// "<codename>-security". The Ubuntu-style Allowed-Origins
+// "${distro_id}:${distro_codename}-security" compares against the archive,
+// so on Debian it matched nothing and no update was ever installed
+// (gotcha 174). Match codename + label, as Debian's own default does.
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
 
 // Do NOT auto-reboot (operators handle reboots during maintenance windows)
