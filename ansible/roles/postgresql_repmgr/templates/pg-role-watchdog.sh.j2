@@ -85,11 +85,15 @@ else
 fi
 
 # Push PG role to Gatus — green when node is in its expected role.
-# Preferred primary ({{ postgresql_primary_node | default('ns1') }}) pushes to "Role: Primary" (green = is primary).
+# Preferred primary ({{ pg_preferred_primary | default(groups['dns_servers'] | first) }}) pushes to "Role: Primary" (green = is primary).
 # Other node pushes to "Role: Standby" (green = is standby).
+# The STATIC preferred home, not postgresql_primary_node: site.yml's pre-flight
+# overrides that to whichever node holds the PG primary, so a deploy during a
+# failover rewrote which check each node pushes and hid the very condition
+# these checks report (gotcha 173, the gotcha-153 class).
 GATUS_TOKEN=$(cat /etc/gatus-token 2>/dev/null || true)
 if [ -n "$GATUS_TOKEN" ]; then
-{% if inventory_hostname == (postgresql_primary_node | default('ns1')) %}
+{% if inventory_hostname == (pg_preferred_primary | default(groups['dns_servers'] | first)) %}
   # This is the preferred primary — green when actually primary
   ROLE_OK=$( [ "$PG_ROLE" = "f" ] && echo "true" || echo "false" )
   ROLE_ENDPOINT="role-primary"
