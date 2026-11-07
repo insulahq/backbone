@@ -11,7 +11,7 @@
 # window is rolled back by pg_rewind (gotcha 171).
 #
 # Safety guards:
-#   1. Only runs on the preferred primary node ({{ dns_failover_primary | default('ns1') }})
+#   1. Only runs on the preferred primary node ({{ pg_preferred_primary | default(groups['dns_servers'] | first) }})
 #   2. Both nodes must be healthy and streaming
 #   3. Settling delay (SETTLING_MIN) — the PG container must have run that long
 #   4. Cooldown (COOLDOWN_MIN) — no failback if one was attempted recently
@@ -25,7 +25,11 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
 
-PREFERRED_PRIMARY="{{ dns_failover_primary | default('ns1') }}"
+# The static preferred home, not dns_failover_primary: site.yml's pre-flight
+# sets that to whichever node holds the PG primary, so a postgresql deploy
+# during a failover would have made the CURRENT primary "preferred" and
+# disabled failback on the real one (gotcha 173).
+PREFERRED_PRIMARY="{{ pg_preferred_primary | default(groups['dns_servers'] | first) }}"
 NODE_NAME="{{ inventory_hostname }}"
 COOLDOWN_FILE="/tmp/pg-failback-cooldown"
 SETTLING_MIN=1800  # 30 minutes
