@@ -17,8 +17,9 @@
 #
 # Architecture: Active-passive. All service domains always point to ONE node.
 # NetBird requires single-server signal exchange; other services benefit from
-# simplicity. The standby runs all containers (hot standby) but receives no
-# external traffic until failover.
+# simplicity. The standby runs most containers (hot standby) but receives no
+# external traffic until failover; NetBird and ntfy are fenced to the PG
+# primary, and Uptime Kuma runs on one node only, so its record is pinned.
 #
 # NOTE: NS glue records (ns1/ns2.<domain>) are NOT modified — both nameservers
 # always respond to DNS queries. Only service A/AAAA records are switched.
@@ -94,12 +95,22 @@ case "$MODE" in
     ;;
 esac
 
-# Service domains to update.
-# ntfy is listed unconditionally, like monitor/ziti: it is fenced to the PG
+# Service domains that follow the serving node.
+# ntfy is listed unconditionally, like ziti: it is fenced to the PG
 # primary, so if its record kept pointing at the demoted node after a failover
 # the fence would have stopped the only server that record resolves to —
 # a silent, total ntfy outage until the next deploy rewrote the record.
-DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} {{ openziti_domain | default('ziti.' + platform_domain) }} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ openziti_domain | default('ziti.' + platform_domain) }} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+
+# Uptime Kuma is the exception: it runs on ONE node (uptime_kuma_node) with no
+# hot standby and no fence (gotcha 164), so its record must not follow the
+# serving node. It used to: after a failover monitor.<domain> resolved to the
+# node without Kuma and answered 404 (gotcha 170). Pinned to its node in
+# every mode.
+{% set kuma_node = uptime_kuma_node | default(groups['dns_servers'] | first) %}
+PINNED_DOMAIN="{{ uptime_kuma_domain | default('monitor.' + platform_domain) }}"
+PINNED_A="[{\"content\": \"{{ hostvars[kuma_node]['ansible_host'] }}\", \"disabled\": false}]"
+PINNED_AAAA="{% if hostvars[kuma_node]['public_ipv6'] is defined %}[{\"content\": \"{{ hostvars[kuma_node]['public_ipv6'] }}\", \"disabled\": false}]{% endif %}"
 
 # Build rrsets payload — delete any LUA records first, then set A/AAAA
 RRSETS="["
@@ -112,6 +123,11 @@ for DOMAIN in $DOMAINS; do
     RRSETS="${RRSETS},{\"name\":\"${DOMAIN}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${AAAA_RECORDS}}"
   fi
 done
+RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
+RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"A\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${PINNED_A}}"
+if [ -n "$PINNED_AAAA" ]; then
+  RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${PINNED_AAAA}}"
+fi
 RRSETS="${RRSETS}]"
 
 # Call PowerDNS API
@@ -127,7 +143,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
   if command -v docker &>/dev/null; then
     docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
   fi
-  echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, } (TTL=30s, HTTP ${HTTP_CODE})"
+  echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, }; ${PINNED_DOMAIN} pinned (TTL=30s, HTTP ${HTTP_CODE})"
 else
   echo "ERROR: PowerDNS API returned HTTP ${HTTP_CODE}" >&2
   exit 1

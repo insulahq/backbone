@@ -191,22 +191,59 @@ fi
 # manual `docker start`, and reboots all drift. Note `restart:
 # unless-stopped` keeps a fenced container stopped across reboots, so
 # promotion MUST re-start it here — nothing else will.
+#
+# Deployed means the compose file exists, not that a container does: a
+# container can vanish (gotcha 167), and the fence then recreates it.
+NETBIRD_COMPOSE_DIR="{{ netbird_install_dir | default('/opt/netbird') }}"
+NETBIRD_PROXY_COMPOSE_DIR="{{ netbird_proxy_install_dir | default('/opt/netbird-proxy') }}"
+NTFY_COMPOSE_DIR="{{ ntfy_install_dir | default('/opt/ntfy') }}"
+
+# container_state <name> — the container's state, or "missing". On a container
+# that does not exist `docker inspect --format` prints an EMPTY LINE and exits
+# 1, so the old `$(docker inspect … || echo "missing")` gave "\nmissing" and no
+# "missing" test ever matched (gotcha 168).
+container_state() {
+  local s
+  s=$(docker inspect "$1" --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || true)
+  s="${s//[[:space:]]/}"
+  echo "${s:-missing}"
+}
+
+# ensure_container <compose dir> <service> <container> — recreate a container
+# that its compose file defines but that no longer exists. `create` only makes
+# it (pulling a missing image) and --no-recreate leaves every existing one
+# alone; the fence starts or keeps it stopped in its own order. Never fails
+# the run: a failed recreate is logged and the next cycle tries again.
+ensure_container() {
+  local file="$1/docker-compose.yml"
+  [ -f "$file" ] || return 0
+  [ "$(container_state "$3")" = "missing" ] || return 0
+  echo "$(date): fence — $3 is missing, recreating it from $file"
+  docker compose -f "$file" create --no-recreate "$2" 2>&1 | tail -1 \
+    || echo "$(date): WARNING — recreating $3 failed"
+  return 0
+}
+
 enforce_netbird_fence() {
-  local nb_state proxy_state fence_state
+  local nb_state proxy_state fence_state dash_state
+  if [ ! -f "$NETBIRD_COMPOSE_DIR/docker-compose.yml" ] && [ ! -f "$NETBIRD_PROXY_COMPOSE_DIR/docker-compose.yml" ]; then
+    return 0  # NetBird not deployed on this node
+  fi
+  ensure_container "$NETBIRD_COMPOSE_DIR" netbird-server netbird-server
+  ensure_container "$NETBIRD_COMPOSE_DIR" dashboard netbird-dashboard
+  ensure_container "$NETBIRD_COMPOSE_DIR" netbird-fence netbird-fence
+  ensure_container "$NETBIRD_PROXY_COMPOSE_DIR" netbird-proxy netbird-proxy
   # Inspect the containers independently — the roles are separately taggable,
   # so netbird-proxy can exist on a node without netbird-server (or vice
   # versa) after a partial --tags/--limit run. Neither may run on the standby.
-  nb_state=$(docker inspect netbird-server --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
-  proxy_state=$(docker inspect netbird-proxy --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+  nb_state=$(container_state netbird-server)
+  proxy_state=$(container_state netbird-proxy)
   # netbird-fence sentinel (gotcha 150) — runs INVERSELY to netbird-server:
   # on the standby its TCP-passthrough-to-dead-port Traefik router closes
   # vpn-domain connections mid-TLS-handshake (a transport error gRPC clients
   # retry through) instead of letting the dashboard answer a valid-TLS 404
   # that pins management channels permanently.
-  fence_state=$(docker inspect netbird-fence --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
-  if [ "$nb_state" = "missing" ] && [ "$proxy_state" = "missing" ] && [ "$fence_state" = "missing" ]; then
-    return 0  # NetBird not deployed on this node
-  fi
+  fence_state=$(container_state netbird-fence)
 
   if [ "$PG_ROLE" = "t" ]; then
     # ORDER (gotcha 150): the sentinel's TCP passthrough only wins the vpn
@@ -219,7 +256,7 @@ enforce_netbird_fence() {
       echo "$(date): NetBird fence — standby role, starting fence sentinel"
       docker start netbird-fence 2>&1 || echo "$(date): WARNING — netbird-fence start failed"
     fi
-    dash_state=$(docker inspect netbird-dashboard --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+    dash_state=$(container_state netbird-dashboard)
     if [ "$dash_state" = "running" ] || [ "$dash_state" = "restarting" ]; then
       echo "$(date): NetBird fence — standby role, stopping netbird-dashboard"
       docker stop --time 5 netbird-dashboard 2>&1 || echo "$(date): WARNING — netbird-dashboard stop failed"
@@ -243,7 +280,7 @@ enforce_netbird_fence() {
     if [ "$nb_state" != "missing" ] && [ "$nb_state" != "running" ]; then
       echo "$(date): NetBird fence — primary role, starting netbird-server"
       docker start netbird-server 2>&1 || echo "$(date): WARNING — netbird-server start failed"
-      nb_state=$(docker inspect netbird-server --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+      nb_state=$(container_state netbird-server)
     fi
     # The proxy talks to the LOCAL netbird-server — only start it when that
     # dependency is actually up, otherwise it just crash-loops.
@@ -251,7 +288,7 @@ enforce_netbird_fence() {
       echo "$(date): NetBird fence — primary role, starting netbird-proxy"
       docker start netbird-proxy 2>&1 || echo "$(date): WARNING — netbird-proxy start failed"
     fi
-    dash_state=$(docker inspect netbird-dashboard --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
+    dash_state=$(container_state netbird-dashboard)
     if [ "$dash_state" != "missing" ] && [ "$dash_state" != "running" ] && [ "$nb_state" = "running" ]; then
       echo "$(date): NetBird fence — primary role, starting netbird-dashboard"
       docker start netbird-dashboard 2>&1 || echo "$(date): WARNING — netbird-dashboard start failed"
@@ -286,15 +323,16 @@ enforce_netbird_fence() {
 # are still readable after a full container restart (verified on v2.27.0).
 enforce_ntfy_fence() {
   local ntfy_state
-  ntfy_state=$(docker inspect ntfy --format "{% raw %}{{.State.Status}}{% endraw %}" 2>/dev/null || echo "missing")
   # Explicit if-block, NOT `[ ... ] && return 0`: under `set -e` an AND-list
   # whose test fails is only survivable while further statements follow it.
   # As the last statement of a function it returns 1 and kills the whole
   # watchdog run — taking netbird fencing, the DNS switch and the conn-kill
   # sweep down with it. Same shape as enforce_netbird_fence() above.
-  if [ "$ntfy_state" = "missing" ]; then
+  if [ ! -f "$NTFY_COMPOSE_DIR/docker-compose.yml" ]; then
     return 0  # ntfy not deployed on this node
   fi
+  ensure_container "$NTFY_COMPOSE_DIR" ntfy ntfy
+  ntfy_state=$(container_state ntfy)
 
   if [ "$PG_ROLE" = "t" ]; then
     if [ "$ntfy_state" = "running" ] || [ "$ntfy_state" = "restarting" ]; then

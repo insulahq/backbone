@@ -15,8 +15,13 @@ trap 'platform_alert "critical" "Images-Up-to-Date" "Docker cleanup failed unexp
 
 log "Starting Docker cleanup"
 
-# Remove stopped containers (older than 24h)
-CONTAINERS=$(docker container prune -f --filter "until=24h" 2>&1)
+# Remove stopped containers (older than 24h) — never one that compose manages.
+# A stopped compose container is a desired state, not litter: the PG role
+# watchdog keeps netbird-server/-proxy/-dashboard and ntfy stopped on the
+# standby and netbird-fence stopped on the primary, then starts them with
+# `docker start` on the next role change. Pruning them left nothing to start:
+# a failover moved DNS to a node with no NetBird and no ntfy (gotcha 167).
+CONTAINERS=$(docker container prune -f --filter "until=24h" --filter "label!=com.docker.compose.project" 2>&1)
 log "Containers: $CONTAINERS"
 
 # Remove dangling images (untagged, no container reference)
@@ -28,8 +33,10 @@ log "Dangling images: $DANGLING"
 UNUSED=$(docker image prune -af --filter "until={{ docker_cleanup_image_age }}" 2>&1)
 log "Unused images: $UNUSED"
 
-# Remove unused networks (not attached to any running container)
-NETWORKS=$(docker network prune -f 2>&1)
+# Remove unused networks (not attached to any running container) — again not a
+# compose one: a fenced container's network has no running member, and
+# `docker start` fails on a container whose network is gone.
+NETWORKS=$(docker network prune -f --filter "label!=com.docker.compose.project" 2>&1)
 log "Networks: $NETWORKS"
 
 # Remove build cache older than 7 days
