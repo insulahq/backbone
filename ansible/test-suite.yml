@@ -2197,10 +2197,12 @@
         - (_fo_zt_pre.stdout | default('') | trim) == '1 preferred-up'
       tags: [failover, never]
 
+    # The archive's mtime is the copied DB directory's (cp -a), so a fresh
+    # archive shows in its ctime, not its mtime.
     - name: "Failover | OpenZiti — the standby stands its controller down and keeps its DB"
       shell: |
         echo "$(docker inspect ziti-controller --format '{% raw %}{{.State.Running}}{% endraw %}')" \
-          "$(find /var/lib/openziti -maxdepth 1 -type d -name 'stood-down-*' -newermt '10 minutes ago' | wc -l)" \
+          "$(find /var/lib/openziti -maxdepth 1 -type d -name 'stood-down-*' -cmin -10 | wc -l)" \
           "$(systemctl is-active ziti-db-sync.timer)"
       register: _fo_zt_stood_down
       retries: 12
