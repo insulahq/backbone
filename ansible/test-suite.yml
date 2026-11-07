@@ -1244,6 +1244,18 @@
   any_errors_fatal: false
   vars:
     _failover_results: []
+    # ok|<back>/<total>|<names not back> over the peers connected before the
+    # drill: back = connected with a last_seen after the failover started.
+    _nb_reconverged_sql: >-
+      SELECT CASE WHEN bool_and(ok) THEN 'ok' ELSE 'wait' END || '|' || count(*) FILTER (WHERE ok)
+      || '/' || count(*) || '|' || coalesce(string_agg(name, ', ') FILTER (WHERE NOT ok), '')
+      FROM (SELECT name, coalesce(peer_status_connected AND peer_status_last_seen >= to_timestamp({{ _fo_start_epoch | default(0) | int }}), false) AS ok
+      FROM peers WHERE id = ANY(string_to_array('{{ _nb_pre_peers | default('') }}', ','))) s
+    # Without the pre-drill peer list or the failover start time the peer
+    # checks would measure nothing (or only the stale connected flag): they
+    # are then recorded as failed instead of skipped.
+    _nb_check_ready: "{{ (_nb_pre_peers | default('') | length > 0) and (_fo_start_epoch | default(0) | int > 0) }}"
+    _nb_not_run: 'NetBird peer check NOT RUN: no pre-drill peer list or no failover start time (store read failed?)'
   pre_tasks:
     - name: "Failover | Detect current PostgreSQL primary"
       community.docker.docker_container_exec:
@@ -1379,41 +1391,41 @@
         == (inventory_hostname == _pg_primary)
       tags: [failover, never]
 
-    # Optional: capture the pre-drill connected-peer count via the management
-    # API (needs netbird_admin_pat deployed to /etc/netbird-api-token). Used
-    # after the failover to verify the mesh reconverged to at least this
-    # count. -1 = API mode unavailable, convergence check is skipped.
-    - name: "Failover | Pre-flight — capture connected NetBird peer count (API mode)"
-      shell: |
-        set -o pipefail
-        if [ ! -f /etc/netbird-api-token ]; then echo "-1"; exit 0; fi
-        curl -fsSk --max-time 10 \
-          -H "Authorization: Token $(cat /etc/netbird-api-token)" \
-          "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/peers" \
-          | python3 -c "import json,sys; print(sum(1 for p in json.load(sys.stdin) if p.get('connected')))" \
-          || echo "-1"
-      args:
-        executable: /bin/bash
-      register: _pf_nb_peer_count
+    # The NetBird peers connected before the drill, read from the management
+    # store (the `netbird` database) — no API token needed. Every one of them,
+    # external peers included, must come back to the serving node after the
+    # failover and still be there after the full-node recovery. The suite
+    # cannot see the peers any other way, and external peers pinned to the
+    # demoted node (gotchas 150/175/176) were only ever found by hand.
+    - name: "Failover | Pre-flight — record connected NetBird peers (management store)"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: >-
+          psql -U postgres -d netbird -tAc
+          "SELECT coalesce(string_agg(id, ',' ORDER BY id), '') FROM peers WHERE peer_status_connected"
+      register: _pf_nb_peers
       changed_when: false
+      ignore_errors: true
       when: inventory_hostname == _pg_primary
       tags: [failover, never]
 
-    - name: "Failover | Pre-flight — publish peer count to all hosts"
+    - name: "Failover | Pre-flight — publish the connected peer IDs to all hosts"
       set_fact:
-        _nb_pre_connected: "{{ hostvars[_pg_primary]['_pf_nb_peer_count']['stdout'] | default('-1') | trim }}"
+        _nb_pre_peers: "{{ hostvars[_pg_primary]['_pf_nb_peers']['stdout'] | default('') | trim }}"
       run_once: true
       tags: [failover, never]
 
   tasks:
 
     # --- DNS failover: stop Traefik, verify other node still serves ---
+    # No run_once next to a `when: inventory_hostname == ...` (gotcha 49):
+    # run_once picks the first host, the when then skips it, and with ns2 as
+    # the test node Traefik was never stopped while the drill still passed.
     - name: "Failover | Stop Traefik on {{ _test_node }} to test DNS failover"
       community.docker.docker_compose_v2:
         project_src: /opt/traefik
         state: stopped
       when: inventory_hostname == _test_node
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Wait for DNS cache expiry (35s)"
@@ -1446,7 +1458,6 @@
         project_src: /opt/traefik
         state: present
       when: inventory_hostname == _test_node
-      run_once: true
       tags: [failover, never]
 
     - name: "Failover | Wait for Traefik to recover (15s)"
@@ -1475,6 +1486,24 @@
       tags: [failover, never]
 
     # --- PostgreSQL failover: stop primary, verify standby promotes ---
+    # Peers that come back to the new primary reconnect after this instant,
+    # which sets their last_seen in the store (see the reconvergence check).
+    - name: "Failover | Record the failover start time (database clock)"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: psql -U postgres -tAc "SELECT extract(epoch FROM now())::bigint"
+      register: _fo_pg_stop_epoch
+      changed_when: false
+      ignore_errors: true
+      when: inventory_hostname == _pg_primary
+      tags: [failover, never]
+
+    - name: "Failover | Publish the failover start time to all hosts"
+      set_fact:
+        _fo_start_epoch: "{{ hostvars[_pg_primary]['_fo_pg_stop_epoch']['stdout'] | default('0') | trim }}"
+      run_once: true
+      tags: [failover, never]
+
     # NOTE: Do NOT combine run_once with when: inventory_hostname == ... (gotcha #49).
     # The when condition alone ensures exactly one host executes the task.
     - name: "Failover | Stop PostgreSQL on primary ({{ _pg_primary }})"
@@ -1753,40 +1782,38 @@
                         or ((hostvars[_surviving_node]['public_ipv6'] | default('NO-IPV6')) in (_t_fo_signal_ips.stdout | default('')))}] }}
       tags: [failover, never]
 
-    # Mesh reconvergence (API mode only): every peer that was connected
-    # before the drill must be connected again. Ceiling 8 min — covers the
-    # ~6 min client self-heal guard cycle for external peers.
-    - name: "Failover | Wait for mesh reconvergence to pre-drill peer count"
-      shell: |
-        set -o pipefail
-        curl -fsSk --max-time 10 \
-          -H "Authorization: Token $(cat /etc/netbird-api-token)" \
-          "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/api/peers" \
-          | python3 -c "import json,sys; print(sum(1 for p in json.load(sys.stdin) if p.get('connected')))" \
-          || echo "-1"
-      args:
-        executable: /bin/bash
+    # Mesh reconvergence: every peer connected before the drill must have
+    # opened a management stream to the new primary, i.e. be connected with a
+    # last_seen after the failover started. A peer pinned to the demoted node
+    # is either marked disconnected or keeps its pre-failover last_seen.
+    # Ceiling 8 min: the newer clients cache the management IP ~5 min.
+    - name: "Failover | Wait for every pre-drill NetBird peer to reconnect to the new primary"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: "psql -U postgres -d netbird -tAc \"{{ _nb_reconverged_sql }}\""
       register: _t_fo_nb_converge
       retries: 16
       delay: 30
-      until: (_t_fo_nb_converge.stdout | default('-1') | trim | int) >= (_nb_pre_connected | int)
+      until: (_t_fo_nb_converge.stdout | default('')).startswith('ok|')
       changed_when: false
       ignore_errors: true
       when:
         - inventory_hostname == _surviving_node
-        - (_nb_pre_connected | int) > 0
+        - _nb_check_ready | bool
       tags: [failover, never]
 
     - name: "Failover | Record result — mesh reconvergence"
       set_fact:
         _failover_results: >-
-          {{ _failover_results + [{'name': 'Mesh reconverged: ' + (_t_fo_nb_converge.stdout | default('?') | trim)
-              + '/' + _nb_pre_connected + ' peers after ~' + ((_t_fo_nb_converge.attempts | default(1)) * 30) | string + 's',
+          {{ _failover_results + [{'name': (('NetBird peers back on the new primary: ' + _p[1]
+              + ((' (not back: ' + _p[2] + ')') if _p[2] | length > 0 else '')
+              + ' after ~' + ((_t_fo_nb_converge.attempts | default(1)) * 30) | string + 's')
+              if _nb_check_ready | bool else _nb_not_run),
               'host': 'cluster',
-              'passed': (_t_fo_nb_converge.stdout | default('-1') | trim | int) >= (_nb_pre_connected | int)}] }}
-      when:
-        - inventory_hostname == _surviving_node
-        - (_nb_pre_connected | int) > 0
+              'passed': (_nb_check_ready | bool) and (_t_fo_nb_converge.stdout | default('')).startswith('ok|')}] }}
+      vars:
+        _p: "{{ ((_t_fo_nb_converge.stdout | default('')) ~ '||').split('|') }}"
+      when: inventory_hostname == _surviving_node
       tags: [failover, never]
 
     # Optional guard-less recovery measurement: set
@@ -1931,18 +1958,26 @@
         _failover_results: "{{ _failover_results + [{'name': 'PostgreSQL accessible during full node outage', 'host': 'cluster', 'passed': _t_fo_full_pg.rc | default(1) == 0}] }}"
       tags: [failover, never]
 
+    # Only what comes back on its own after a reboot. The watchdogs own the
+    # rest: NetBird (fenced to the PG primary, its sentinel to the standby)
+    # and the OpenZiti controller. `compose up` of those projects used to
+    # start netbird-server on the standby and a second OpenZiti controller
+    # next to the one serving.
     - name: "Failover | FULL NODE RECOVERY — restarting all services on {{ _test_node }}"
       community.docker.docker_compose_v2:
-        project_src: "{{ item }}"
+        project_src: "{{ item.project }}"
+        services: "{{ item.services | default(omit) }}"
         state: present
       loop:
-        - /opt/traefik
-        - /opt/powerdns
-        - /opt/netbird
-        - /opt/zitadel
-        - /opt/gatus
-        - /opt/portainer
-        - /opt/openziti
+        - project: /opt/traefik
+        - project: /opt/powerdns
+        - project: /opt/zitadel
+        - project: /opt/gatus
+        - project: /opt/portainer
+        - project: /opt/openziti
+          services: [ziti-router]
+      loop_control:
+        label: "{{ item.project }}"
       when: inventory_hostname == _test_node
       ignore_errors: true
       tags: [failover, never]
@@ -2005,14 +2040,19 @@
     # netbird-server must be re-fenced (compose restarted it; the watchdog
     # stops it within ~30s). NetBird service health is asserted via the
     # primary instead.
-    - name: "Failover | Verify netbird-server re-fenced on recovered standby"
-      community.docker.docker_container_info:
-        name: netbird-server
+    # The recovery leaves NetBird to the watchdog: netbird-server must stay
+    # down and the watchdog must bring the fence sentinel back, which the
+    # outage stopped and nothing else starts (restart: no).
+    - name: "Failover | Verify the NetBird fence is restored on the recovered standby"
+      shell: |
+        running() { docker inspect "$1" --format '{% raw %}{{.State.Running}}{% endraw %}' 2>/dev/null | grep -qx true && echo true || echo false; }
+        echo "server=$(running netbird-server) fence=$(running netbird-fence)"
       register: _t_fo_recovery_nb_fence
+      changed_when: false
       ignore_errors: true
       retries: 12
       delay: 10
-      until: (_t_fo_recovery_nb_fence.container.State.Status | default('')) != 'running'
+      until: (_t_fo_recovery_nb_fence.stdout | default('') | trim) == 'server=false fence=true'
       delegate_to: "{{ _test_node }}"
       vars:
         ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated_secrets/ssh/{{ _test_node }}"
@@ -2047,8 +2087,9 @@
       set_fact:
         _failover_results: >-
           {{ _failover_results + [
-             {'name': 'netbird-server re-fenced on recovered standby', 'host': 'cluster',
-              'passed': (_t_fo_recovery_nb_fence.container.State.Status | default('')) != 'running'},
+             {'name': 'NetBird fence restored on recovered standby (' + (_t_fo_recovery_nb_fence.stdout | default('?') | trim) + ')',
+              'host': 'cluster',
+              'passed': (_t_fo_recovery_nb_fence.stdout | default('') | trim) == 'server=false fence=true'},
              {'name': 'NetBird API healthy via primary after recovery', 'host': 'cluster',
               'passed': _t_fo_recovery_netbird is success}] }}
       tags: [failover, never]
@@ -2116,6 +2157,121 @@
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'OpenZiti router healthy on recovered node', 'host': 'cluster', 'passed': (_t_fo_ziti_recovery.container.State.Health.Status | default('')) == 'healthy'}] }}"
       when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    # --- OpenZiti dual active (gotcha 177) ---
+    # A healed partition leaves the standby's promoted controller serving next
+    # to the preferred primary's. Recreate that state by starting the
+    # standby's controller while the preferred one serves: the preferred one
+    # ran throughout, so the standby's watchdog must stand its own down within
+    # a cycle or two and keep the DB it wrote.
+    - name: "Failover | OpenZiti — count serving controllers before the dual-active drill"
+      shell: &zt_count |
+        up() { curl -fsSk --max-time 5 "https://$1:{{ openziti_edge_port | default(8441) }}/edge/client/v1/version" >/dev/null 2>&1; }
+        n=0
+        for ip in {{ groups['dns_servers'] | map('extract', hostvars, 'wireguard_ip') | join(' ') }}; do
+          up "$ip" && n=$((n + 1))
+        done
+        up "{{ hostvars[_zt_pref]['wireguard_ip'] }}" && echo "$n preferred-up" || echo "$n preferred-down"
+      register: _fo_zt_pre
+      retries: 12
+      delay: 10
+      until: (_fo_zt_pre.stdout | default('') | trim) == '1 preferred-up'
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      vars: &zt_vars
+        _zt_pref: "{{ openziti_primary_node | default(groups['dns_servers'] | first) }}"
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | OpenZiti — start a second controller on the standby"
+      community.docker.docker_compose_v2:
+        project_src: /opt/openziti
+        services: [ziti-controller]
+        state: present
+      vars: *zt_vars
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != _zt_pref
+        - (_fo_zt_pre.stdout | default('') | trim) == '1 preferred-up'
+      tags: [failover, never]
+
+    - name: "Failover | OpenZiti — the standby stands its controller down and keeps its DB"
+      shell: |
+        echo "$(docker inspect ziti-controller --format '{% raw %}{{.State.Running}}{% endraw %}')" \
+          "$(find /var/lib/openziti -maxdepth 1 -type d -name 'stood-down-*' -newermt '10 minutes ago' | wc -l)" \
+          "$(systemctl is-active ziti-db-sync.timer)"
+      register: _fo_zt_stood_down
+      retries: 12
+      delay: 10
+      until: (_fo_zt_stood_down.stdout | default('') | trim) is match('false [1-9][0-9]* active$')
+      changed_when: false
+      ignore_errors: true
+      vars: *zt_vars
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != _zt_pref
+        - (_fo_zt_pre.stdout | default('') | trim) == '1 preferred-up'
+      tags: [failover, never]
+
+    - name: "Failover | OpenZiti — exactly one controller serves after the drill"
+      shell: *zt_count
+      register: _fo_zt_post
+      retries: 6
+      delay: 10
+      until: (_fo_zt_post.stdout | default('') | trim) == '1 preferred-up'
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      vars: *zt_vars
+      when: openziti_enabled | default(false) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — OpenZiti dual active"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [
+             {'name': 'OpenZiti standby stood down a second controller (running, archives, db-sync: '
+                + (_fo_zt_stood_down.stdout | default('not run, before: ' + (_fo_zt_pre.stdout | default('?'))) | trim) + ')',
+              'host': 'cluster',
+              'passed': (_fo_zt_stood_down.stdout | default('') | trim) is match('false [1-9][0-9]* active$')},
+             {'name': 'OpenZiti: one controller, on the preferred primary (' + (_fo_zt_post.stdout | default('?') | trim) + ')',
+              'host': 'cluster',
+              'passed': (_fo_zt_post.stdout | default('') | trim) == '1 preferred-up'}] }}
+      vars: *zt_vars
+      when:
+        - openziti_enabled | default(false) | bool
+        - inventory_hostname != _zt_pref
+      tags: [failover, never]
+
+    # The full-node recovery must not have pinned anyone either.
+    - name: "Failover | Every pre-drill NetBird peer is still on the primary after the recovery"
+      community.docker.docker_container_exec:
+        container: postgresql
+        command: "psql -U postgres -d netbird -tAc \"{{ _nb_reconverged_sql }}\""
+      register: _t_fo_nb_final
+      retries: 16
+      delay: 30
+      until: (_t_fo_nb_final.stdout | default('')).startswith('ok|')
+      changed_when: false
+      ignore_errors: true
+      when:
+        - inventory_hostname == _surviving_node
+        - _nb_check_ready | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — NetBird peers after the recovery"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': (('NetBird peers on the primary after the recovery: ' + _p[1]
+              + ((' (not back: ' + _p[2] + ')') if _p[2] | length > 0 else ''))
+              if _nb_check_ready | bool else _nb_not_run),
+              'host': 'cluster',
+              'passed': (_nb_check_ready | bool) and (_t_fo_nb_final.stdout | default('')).startswith('ok|')}] }}
+      vars:
+        _p: "{{ ((_t_fo_nb_final.stdout | default('')) ~ '||').split('|') }}"
+      when: inventory_hostname == _surviving_node
       tags: [failover, never]
 
     # ------------------------------------------------------------------
