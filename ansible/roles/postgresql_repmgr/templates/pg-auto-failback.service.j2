@@ -4,5 +4,6 @@ After=docker.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=120
+# Stopping the peer (up to 90 s) plus repmgrd's promotion (PROMOTE_TIMEOUT 240 s)
+TimeoutStartSec=600
 ExecStart=/usr/local/bin/pg-auto-failback.sh
