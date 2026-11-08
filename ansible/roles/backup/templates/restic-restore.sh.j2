@@ -7,6 +7,7 @@
 #   restore.sh database --load         — Extract, load, and VERIFY into running PostgreSQL
 #                                        (asserts every database in the dump is present and
 #                                         non-empty; fails loudly on psql errors or partial load)
+#   restore.sh latest-dump             — The newest database dump of this host: id, age, size
 
 set -euo pipefail
 
@@ -41,6 +42,21 @@ cmd_list() {
     echo "=== Database snapshots (pg_dumpall) ==="
     restic "${RESTIC_OPTS[@]}" snapshots --no-lock --tag pgdump --compact 2>/dev/null || \
         echo "No database snapshots found"
+}
+
+# One line for this host's newest pg_dumpall snapshot, "<id> age=<s>s
+# bytes=<n>", from the size restic records with each snapshot. A dump that
+# failed used to be saved empty (gotcha 182); test-suite reads this line.
+cmd_latest_dump() {
+    local line id time bytes
+    line=$(restic "${RESTIC_OPTS[@]}" snapshots --no-lock --host "$HOSTNAME" --tag pgdump --latest 1 --json \
+        | jq -r '.[-1] // empty | "\(.short_id) \(.time) \(.summary.total_bytes_processed // 0)"')
+    if [ -z "$line" ]; then
+        error "No database snapshot for ${HOSTNAME}"
+        exit 1
+    fi
+    read -r id time bytes <<< "$line"
+    echo "${id} age=$(( $(date +%s) - $(date -d "$time" +%s) ))s bytes=${bytes}"
 }
 
 cmd_files() {
@@ -189,14 +205,16 @@ case "${1:-help}" in
     list)     cmd_list ;;
     files)    shift; cmd_files "$@" ;;
     database) shift; cmd_database "$@" ;;
+    latest-dump) cmd_latest_dump ;;
     help|*)
-        echo "Usage: $0 {list|files|database} [options]"
+        echo "Usage: $0 {list|files|database|latest-dump} [options]"
         echo ""
         echo "Commands:"
         echo "  list                     List available snapshots"
         echo "  files [--include PATH]   Restore files to /tmp/restore"
         echo "  database                 Extract pg_dumpall to /tmp/pg_dumpall.sql"
         echo "  database --load          Extract and load into running PostgreSQL"
+        echo "  latest-dump              Newest database dump of this host: id, age, size"
         exit 0
         ;;
 esac

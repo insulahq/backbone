@@ -580,6 +580,33 @@
       when: backup_enabled | default(false) | bool
       tags: [backup]
 
+    # Gotcha 182: a failed pg_dumpall used to be saved as an empty snapshot
+    # while Backup-OK stayed green. This host's newest dump must hold data and
+    # come from the last nightly run (26 h covers the timer's random delay).
+    - name: "Backup | Newest database dump of this host"
+      command: /etc/restic/restore.sh latest-dump
+      register: _t_backup_dump
+      changed_when: false
+      ignore_errors: true
+      when:
+        - backup_enabled | default(false) | bool
+        - restic_pgdump_enabled | default(true) | bool
+      tags: [backup]
+
+    - name: "Backup | Record result — newest database dump holds data"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'Newest database dump (' + (_t_backup_dump.stdout | default('none', true)) + ')',
+              'host': inventory_hostname,
+              'passed': _t_backup_dump.rc | default(1) == 0 and _dump_bytes | int > 0 and _dump_age | int < 93600}] }}
+      vars:
+        _dump_age: "{{ _t_backup_dump.stdout | default('') | regex_search('age=[0-9]+') | default('age=999999', true) | replace('age=', '') }}"
+        _dump_bytes: "{{ _t_backup_dump.stdout | default('') | regex_search('bytes=[0-9]+') | default('bytes=0', true) | replace('bytes=', '') }}"
+      when:
+        - backup_enabled | default(false) | bool
+        - restic_pgdump_enabled | default(true) | bool
+      tags: [backup]
+
     # ------------------------------------------------------------------
     # OpenZiti Tests
     # ------------------------------------------------------------------

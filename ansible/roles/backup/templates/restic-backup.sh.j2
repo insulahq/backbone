@@ -59,19 +59,28 @@ curl -fsS --retry 3 "{{ restic_healthcheck_url }}/start" > /dev/null 2>&1 || tru
 
 log "Starting backup for {{ inventory_hostname }}"
 
-# PostgreSQL dump — pipe directly to restic (no plaintext staging on disk)
+# PostgreSQL dump — streamed into restic (no plaintext staging on disk).
+# --stdin-from-command runs pg_dumpall itself and saves no snapshot when it
+# exits non-zero. Piped into --stdin, a failed dump was saved as an empty
+# pg_dumpall.sql, counted against the retention policy, and the run still
+# reported Backup-OK: ns1 kept 0-byte dumps for two days while its PostgreSQL
+# was down (gotcha 182). A failed or skipped dump now fails Backup-OK, after
+# the file backup has run.
+DUMP_PROBLEM=""
 {% if restic_pgdump_enabled %}
 if docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q '^postgresql$'; then
     log "Dumping all PostgreSQL databases (streaming to restic)"
-    if docker exec postgresql pg_dumpall -U postgres 2>>"$LOG_FILE" | \
-        restic "${RESTIC_OPTS[@]}" backup --stdin --stdin-filename "pg_dumpall.sql" \
-        --tag pgdump --tag "{{ inventory_hostname }}" 2>>"$LOG_FILE"; then
+    if restic "${RESTIC_OPTS[@]}" backup --stdin-from-command --stdin-filename "pg_dumpall.sql" \
+        --tag pgdump --tag "{{ inventory_hostname }}" \
+        -- docker exec postgresql pg_dumpall -U postgres 2>>"$LOG_FILE"; then
         log "PostgreSQL dump backed up successfully"
     else
-        error "pg_dumpall or restic stdin backup failed — continuing with file backup"
+        DUMP_PROBLEM="the PostgreSQL dump failed, no dump snapshot was saved"
+        error "${DUMP_PROBLEM} — continuing with file backup"
     fi
 else
-    log "PostgreSQL container not running — skipping database dump"
+    DUMP_PROBLEM="the postgresql container is not running, no dump was taken"
+    error "${DUMP_PROBLEM} — continuing with file backup"
 fi
 {% endif %}
 
@@ -179,6 +188,11 @@ REPO_SIZE=$(restic "${RESTIC_OPTS[@]}" stats --no-lock --host "{{ inventory_host
 log "Backup completed successfully"
 log "Snapshots for {{ inventory_hostname }}: $SNAPSHOT_COUNT"
 log "Repository size: $REPO_SIZE bytes"
+
+if [ -n "$DUMP_PROBLEM" ]; then
+    notify_failure "files backed up, but ${DUMP_PROBLEM}"
+    exit 1
+fi
 
 # Report success to Gatus dashboard
 platform_alert "info" "Backup-OK" "Backup completed: $SNAPSHOT_COUNT snapshots, $REPO_SIZE bytes"
