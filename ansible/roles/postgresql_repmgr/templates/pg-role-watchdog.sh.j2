@@ -365,20 +365,60 @@ enforce_ntfy_fence() {
   return 0
 }
 
+# vpn_settled — whether the vpn SNI gets its final answer through this node's
+# Traefik right now: a gRPC answer from the management service on the primary
+# (the dashboard's catch-all would answer text/html), the sentinel's closed
+# handshake on the standby (curl 35, or 56 when the close follows the hello;
+# a refused connection or a timeout is Traefik down or hung, not the
+# sentinel). A 404 or 502 while routers rebuild is what pins a client
+# (gotcha 150). False where NetBird is not deployed.
+vpn_settled() {
+  local code rc=0
+  [ -f "$NETBIRD_COMPOSE_DIR/docker-compose.yml" ] || return 1
+  code=$(curl -sk --http2 -o /dev/null -w '%{http_code} %{content_type}' --max-time 5 -X POST \
+    -H 'content-type: application/grpc' --data-binary @/dev/null \
+    --resolve "{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}:443:127.0.0.1" \
+    "https://{{ netbird_dashboard_domain | default('vpn.' + platform_domain) }}/management.ManagementService/GetServerKey" 2>/dev/null) || rc=$?
+  if [ "$PG_ROLE" = "f" ]; then
+    case "$code" in "200 application/grpc"*) return 0 ;; esac
+  else
+    case "$rc" in 35|56) return 0 ;; esac
+  fi
+  return 1
+}
+
 # Kill established client TLS connections in Traefik's netns, once per call,
 # while /var/run/pg-transition-sweep counts passes down (set to 3 on a role
 # transition at the end of the script). Why the kill and why several passes:
 # see the comment at that call.
+# A pass first waits up to 20 s for the vpn SNI's final answer. Once that is
+# served, every client cut by the pass redials into it, and no further pass is
+# needed: the follow-ups used to cut the clients that had just reconnected
+# correctly, on the new primary (gotcha 181). Without it (no NetBird here, or
+# still rebuilding) the passes count down as before, each one up to 20 s later
+# (well inside the unit's TimeoutStartSec).
 transition_sweep() {
-  local sweep traefik_pid conns
+  local sweep traefik_pid conns settled=false left note="" _i
   sweep=$(cat /var/run/pg-transition-sweep 2>/dev/null || echo 0)
   [ "${sweep:-0}" -gt 0 ] || return 0
-  echo $((sweep - 1)) > /var/run/pg-transition-sweep
+  if [ -f "$NETBIRD_COMPOSE_DIR/docker-compose.yml" ]; then
+    for _i in 1 2 3 4; do
+      if vpn_settled; then settled=true; break; fi
+      sleep 5
+    done
+  fi
+  if $settled; then
+    left=0
+    note=", the vpn SNI answers as it should"
+  else
+    left=$((sweep - 1))
+  fi
+  echo "$left" > /var/run/pg-transition-sweep
   traefik_pid=$(docker inspect traefik --format "{% raw %}{{.State.Pid}}{% endraw %}" 2>/dev/null || echo "")
   if [ -n "$traefik_pid" ] && [ "$traefik_pid" != "0" ]; then
     conns=$(nsenter -t "$traefik_pid" -n ss -tn 'sport = :443' 2>/dev/null | grep -c ESTAB || true)
     nsenter -t "$traefik_pid" -n ss -K 'sport = :443' >/dev/null 2>&1 || true
-    echo "$(date): Killed ${conns:-0} established :443 connections in Traefik netns (transition sweep, $((sweep - 1)) passes left)"
+    echo "$(date): Killed ${conns:-0} established :443 connections in Traefik netns (transition sweep, ${left} passes left${note})"
   fi
   return 0
 }
@@ -483,7 +523,8 @@ enforce_ntfy_fence
 # within seconds of the 19:00 failback kill and hammered 404s for 46 min).
 # By the following cycles the sentinel/server routers are definitively
 # active, so post-sweep redials land correctly. The first pass runs here; the
-# other two run from the steady-state exit above on the next cycles.
+# other two run from the steady-state exit above on the next cycles, unless a
+# pass already saw the vpn SNI answer as it should (transition_sweep).
 if $ROLE_TRANSITIONED; then
   echo 3 > /var/run/pg-transition-sweep
 fi
