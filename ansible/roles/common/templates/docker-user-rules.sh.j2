@@ -10,6 +10,10 @@ iptables -F DOCKER-USER
 iptables -A DOCKER-USER -i {{ wireguard_interface | default('wg0') }} -j RETURN
 iptables -A DOCKER-USER -i wt0 -j RETURN
 iptables -A DOCKER-USER -i lo -j RETURN
+# DOCKER-USER also sees containers' outbound traffic, so the drops below
+# matched Traefik's fallback to the peer's OpenZiti edge API (8441) over
+# WireGuard (gotcha 186). Traffic to the peer node leaves on wg0.
+iptables -A DOCKER-USER -o {{ wireguard_interface | default('wg0') }} -j RETURN
 
 # Allow Docker bridge traffic to PowerDNS API only (post-promote DNS switch)
 iptables -A DOCKER-USER -s 172.16.0.0/12 -p tcp --dport 8081 -j RETURN
