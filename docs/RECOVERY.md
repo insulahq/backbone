@@ -395,6 +395,22 @@ ssh root@<DEMOTE_NODE> "cd /opt/postgresql && docker compose restart postgresql"
 
 > **Data impact:** Writes to the demoted node since divergence are lost (`pg_rewind` rolls them back). The window is typically <60s.
 
+**The loser self-demoted but is still down** (`SELF-DEMOTING` in its log, container
+`Up (unhealthy)`, `pg_ctl status` = no server running): before the gotcha-169 fix the
+container never restarted after self-demotion. The `.demoted` marker is still in `$PGDATA`,
+so a restart takes the standby path with `pg_rewind`:
+
+```bash
+# Optional: keep the loser's diverged writes for later inspection (server is stopped)
+ssh root@<DEMOTED_NODE> "tar -C /var/lib/docker/volumes/postgresql_postgresql_data/_data -czf /root/pg-split-brain.tar.gz ."
+ssh root@<DEMOTED_NODE> "docker compose -f /opt/postgresql/docker-compose.yml restart postgresql"
+# Expect: "Found demotion marker" → "pg_rewind succeeded" → "WAL streaming confirmed"
+```
+
+Then check the services the fences move with the primary (NetBird, ntfy): on the
+primary they must be running, on the standby `netbird-fence` must be running. A
+container a fence needs that is missing is recreated by the watchdog (gotcha 167).
+
 ---
 
 ## Scenario 9: NetBird Mesh Broken

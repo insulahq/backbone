@@ -162,6 +162,15 @@ external-endpoints:
     token: "{{ gatus_external_token }}"
     conditions:
       - "[CONNECTED] == true"
+{% if openziti_enabled | default(false) | bool %}
+  # Pushed every ziti-watchdog cycle: red on a failover, two controllers or
+  # none. The watchdog used to report them to its journal only.
+  - name: OpenZiti-Controller
+    group: {{ host }}
+    token: "{{ gatus_external_token }}"
+    conditions:
+      - "[CONNECTED] == true"
+{% endif %}
 {% endfor %}
 
 # ============================================================================
@@ -265,7 +274,9 @@ endpoints:
     client:
       insecure: true
     conditions:
-      - "[STATUS] < 500"
+      # Not "< 500": the node without the controller answers 404, and that
+      # passed while the name pointed there (gotcha 180).
+      - "[STATUS] == 200"
       - "[CERTIFICATE_EXPIRATION] > 720h"
     interval: 5m
 {% endif %}

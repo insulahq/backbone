@@ -96,11 +96,15 @@
     - /etc/systemd/system/pg-restart-consumers.service
     - "{{ postgresql_install_dir }}/signals"
 
+# Tagged maintenance like the PG maintenance script: a host-side script the
+# timer runs, deployable with --tags maintenance without touching the
+# PostgreSQL container (the entrypoint wrapper above notifies a restart).
 - name: Deploy PG role watchdog script
   template:
     src: pg-role-watchdog.sh.j2
     dest: /usr/local/bin/pg-role-watchdog.sh
     mode: '0755'
+  tags: [postgresql, maintenance]
 
 - name: Deploy NetBird peer wake-up script (post-failover)
   template:

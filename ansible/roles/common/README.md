@@ -25,7 +25,7 @@ The firewall is deliberately simple (gotcha 7: complex NAT rules broke server ac
 | WireGuard (51810/udp) | Always |
 | SSH | When `ssh_break_glass_enabled: true` |
 
-The file replaces only its own `inet filter` table (`table` + `delete table` in one transaction), so a reload leaves Docker's, fail2ban's and NetBird's tables alone and needs no Docker restart (gotcha 167). The template is checked with `nft -c` before it is installed. Never `systemctl restart nftables`: the unit's stop step is `nft flush ruleset`.
+The file replaces only its own `inet filter` table (`table` + `delete table` in one transaction), so a reload leaves Docker's, fail2ban's and NetBird's tables alone and needs no Docker restart (gotcha 184). The template is checked with `nft -c` before it is installed. Never `systemctl restart nftables`: the unit's stop step is `nft flush ruleset`.
 
 ## Dependencies
 
@@ -42,6 +42,6 @@ None -- this is the first role in the deployment order.
 ## Gotchas
 
 - Docker `0.0.0.0` port binding bypasses nftables INPUT chain; traffic goes through FORWARD chain (gotcha 1)
-- `flush ruleset` wipes Docker's, fail2ban's and NetBird's tables; the file no longer uses it (gotchas 2, 167)
-- A host-network service's port needs its own input rule: the input chain drops everything else, and only Docker-published ports bypass it (gotchas 1, 167)
+- `flush ruleset` wipes Docker's, fail2ban's and NetBird's tables; the file no longer uses it (gotchas 2, 184)
+- A host-network service's port needs its own input rule: the input chain drops everything else, and only Docker-published ports bypass it (gotchas 1, 184)
 - Docker repo has no `trixie` codename yet; role falls back to `bookworm` (gotcha in tasks)

@@ -7,7 +7,7 @@
 # Replace only this file's table, atomically. `flush ruleset` also wiped the
 # tables Docker (ip/ip6 filter, nat, raw), fail2ban (inet f2b-table) and
 # NetBird (ip netbird) keep, so every reload needed a Docker restart and left
-# bans and NetBird's rules gone until those services restarted (gotcha 167).
+# bans and NetBird's rules gone until those services restarted (gotcha 184).
 table inet filter
 delete table inet filter
 
@@ -47,7 +47,7 @@ table inet filter {
 {% if 'dns_servers' in group_names and openziti_enabled | default(false) | bool %}
     # OpenZiti edge router (host network). Clients dial the address the router
     # advertises: the public IP (router.yaml.j2). Its link listener (6262)
-    # advertises the WireGuard IP and stays closed here (gotcha 167).
+    # advertises the WireGuard IP and stays closed here (gotcha 184).
     tcp dport {{ openziti_router_port | default(3022) }} accept
 {% endif %}
     

@@ -8,7 +8,7 @@
 
 # Reload = `nft -f /etc/nftables.conf`, which replaces only `inet filter`:
 # Docker's, fail2ban's and NetBird's tables are untouched, so no Docker
-# restart (that restarted every container, PG primary included; gotcha 167).
+# restart (that restarted every container, PG primary included; gotcha 184).
 # Never `restarted`: the unit's ExecStop is `nft flush ruleset`.
 - name: reload nftables
   systemd:

@@ -4,14 +4,26 @@
 # ==========================================================================
 # Runs every 60s via systemd timer on the PREFERRED PRIMARY node only.
 # If this node is standby but should be primary (and conditions are safe),
-# performs a coordinated repmgr switchover to reclaim the primary role.
+# it stops the peer's PostgreSQL over SSH and lets this node's repmgrd fail
+# over to it, then starts the peer again, which rejoins as standby.
+#
+# The peer's clean shutdown streams all of its WAL to this standby first, so
+# nothing is lost, and the promotion is repmgrd's own, so repmgrd carries on
+# monitoring as primary. Writes stop for repmgrd's detection window (~75 s).
+# It used to pg_promote() here while the peer was still primary: the peer's
+# writes in the dual-primary seconds were rolled back by pg_rewind (gotcha
+# 171), and repmgrd, still in standby mode, exited when the peer came back,
+# taking the new primary's container down with it a minute later (gotcha 178).
 #
 # Safety guards:
-#   1. Only runs on the preferred primary node ({{ dns_failover_primary | default('ns1') }})
-#   2. Both nodes must be healthy and streaming
-#   3. 5-minute settling delay — node must have been standby for >5 min
-#   4. 30-minute cooldown — no switchover if a failover event happened recently
-#   5. Coordinated switchover (not forced promotion) — zero data loss
+#   1. Only runs on the preferred primary node ({{ pg_preferred_primary | default(groups['dns_servers'] | first) }})
+#   2. Both nodes must be healthy and streaming, repmgrd running here
+#   3. Settling delay (SETTLING_MIN) — the PG container must have run that long
+#   4. Cooldown (COOLDOWN_MIN) — no failback if one was attempted recently
+#   5. /etc/platform-maintenance-mode holds it (self-cleans after 24h)
+#   6. The peer starts again as primary if it did not shut down cleanly,
+#      this node lacks WAL up to its shutdown checkpoint, or this node is not
+#      promoted within PROMOTE_TIMEOUT
 # ==========================================================================
 
 set -euo pipefail
@@ -21,11 +33,17 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /usr/local/lib/platform-alert.sh 2>/dev/null || platform_alert() { echo "[alert:$1] [$2] $3"; }
 
-PREFERRED_PRIMARY="{{ dns_failover_primary | default('ns1') }}"
+# The static preferred home, not dns_failover_primary: site.yml's pre-flight
+# sets that to whichever node holds the PG primary, so a postgresql deploy
+# during a failover would have made the CURRENT primary "preferred" and
+# disabled failback on the real one (gotcha 173).
+PREFERRED_PRIMARY="{{ pg_preferred_primary | default(groups['dns_servers'] | first) }}"
 NODE_NAME="{{ inventory_hostname }}"
 COOLDOWN_FILE="/tmp/pg-failback-cooldown"
 SETTLING_MIN=1800  # 30 minutes
 COOLDOWN_MIN=1800  # 30 minutes
+# repmgrd promotes after 6 × 10 s reconnect attempts plus a 10 s promote_delay.
+PROMOTE_TIMEOUT=240
 
 # Skip auto-failback during fresh installs or explicit maintenance windows.
 FRESH_INSTALL_GRACE_SEC={{ (postgresql_failback_fresh_install_grace_hours | default(2)) * 3600 }}
@@ -107,10 +125,24 @@ if [ "$WAL_STATUS" != "streaming" ]; then
   exit 0  # Not streaming — unsafe to switchover
 fi
 
+PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
+PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+PEER_SSH_KEY="/root/.ssh/peer_key"
+
+local_psql() { docker exec postgresql psql -U postgres -tAc "$1" 2>/dev/null || echo "error"; }
+peer_ssh() {
+  ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -i "$PEER_SSH_KEY" "root@${PEER_WG_IP}" "$@"
+}
+
 # Guard 4: Peer must be reachable and running as primary
-PEER_RECOVERY=$(docker exec postgresql psql -U postgres -d repmgr -h "{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}" -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+PEER_RECOVERY=$(docker exec postgresql psql -U postgres -d repmgr -h "$PEER_NAME" -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
 if [ "$PEER_RECOVERY" != "f" ]; then
   exit 0  # Peer is not primary or unreachable
+fi
+
+# Guard 5: this node's repmgrd makes the promotion, so it must be running
+if ! docker exec postgresql sh -c 'kill -0 "$(cat /tmp/repmgrd.pid)"' 2>/dev/null; then
+  exit 0
 fi
 
 # === All guards passed — perform failback ===
@@ -119,41 +151,68 @@ echo "$(date): AUTO-FAILBACK: Preferred primary $NODE_NAME is standby. Initiatin
 # Set cooldown marker BEFORE attempting (prevents rapid retries on failure)
 touch "$COOLDOWN_FILE"
 
-# Use pg_promote() to promote this standby directly (bypasses repmgr's
-# "already has active primary" safety check). This intentionally creates
-# a brief dual-primary state which the split-brain watchdog on the peer
-# resolves within ~30s (peer has lower timeline → self-demotes).
-PEER_NAME="{{ groups['dns_servers'] | difference([inventory_hostname]) | first }}"
-PEER_WG_IP="{{ hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] }}"
+if [ ! -f "$PEER_SSH_KEY" ]; then
+  echo "$(date): AUTO-FAILBACK: No peer SSH key at $PEER_SSH_KEY — cannot stop the peer's PostgreSQL"
+  platform_alert "warning" "Repmgr-Healthy" "Auto-failback on $NODE_NAME skipped: no peer SSH key — cooldown ${COOLDOWN_MIN}s"
+  exit 1
+fi
 
-platform_alert "info" "Repmgr-Healthy" "Auto-failback initiating: promoting $NODE_NAME from standby to primary"
-
-if docker exec postgresql psql -U postgres -c "SELECT pg_promote(true, 60);" 2>&1; then
-  echo "$(date): AUTO-FAILBACK: $NODE_NAME promoted via pg_promote()."
-  # Update pgproxy target immediately
-  echo "postgresql" > /opt/postgresql/pgproxy-target
-  # Re-register as primary in repmgr
-  sleep 5
-  docker exec postgresql repmgr -f /etc/repmgr/repmgr.conf primary register --force 2>&1 || true
-  # Watchdog handles DNS switch + service restarts within 10s.
-
-  # Signal peer to restart its PG container so it detects the new primary
-  # and rejoins as standby. Uses the per-server SSH key deployed by Ansible.
-  PEER_SSH_KEY="/root/.ssh/peer_key"
-  if [ -f "$PEER_SSH_KEY" ]; then
-    echo "$(date): AUTO-FAILBACK: Restarting peer ($PEER_NAME) PG via SSH..."
-    if ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -i "$PEER_SSH_KEY" \
-      "root@${PEER_WG_IP}" "cd /opt/postgresql && docker compose restart postgresql" 2>&1; then
-      platform_alert "info" "Repmgr-Healthy" "Auto-failback succeeded on $NODE_NAME (peer PG restarted to rejoin as standby)"
-    else
-      echo "$(date): AUTO-FAILBACK: WARNING — could not restart peer PG via SSH. Peer will rejoin on next restart."
-      platform_alert "warning" "Repmgr-Healthy" "Auto-failback: $NODE_NAME promoted but peer SSH restart failed — peer will rejoin on next restart"
-    fi
+# Starts the peer's PostgreSQL again when the failback does not complete.
+# Its entrypoint finds this node still a standby and starts as primary.
+abort_failback() {
+  echo "$(date): AUTO-FAILBACK: $1 — starting $PEER_NAME's PostgreSQL again"
+  if peer_ssh "cd /opt/postgresql && docker compose start postgresql" 2>&1; then
+    platform_alert "warning" "Repmgr-Healthy" "Auto-failback on $NODE_NAME aborted: $1 — $PEER_NAME's PostgreSQL started again, cooldown ${COOLDOWN_MIN}s"
   else
-    echo "$(date): AUTO-FAILBACK: No peer SSH key at $PEER_SSH_KEY. Peer must be restarted manually."
-    platform_alert "warning" "Repmgr-Healthy" "Auto-failback: $NODE_NAME promoted but no peer SSH key — peer must be restarted manually"
+    platform_alert "critical" "Repmgr-Healthy" "Auto-failback on $NODE_NAME aborted: $1 — and $PEER_NAME's PostgreSQL could NOT be started again over SSH: start it there"
   fi
+  exit 1
+}
+
+# 1. Stop the peer's PostgreSQL. A clean shutdown streams all of its WAL to
+# this standby before the peer exits. The entrypoint's shutdown handler gives
+# pg_ctl 60 s; the stop timeout leaves it that time before Docker kills.
+platform_alert "info" "Repmgr-Healthy" "Auto-failback initiating: stopping $PEER_NAME's PostgreSQL so repmgrd promotes $NODE_NAME"
+echo "$(date): AUTO-FAILBACK: Stopping $PEER_NAME's PostgreSQL..."
+if ! peer_ssh "cd /opt/postgresql && docker compose stop -t 90 postgresql" 2>&1; then
+  abort_failback "could not stop $PEER_NAME's PostgreSQL over SSH"
+fi
+
+# 2. The peer must have shut down cleanly, and this standby must hold its
+# shutdown checkpoint record: then it has every record the peer wrote. Read
+# from the stopped peer's pg_control through a throwaway container. repmgrd
+# waits about a minute before it promotes, so there is time to back out.
+PEER_CONTROL=$(peer_ssh "img=\$(docker inspect postgresql --format '{% raw %}{{.Config.Image}}{% endraw %}') && docker run --rm --network none --volumes-from postgresql --entrypoint pg_controldata \"\$img\" {{ postgresql_data_dir }}" 2>/dev/null || true)
+PEER_STATE=$(echo "$PEER_CONTROL" | sed -n 's/^Database cluster state: *//p')
+PEER_CHECKPOINT=$(echo "$PEER_CONTROL" | sed -n 's/^Latest checkpoint location: *//p')
+echo "$(date): AUTO-FAILBACK: $PEER_NAME stopped — state '${PEER_STATE:-unreadable}', shutdown checkpoint ${PEER_CHECKPOINT:-unreadable}"
+if [ "$PEER_STATE" != "shut down" ] || [ -z "$PEER_CHECKPOINT" ]; then
+  abort_failback "$PEER_NAME did not shut down cleanly (state '${PEER_STATE:-unreadable}')"
+fi
+if [ "$(local_psql "SELECT pg_last_wal_receive_lsn() > '${PEER_CHECKPOINT}'::pg_lsn;")" != "t" ]; then
+  abort_failback "$NODE_NAME has not received $PEER_NAME's WAL up to its shutdown checkpoint ${PEER_CHECKPOINT}"
+fi
+
+# 3. Wait for repmgrd's own failover: it promotes through promote_command,
+# which also registers this node as primary and repoints pgproxy. The
+# pg-role-watchdog then switches DNS and starts the fenced services. Once the
+# peer is back as primary, a repmgrd that has not promoted yet stands down
+# ("original primary reappeared").
+WAITED=0
+until [ "$(local_psql "SELECT pg_is_in_recovery();")" = "f" ]; do
+  if [ "$WAITED" -ge "$PROMOTE_TIMEOUT" ]; then
+    abort_failback "repmgrd did not promote $NODE_NAME within ${PROMOTE_TIMEOUT}s"
+  fi
+  sleep 5
+  WAITED=$((WAITED + 5))
+done
+echo "$(date): AUTO-FAILBACK: repmgrd promoted $NODE_NAME after ${WAITED}s"
+
+# 4. Start the peer again. Its entrypoint finds this node primary and
+# rejoins as standby (pg_rewind when its timeline diverged).
+if peer_ssh "cd /opt/postgresql && docker compose start postgresql" 2>&1; then
+  platform_alert "info" "Repmgr-Healthy" "Auto-failback succeeded: $NODE_NAME promoted by repmgrd after ${WAITED}s, $PEER_NAME rejoining as standby"
 else
-  echo "$(date): AUTO-FAILBACK: pg_promote() FAILED. Cooldown active for ${COOLDOWN_MIN}s."
-  platform_alert "warning" "Repmgr-Healthy" "Auto-failback pg_promote() FAILED on $NODE_NAME — cooldown ${COOLDOWN_MIN}s"
+  echo "$(date): AUTO-FAILBACK: WARNING — could not start $PEER_NAME's PostgreSQL over SSH"
+  platform_alert "critical" "Repmgr-Healthy" "Auto-failback: $NODE_NAME promoted, but $PEER_NAME's PostgreSQL could not be started over SSH — start it there (no standby until then)"
 fi

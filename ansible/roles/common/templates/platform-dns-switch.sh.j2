@@ -9,16 +9,23 @@
 #   - Operators for manual drain/restore
 #
 # Usage:
-#   platform-dns-switch <mode> [--primary-ip IP] [--peer-ip IP]
+#   platform-dns-switch <mode> [--primary-ip IP] [--peer-ip IP] [--name FQDN]
 #
 # Modes:
 #   primary-only  — Only this node's IP in DNS (active-passive: this node serves)
 #   drain-self    — Only the peer's IP in DNS (draining this node for maintenance/failover)
 #
+#   --name FQDN   — Switch only that one name. For a service that fails over on
+#                   its own rather than with the PG primary: the OpenZiti
+#                   controller, whose record ziti-watchdog moves (gotcha 180).
+#
 # Architecture: Active-passive. All service domains always point to ONE node.
 # NetBird requires single-server signal exchange; other services benefit from
-# simplicity. The standby runs all containers (hot standby) but receives no
-# external traffic until failover.
+# simplicity. The standby runs most containers (hot standby) but receives no
+# external traffic until failover; NetBird and ntfy are fenced to the PG
+# primary, and Uptime Kuma runs on one node only, so its record is pinned.
+# The OpenZiti controller has its own failover, so its record is not switched
+# here (see --name).
 #
 # NOTE: NS glue records (ns1/ns2.<domain>) are NOT modified — both nameservers
 # always respond to DNS queries. Only service A/AAAA records are switched.
@@ -39,6 +46,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 MODE="${1:-}"
+ONLY_NAME=""
 PRIMARY_IP="${LOCAL_PUBLIC_IP:-}"
 PEER_IP="${PEER_PUBLIC_IP:-}"
 PRIMARY_IPV6="${LOCAL_PUBLIC_IPV6:-}"
@@ -50,16 +58,20 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --primary-ip) PRIMARY_IP="$2"; shift 2 ;;
     --peer-ip)    PEER_IP="$2"; shift 2 ;;
+    --name)       ONLY_NAME="$2"; shift 2 ;;
     *)            shift ;;
   esac
 done
 
 usage() {
-  echo "Usage: platform-dns-switch <primary-only|drain-self>" >&2
+  echo "Usage: platform-dns-switch <primary-only|drain-self> [--name FQDN]" >&2
   exit 1
 }
 
 [ -z "$MODE" ] && usage
+case "$ONLY_NAME" in
+  *[!A-Za-z0-9.-]*) echo "ERROR: --name must be a plain host name" >&2; exit 1 ;;
+esac
 
 if [ -z "${PDNS_API_KEY:-}" ] || [ -z "${PLATFORM_DOMAIN:-}" ]; then
   echo "ERROR: PDNS_API_KEY and PLATFORM_DOMAIN must be set" >&2
@@ -94,16 +106,42 @@ case "$MODE" in
     ;;
 esac
 
-# Service domains to update.
-# ntfy is listed unconditionally, like monitor/ziti: it is fenced to the PG
-# primary, so if its record kept pointing at the demoted node after a failover
-# the fence would have stopped the only server that record resolves to —
-# a silent, total ntfy outage until the next deploy rewrote the record.
-DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ uptime_kuma_domain | default('monitor.' + platform_domain) }} {{ openziti_domain | default('ziti.' + platform_domain) }} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+# Service domains that follow the serving node.
+# ntfy is listed unconditionally: it is fenced to the PG primary, so if its
+# record kept pointing at the demoted node after a failover the fence would
+# have stopped the only server that record resolves to — a silent, total ntfy
+# outage until the next deploy rewrote the record.
+# ziti.<domain> is not listed. Traefik routes it to a local controller only,
+# and the controller fails over with ziti-watchdog, not with the PG primary:
+# while the two sat on different nodes the Edge API answered 404 (gotcha 180).
+DOMAINS="vpn.${PLATFORM_DOMAIN} {{ zitadel_domain | default('account.' + platform_domain) }} status.${PLATFORM_DOMAIN} {{ ntfy_domain | default('ntfy.' + platform_domain) }} ${PLATFORM_DOMAIN}"
+{% if netbird_proxy_create_dns_records | default(true) | bool %}
+# netbird-proxy is fenced to the PG primary like netbird-server, but the role
+# wrote its records once, at deploy time, for the node active then — after a
+# failover they pointed at the node where the fence had stopped the proxy
+# (gotcha 172). They follow the serving node like the rest.
+{% set proxy_apex = netbird_proxy_apex | default('proxy.' + platform_domain) %}
+DOMAINS="${DOMAINS} {{ proxy_apex }} *.{{ proxy_apex }}"
+{% endif %}
+
+# Uptime Kuma is the exception: it runs on ONE node (uptime_kuma_node) with no
+# hot standby and no fence (gotcha 164), so its record must not follow the
+# serving node. It used to: after a failover monitor.<domain> resolved to the
+# node without Kuma and answered 404 (gotcha 170). Pinned to its node in
+# every mode.
+{% set kuma_node = uptime_kuma_node | default(groups['dns_servers'] | first) %}
+PINNED_DOMAIN="{{ uptime_kuma_domain | default('monitor.' + platform_domain) }}"
+PINNED_A="[{\"content\": \"{{ hostvars[kuma_node]['ansible_host'] }}\", \"disabled\": false}]"
+PINNED_AAAA="{% if hostvars[kuma_node]['public_ipv6'] is defined %}[{\"content\": \"{{ hostvars[kuma_node]['public_ipv6'] }}\", \"disabled\": false}]{% endif %}"
+
+if [ -n "$ONLY_NAME" ]; then
+  DOMAINS="$ONLY_NAME"
+fi
 
 # Build rrsets payload — delete any LUA records first, then set A/AAAA
 RRSETS="["
 FIRST=true
+set -f  # no pathname expansion: the list can hold a wildcard name
 for DOMAIN in $DOMAINS; do
   if [ "$FIRST" = true ]; then FIRST=false; else RRSETS="${RRSETS},"; fi
   RRSETS="${RRSETS}{\"name\":\"${DOMAIN}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
@@ -112,6 +150,13 @@ for DOMAIN in $DOMAINS; do
     RRSETS="${RRSETS},{\"name\":\"${DOMAIN}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${AAAA_RECORDS}}"
   fi
 done
+if [ -z "$ONLY_NAME" ]; then
+  RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"LUA\",\"changetype\":\"DELETE\"}"
+  RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"A\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${PINNED_A}}"
+  if [ -n "$PINNED_AAAA" ]; then
+    RRSETS="${RRSETS},{\"name\":\"${PINNED_DOMAIN}.\",\"type\":\"AAAA\",\"ttl\":30,\"changetype\":\"REPLACE\",\"records\":${PINNED_AAAA}}"
+  fi
+fi
 RRSETS="${RRSETS}]"
 
 # Call PowerDNS API
@@ -127,7 +172,11 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
   if command -v docker &>/dev/null; then
     docker exec powerdns-auth pdnsutil increase-serial "${PLATFORM_DOMAIN}" > /dev/null 2>&1 || true
   fi
-  echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, } (TTL=30s, HTTP ${HTTP_CODE})"
+  if [ -n "$ONLY_NAME" ]; then
+    echo "DNS SWITCH: ${MODE} — ${ONLY_NAME} only (TTL=30s, HTTP ${HTTP_CODE})"
+  else
+    echo "DNS SWITCH: ${MODE} — ${DOMAINS// /, }; ${PINNED_DOMAIN} pinned (TTL=30s, HTTP ${HTTP_CODE})"
+  fi
 else
   echo "ERROR: PowerDNS API returned HTTP ${HTTP_CODE}" >&2
   exit 1

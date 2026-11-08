@@ -29,7 +29,9 @@
 #   Layer 1 — Startup:   determine_role() always checks peer before choosing role
 #   Layer 2 — Promotion: promote-check.sh validates external connectivity
 #   Layer 3 — Runtime:   split_brain_watchdog detects dual-primary, lower timeline
-#                         self-demotes (deterministic tiebreaker: REPMGR_INITIAL_ROLE)
+#                         self-demotes (deterministic tiebreaker: REPMGR_INITIAL_ROLE).
+#                         Runs in both roles: a standby that repmgrd promotes
+#                         is a primary without a restart (gotcha 183).
 #   Layer 4 — Demotion:  .demoted marker survives container restarts
 #
 # ==========================================================================
@@ -725,6 +727,15 @@ start_as_standby() {
     echo "==> Standby registration returned non-zero (may already be registered)"
   }
 
+  # The split-brain watchdog runs here too. It only acts while this node is
+  # primary, and a standby becomes one when repmgrd promotes it, with no
+  # restart that would pass through start_as_primary. Started there only, it
+  # never ran on a node promoted by a failover: after a WireGuard-only
+  # partition both nodes stayed primary until one was demoted by hand
+  # (gotcha 183).
+  split_brain_watchdog &
+  WATCHDOG_PID=$!
+
   echo "==> Starting repmgrd (foreground)..."
   repmgrd -f "$REPMGR_CONFIG_FILE" --daemonize=false &
   REPMGRD_PID=$!
@@ -733,7 +744,7 @@ start_as_standby() {
 }
 
 # ==========================================================================
-# Split-brain watchdog (runs in background on primary)
+# Split-brain watchdog (runs in background in both roles, acts as primary)
 # ==========================================================================
 # Every 15 seconds, checks if the peer is ALSO running as primary.
 # If dual-primary is detected:
@@ -820,13 +831,19 @@ self_demote() {
   # Stop PostgreSQL to prevent further writes
   pg_ctl -D "$PGDATA" -m fast -w stop 2>/dev/null || true
 
-  # Kill repmgrd
-  [ -n "$REPMGRD_PID" ] && kill "$REPMGRD_PID" 2>/dev/null || true
-
   # Update pgproxy target — watchdog handles DNS + consumer restarts
   echo "${PEER_NAME}" > /opt/postgresql/pgproxy-target
 
+  # This runs inside split_brain_watchdog's background subshell. An `exit`
+  # here ends only that subshell, and REPMGRD_PID is the empty value it had
+  # when the subshell forked, so repmgrd could not be killed from here. The
+  # main shell (PID 1, waiting on repmgrd) then kept the container up with
+  # PostgreSQL stopped: no restart, no rejoin, for days (gotcha 169). Signal
+  # the main shell instead — `$$` is its PID even in a subshell — so
+  # shutdown_handler stops repmgrd and exits, and the restart policy brings
+  # the container back as a standby.
   echo "==> Container will restart and rejoin as standby" >&2
+  kill -TERM "$$"
   exit 1
 }
 
