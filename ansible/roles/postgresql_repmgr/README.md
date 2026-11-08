@@ -22,7 +22,7 @@ One node is the primary (accepts writes), the other is a streaming standby (read
 
 1. Primary goes down
 2. repmgrd on standby detects failure (6 x 10s = 60s detection window)
-3. `promote-check.sh` validates external connectivity (prevents false promotion during WireGuard tunnel drops)
+3. `promote-check.sh` validates external connectivity, and refuses while the primary's database still answers on its public address (a WireGuard-only drop, gotcha 185)
 4. Standby promotes to primary (creates new timeline)
 5. Old primary comes back
 6. Entrypoint queries peer, sees it's primary -> starts as standby
@@ -36,7 +36,7 @@ Four layers prevent dual-primary states:
 | Layer | When | How |
 |-------|------|-----|
 | **Startup** | Container boot | `determine_role()` queries the peer before choosing role. Never trusts the static `REPMGR_INITIAL_ROLE` env var after first boot. |
-| **Promotion** | Before promoting | `promote-check.sh` verifies external connectivity. If the standby can't reach the internet, it's likely a local network issue (not a dead primary) -- promotion is blocked. |
+| **Promotion** | Before promoting | `promote-check.sh` verifies external connectivity. If the standby can't reach the internet, it's likely a local network issue (not a dead primary) -- promotion is blocked. It is also blocked while the standby's `pg-role-watchdog` has seen the primary's PowerDNS answer from its database on a public address (IPv4 or IPv6) in the last 60 s: only the WireGuard path is down (gotcha 185). |
 | **Runtime** | Every 15s | Background watchdog detects if both nodes are running as primary. Lower timeline self-demotes. Same-timeline uses `REPMGR_INITIAL_ROLE` as deterministic tiebreaker. |
 | **Restart** | After demotion | `.demoted` marker file in PGDATA survives container restarts. On next boot, forces standby role regardless of other checks. |
 
@@ -107,4 +107,4 @@ The PostgreSQL HA cluster is shared by:
 
 ## Known Limitation
 
-With only 2 nodes and no external consensus mechanism (etcd/Consul), a true network partition where both nodes are running and the WireGuard tunnel drops for >70s can still result in a brief dual-primary window. The `promote-check.sh` (external connectivity validation) reduces this risk, and the runtime watchdog resolves it within 45s of connectivity being restored. For the DNS + VPN workload, this is acceptable.
+With only 2 nodes and no external consensus mechanism (etcd/Consul), a partition that cuts every path between the nodes (WireGuard and both public address families) while each still reaches the internet can still result in a dual-primary window. A WireGuard-only drop no longer does: `promote-check.sh` refuses while the primary answers publicly (gotcha 185), and the standby's PowerDNS fails its queries until the tunnel is back. The runtime watchdog resolves a dual primary within 45s of connectivity being restored, demoting the lower timeline. For the DNS + VPN workload, this is acceptable.

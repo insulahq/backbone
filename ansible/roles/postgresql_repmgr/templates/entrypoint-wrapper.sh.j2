@@ -17,8 +17,8 @@
 # Failover flow:
 #   1. Primary goes down
 #   2. repmgrd on standby detects failure (6 × 10s = 60s)
-#   3. promote-check validates external connectivity (prevents false promotion
-#      during network partitions)
+#   3. promote-check validates external connectivity and refuses while the
+#      primary still answers on its public address (WireGuard-only partition)
 #   4. Standby promotes → new timeline
 #   5. Old primary comes back
 #   6. determine_role() queries peer → sees peer is primary → starts as standby
@@ -27,7 +27,8 @@
 #
 # Split-brain prevention layers:
 #   Layer 1 — Startup:   determine_role() always checks peer before choosing role
-#   Layer 2 — Promotion: promote-check.sh validates external connectivity
+#   Layer 2 — Promotion: promote-check.sh validates external connectivity and
+#                         refuses while the primary answers publicly (gotcha 185)
 #   Layer 3 — Runtime:   split_brain_watchdog detects dual-primary, lower timeline
 #                         self-demotes (deterministic tiebreaker: REPMGR_INITIAL_ROLE).
 #                         Runs in both roles: a standby that repmgrd promotes
@@ -173,9 +174,10 @@ PGPASS
 # ==========================================================================
 # Prevents false promotions during network partitions: if the standby loses
 # its WireGuard tunnel to the primary but the primary is still running,
-# promoting would create a split-brain. This script checks if the standby
-# has external connectivity — if it can reach the internet but not the
-# primary, the primary is truly down and promotion is safe.
+# promoting would create a split-brain. A standby without internet access
+# refuses. Reaching the internet alone does not prove the primary down (a
+# WireGuard partition drill promoted that way), so it also refuses while the
+# primary's database answers on its public address (gotcha 185).
 create_promote_check() {
   cat > "$PROMOTE_CHECK" <<'SCRIPT'
 #!/bin/bash
@@ -192,6 +194,24 @@ done
 if [ "$CHECKS" -eq 0 ]; then
   echo "PROMOTE CHECK FAILED: No external connectivity — refusing promotion" >&2
   exit 1
+fi
+# A primary that only the WireGuard path lost still serves. The host's
+# pg-role-watchdog leaves here the time it last saw the peer's nameserver
+# answer from its database on a public address (gotcha 185). Promoting then
+# would make two primaries, and the split-brain rule would demote the node
+# that kept serving. Fresh = younger than two watchdog cycles (30 s each);
+# repmgrd needs 70 s to get here, and reruns the election every
+# election_rerun_interval (15 s) after a refusal. Any failure of this script
+# refuses promotion, so a marker caught mid-write counts as absent.
+MARKER=/tmp/peer-db-serves-publicly
+if [ -f "$MARKER" ]; then
+  SEEN=$(cat "$MARKER" 2>/dev/null)
+  case "$SEEN" in ''|*[!0-9]*) SEEN=0 ;; esac
+  AGE=$(( $(date +%s) - SEEN ))
+  if [ "$AGE" -ge 0 ] && [ "$AGE" -lt 60 ]; then
+    echo "PROMOTE CHECK FAILED: the primary is unreachable over WireGuard, but its database answered on its public address ${AGE}s ago — refusing promotion" >&2
+    exit 1
+  fi
 fi
 echo "PROMOTE CHECK PASSED: External connectivity confirmed, primary is truly unreachable" >&2
 exit 0

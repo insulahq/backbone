@@ -49,6 +49,39 @@ else
   DNS_MODE="drain-self"
 fi
 
+# Partition guard, the standby's half (gotcha 185). repmgr runs promote-check
+# (its failover_validation_command) inside the PG container, which has no IPv6
+# and no DNS tools, so this host-side check feeds it. The peer's PowerDNS reads
+# through the peer's pgproxy, so an authoritative NOERROR/NXDOMAIN for a fresh
+# random name (no cache holds it) means the peer's database serves. Checked on
+# its public addresses, IPv6 included: a WireGuard outage can take the whole
+# IPv4 path between the nodes with it. The marker holds the time of the last
+# such answer; promote-check refuses promotion while it is fresh, so a standby
+# that loses only the WireGuard path no longer makes a second primary. A peer
+# whose database is down answers SERVFAIL or nothing, the marker goes, and
+# repmgrd's next election promotes.
+{% set _pg_peer = groups['dns_servers'] | difference([inventory_hostname]) | first %}
+PEER_DB_MARKER=/tmp/peer-db-serves-publicly
+peer_db_serves_publicly() {
+  local ip out
+  for ip in {{ hostvars[_pg_peer]['ansible_host'] }} {{ hostvars[_pg_peer]['public_ipv6'] | default('') }}; do
+    out=$(dig +norecurse +time=2 +tries=1 "@${ip}" "promote-check-${RANDOM}${RANDOM}.{{ platform_domain }}" A 2>/dev/null) || continue
+    case "$out" in
+      *"status: NOERROR"*|*"status: NXDOMAIN"*) ;;
+      *) continue ;;
+    esac
+    case "$out" in *";; flags: qr aa"*) return 0 ;; esac
+  done
+  return 1
+}
+if [ "$PG_ROLE" = "t" ]; then
+  if peer_db_serves_publicly; then
+    docker exec postgresql sh -c "date +%s > $PEER_DB_MARKER" 2>/dev/null || true
+  else
+    docker exec postgresql rm -f "$PEER_DB_MARKER" 2>/dev/null || true
+  fi
+fi
+
 # Role-transition detection independent of WHO retargets pgproxy — on real
 # promotions the repmgr post-promote hook retargets before our next cycle,
 # so PGPROXY_NEEDS_UPDATE stays false and gating post-transition actions on

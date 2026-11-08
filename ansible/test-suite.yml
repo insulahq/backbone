@@ -336,6 +336,41 @@
               'passed': (_t_pg_sbw.stdout | default('0') | trim | int) >= 1}] }}
       tags: [postgresql]
 
+    # Gotcha 185: promote-check refuses promotion while the primary's database
+    # answers on its public address. The standby's pg-role-watchdog (30 s
+    # timer) leaves the time of the last such answer in the container, so in
+    # normal operation the standby's marker is under a minute old. Both
+    # containers must run a promote-check that reads it.
+    - name: "PostgreSQL | Partition guard in promote-check, and the standby's view of the primary"
+      shell: |
+        c=$(docker exec postgresql grep -c peer-db-serves-publicly /tmp/promote-check.sh 2>/dev/null || echo 0)
+        a=$(docker exec postgresql sh -c 'm=$(cat /tmp/peer-db-serves-publicly 2>/dev/null) && echo $(( $(date +%s) - m ))' 2>/dev/null || echo none)
+        echo "$c $a"
+      register: _t_pg_pguard
+      changed_when: false
+      failed_when: false
+      retries: 3
+      delay: 10
+      until: >-
+        (_t_pg_pguard.stdout | default('0') | trim).split() | first | int >= 1
+        and (inventory_hostname == _pg_primary
+             or ((_t_pg_pguard.stdout | default('') | trim).split() | last) is match('^[0-9]+$')
+             and ((_t_pg_pguard.stdout | trim).split() | last | int) < 60)
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — partition guard"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'Partition guard: promote-check reads the marker'
+              ~ ('' if inventory_hostname == _pg_primary else ', primary seen publicly (marker age s: ' ~ _pg_mark_age ~ ')'),
+              'host': inventory_hostname,
+              'passed': (_pg_guard_lines | int) >= 1
+                        and (inventory_hostname == _pg_primary or (_pg_mark_age is match('^[0-9]+$') and (_pg_mark_age | int) < 60))}] }}
+      vars:
+        _pg_guard_lines: "{{ (_t_pg_pguard.stdout | default('0') | trim).split() | first | default('0') }}"
+        _pg_mark_age: "{{ (_t_pg_pguard.stdout | default('') | trim).split() | last | default('none') }}"
+      tags: [postgresql]
+
     # No replication slots are used, so wal_keep_size is the only WAL kept for
     # a reconnecting standby; at 0 one primary restart strands it (gotcha 151).
     # Checked on both nodes — the standby becomes the primary after a failover.
