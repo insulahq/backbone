@@ -315,6 +315,27 @@
       when: inventory_hostname == _pg_primary
       tags: [postgresql]
 
+    # Gotcha 183: the split-brain watchdog is a background subshell of the
+    # entrypoint (a second entrypoint-wrapper process whose parent is PID 1).
+    # It must run on both nodes, whichever role the container started in.
+    - name: "PostgreSQL | Split-brain watchdog running in the container"
+      shell: |
+        set -o pipefail
+        docker exec postgresql ps -eo ppid=,args= | awk '$1 == 1 && /entrypoint-wrapper/' | wc -l
+      args:
+        executable: /bin/bash
+      register: _t_pg_sbw
+      changed_when: false
+      failed_when: false
+      tags: [postgresql]
+
+    - name: "PostgreSQL | Record result — split-brain watchdog"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'Split-brain watchdog running', 'host': inventory_hostname,
+              'passed': (_t_pg_sbw.stdout | default('0') | trim | int) >= 1}] }}
+      tags: [postgresql]
+
     # No replication slots are used, so wal_keep_size is the only WAL kept for
     # a reconnecting standby; at 0 one primary restart strands it (gotcha 151).
     # Checked on both nodes — the standby becomes the primary after a failover.
