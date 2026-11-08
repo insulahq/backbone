@@ -906,9 +906,8 @@
       when: openziti_enabled | default(false) | bool
       tags: [openziti]
 
-    # Gotcha 180: Traefik routes ziti.<domain> to a local controller only, so
-    # each nameserver must name the node whose controller runs. The record
-    # used to follow the PG primary instead.
+    # Gotcha 180: each nameserver must name the node whose controller runs.
+    # The record used to follow the PG primary instead.
     # Retried: the watchdog moves the record within a cycle, and the other
     # node's PowerDNS caches the old answer for up to 20 s.
     - name: "OpenZiti | Controller record on this nameserver"
@@ -942,6 +941,43 @@
       when:
         - openziti_enabled | default(false) | bool
         - openziti_create_dns_records | default(true) | bool
+      tags: [openziti]
+
+    # Gotcha 186: each node's Traefik serves ziti.<domain> wherever the
+    # controller runs: its own controller and console, else the peer's over
+    # WireGuard. A client still connected to the node that lost the
+    # controller gets answers instead of 404s. X-Ziti-Local-Only skips the
+    # fallback and must answer only on the controller's node.
+    - name: "OpenZiti | Edge API, console and local-only probe through this node's Traefik"
+      shell: |
+        r="--resolve {{ _zt_name }}:443:127.0.0.1"
+        api=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $r "https://{{ _zt_name }}/edge/client/v1/version")
+        own=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $r -H 'X-Ziti-Local-Only: 1' \
+          "https://{{ _zt_name }}/edge/client/v1/version")
+        console=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $r "https://{{ _zt_name }}/")
+        echo "$api $own $console"
+      vars:
+        _zt_name: "{{ openziti_domain | default('ziti.' + platform_domain) }}"
+      register: _t_ziti_ha
+      changed_when: false
+      failed_when: false
+      when:
+        - openziti_enabled | default(false) | bool
+        - groups['dns_servers'] | length > 1
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — served through this node's Traefik"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'OpenZiti via local Traefik: API, local-only, console ('
+              + (_t_ziti_ha.stdout | default('none') | trim) + ')', 'host': inventory_hostname,
+              'passed': (_ziti_ha | length) == 3 and _ziti_ha[0] == '200' and _ziti_ha[2] == '200'
+                        and (_ziti_ha[1] == '200') == ((_t_ziti_ctrl_state.stdout | default('')) == 'true')}] }}
+      vars:
+        _ziti_ha: "{{ (_t_ziti_ha.stdout | default('')).split() }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - groups['dns_servers'] | length > 1
       tags: [openziti]
 
     # ------------------------------------------------------------------
@@ -1796,13 +1832,14 @@
 
     # Gotcha 180: the PG failover leaves the OpenZiti controller where it was,
     # and its record must stay with it. It used to move with the PG primary,
-    # to the node without a controller, which answered 404.
+    # to the node without a controller, which answered 404. X-Ziti-Local-Only:
+    # that node's Traefik would now answer through its fallback (gotcha 186).
     - name: "Failover | OpenZiti — the Edge API answers at the node its record names"
       shell: |
         set -o pipefail
         ip=$(dig +short {{ _zt_name }} A @{{ hostvars[_surviving_node]['ansible_host'] }} +time=3 +tries=2 | head -1)
         [ -n "$ip" ] || { echo "no A record"; exit 1; }
-        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 \
+        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -H 'X-Ziti-Local-Only: 1' \
           --resolve "{{ _zt_name }}:443:${ip}" "https://{{ _zt_name }}/edge/client/v1/version")
         echo "${ip} HTTP ${code}"
         [ "$code" = "200" ]

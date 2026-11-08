@@ -72,7 +72,7 @@ openziti_domain: "ziti.{{ platform_domain }}"
 # Controller ports (WireGuard interface only)
 openziti_ctrl_port: 8440          # Fabric control channel (router-to-controller)
 openziti_edge_port: 8441          # Edge management API + client sessions
-openziti_console_port: 8443       # ZAC web console (internal, behind Traefik)
+openziti_console_port: 1408       # ZAC web console (HTTP, gotcha 138): published on the WireGuard IP for the peer's Traefik (gotcha 186)
 
 # Edge router port (public-facing for tunneler clients)
 openziti_router_port: 3022

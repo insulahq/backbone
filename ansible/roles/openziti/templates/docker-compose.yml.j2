@@ -33,6 +33,8 @@ services:
       - traefik.enable=true
       # Edge API — proxied through Traefik with Let's Encrypt cert
       # Handles: tunneler auth, enrollment, service discovery, ZAC API calls
+      # Traefik's dynamic.yml routers (ziti-*-ha) outrank these label routers
+      # and fall back to the peer's controller and console (gotcha 186).
       - traefik.http.routers.ziti-api.rule=Host(`{{ openziti_domain }}`) && (PathPrefix(`/edge`) || PathPrefix(`/fabric`) || PathPrefix(`/oidc`) || PathPrefix(`/.well-known`))
       - traefik.http.routers.ziti-api.entrypoints=websecure
       - traefik.http.routers.ziti-api.tls=true
@@ -61,6 +63,10 @@ services:
     restart: "no"
     networks:
       - traefik_public
+    ports:
+      # On WireGuard for the peer's Traefik, which serves this console while
+      # its own is stopped (gotcha 186).
+      - '{{ wireguard_ip }}:{{ openziti_console_port }}:1408'
     environment:
       # Public URL — ZAC JavaScript calls the controller API from the browser
       ZAC_CONTROLLER_URLS: "https://{{ openziti_domain }}"

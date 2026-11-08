@@ -15,6 +15,94 @@ http:
   serversTransports:
     insecureTransport:
       insecureSkipVerify: true
+{% if openziti_enabled | default(false) | bool and groups['dns_servers'] | length > 1 %}
+{% set _ziti_peer_wg = hostvars[groups['dns_servers'] | difference([inventory_hostname]) | first]['wireguard_ip'] %}
+{% set _ziti_host = openziti_domain | default('ziti.' + platform_domain) %}
+
+  # OpenZiti: the controller and console run on one node at a time, and a
+  # client can still reach the other node's Traefik (a keep-alive connection
+  # from before the controller moved, a cached record). Each node serves
+  # {{ _ziti_host }} from its own controller and console, and from the
+  # peer's over WireGuard while its own are down (gotcha 186). These routers
+  # outrank the containers' label routers (priorities 100 and 1). The fallbacks
+  # dial the peer's containers, not its Traefik, so two nodes without a
+  # controller cannot forward to each other.
+  #
+  # X-Ziti-Local-Only: 1 asks for this node's own controller, without the
+  # fallback. The standby's ziti-watchdog sends it when it checks whether the
+  # preferred primary serves on its public address; through the fallback, a
+  # preferred primary with its controller down would answer from the
+  # standby's own.
+  routers:
+    ziti-api-ha:
+      rule: 'Host(`{{ _ziti_host }}`) && (PathPrefix(`/edge`) || PathPrefix(`/fabric`) || PathPrefix(`/oidc`) || PathPrefix(`/.well-known`))'
+      entryPoints:
+        - websecure
+      tls: {}
+      priority: 110
+      middlewares:
+        - ratelimit
+      service: ziti-api-ha
+    ziti-api-local-only:
+      rule: 'Host(`{{ _ziti_host }}`) && PathPrefix(`/edge`) && Header(`X-Ziti-Local-Only`, `1`)'
+      entryPoints:
+        - websecure
+      tls: {}
+      priority: 120
+      middlewares:
+        - ratelimit
+      service: ziti-api-local
+    ziti-console-ha:
+      rule: 'Host(`{{ _ziti_host }}`)'
+      entryPoints:
+        - websecure
+      tls: {}
+      priority: 2
+      middlewares:
+        - ratelimit
+      service: ziti-console-ha
+
+  services:
+    ziti-api-ha:
+      failover:
+        service: ziti-api-local
+        fallback: ziti-api-peer
+    # The health check decides between local and peer. On the node without a
+    # controller it always fails, so it repeats there only every 30 s (each
+    # failure is a log line); a promoted controller is used within 30 s.
+    ziti-api-local:
+      loadBalancer:
+        serversTransport: insecureTransport
+        healthCheck:
+          path: /edge/client/v1/version
+          interval: 5s
+          unhealthyInterval: 30s
+          timeout: 3s
+        servers:
+          - url: "https://ziti-controller:{{ openziti_edge_port | default(8441) }}"
+    ziti-api-peer:
+      loadBalancer:
+        serversTransport: insecureTransport
+        servers:
+          - url: "https://{{ _ziti_peer_wg }}:{{ openziti_edge_port | default(8441) }}"
+    ziti-console-ha:
+      failover:
+        service: ziti-console-local
+        fallback: ziti-console-peer
+    ziti-console-local:
+      loadBalancer:
+        healthCheck:
+          path: /
+          interval: 5s
+          unhealthyInterval: 30s
+          timeout: 3s
+        servers:
+          - url: "http://ziti-console:1408"
+    ziti-console-peer:
+      loadBalancer:
+        servers:
+          - url: "http://{{ _ziti_peer_wg }}:{{ openziti_console_port | default(1408) }}"
+{% endif %}
 
 # TCP passthrough for the NetBird Reverse Proxy.
 # Scoped tightly to *.{{ netbird_proxy_apex | default('proxy.' + platform_domain) }}

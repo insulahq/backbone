@@ -371,10 +371,12 @@ PREFERRED_PUBLIC_IPS="{{ hostvars[openziti_primary_node]['ansible_host'] }}{% if
 # path has nothing to take over: promoting would make a second controller, and
 # both would claim {{ openziti_domain }}. A preferred primary whose Traefik is
 # down fails this too, and then the failover is wanted.
+# X-Ziti-Local-Only skips its Traefik's fallback to this node's controller
+# (gotcha 186): once this node has taken over, that fallback answers too.
 preferred_serves_publicly() {
     local ip
     for ip in $PREFERRED_PUBLIC_IPS; do
-        curl -fsSk --max-time 5 --resolve "${ZITI_DOMAIN}:443:${ip}" \
+        curl -fsSk --max-time 5 --resolve "${ZITI_DOMAIN}:443:${ip}" -H 'X-Ziti-Local-Only: 1' \
             "https://${ZITI_DOMAIN}/edge/client/v1/version" >/dev/null 2>&1 && return 0
     done
     return 1
