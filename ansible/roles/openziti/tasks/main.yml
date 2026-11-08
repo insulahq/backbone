@@ -426,69 +426,10 @@
   tags: [openziti]
 
 # --- DNS records ---
-- name: Create DNS A record for OpenZiti console
-  uri:
-    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
-    method: PATCH
-    headers:
-      X-API-Key: "{{ powerdns_api_key }}"
-    body_format: json
-    body:
-      rrsets:
-        - name: "{{ openziti_domain }}."
-          type: A
-          ttl: 30
-          changetype: REPLACE
-          records:
-            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['ansible_host'] }}"
-              disabled: false
-    status_code: [200, 204]
-  ignore_errors: true
-  when:
-    - openziti_create_dns_records | bool
-    - powerdns_api_key is defined
-    - inventory_hostname == openziti_primary_node
-  run_once: true
-  tags: [openziti]
-
-- name: Create DNS AAAA record for OpenZiti console
-  uri:
-    url: "http://{{ powerdns_bind_interface | default('127.0.0.1') }}:{{ powerdns_nginx_api_port | default('8081') }}/api/v1/servers/localhost/zones/{{ platform_domain }}."
-    method: PATCH
-    headers:
-      X-API-Key: "{{ powerdns_api_key }}"
-    body_format: json
-    body:
-      rrsets:
-        - name: "{{ openziti_domain }}."
-          type: AAAA
-          ttl: 30
-          changetype: REPLACE
-          records:
-            - content: "{{ hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] }}"
-              disabled: false
-    status_code: [200, 204]
-  ignore_errors: true
-  when:
-    - openziti_create_dns_records | bool
-    - powerdns_api_key is defined
-    - inventory_hostname == openziti_primary_node
-    - hostvars[dns_failover_primary | default('ns1')]['public_ipv6'] is defined
-  run_once: true
-  tags: [openziti]
-
-- name: Increment SOA serial after DNS record creation
-  community.docker.docker_container_exec:
-    container: powerdns-auth
-    command: pdnsutil increase-serial {{ platform_domain }}
-  changed_when: true
-  ignore_errors: true
-  when:
-    - openziti_create_dns_records | bool
-    - powerdns_api_key is defined
-    - inventory_hostname == openziti_primary_node
-  run_once: true
-  tags: [openziti]
+# {{ openziti_domain }} is written by ziti-watchdog, on whichever node serves
+# the controller, within one cycle of the timer starting (claim_dns). These
+# tasks used to point it at dns_failover_primary, the PG primary, which is not
+# where the controller runs after a controller-only failover (gotcha 180).
 
 # --- Status display ---
 - name: Display OpenZiti deployment status

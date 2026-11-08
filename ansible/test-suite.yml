@@ -795,6 +795,44 @@
       when: openziti_enabled | default(false) | bool
       tags: [openziti]
 
+    # Gotcha 180: Traefik routes ziti.<domain> to a local controller only, so
+    # each nameserver must name the node whose controller runs. The record
+    # used to follow the PG primary instead.
+    # Retried: the watchdog moves the record within a cycle, and the other
+    # node's PowerDNS caches the old answer for up to 20 s.
+    - name: "OpenZiti | Controller record on this nameserver"
+      command: "dig +short {{ openziti_domain | default('ziti.' + platform_domain) }} A @{{ ansible_host }} +time=3 +tries=2"
+      register: _t_ziti_dns
+      changed_when: false
+      failed_when: false
+      retries: 4
+      delay: 15
+      until: >-
+        (_t_ziti_dns.stdout_lines | default([]) | sort | join(' '))
+        == (ansible_play_hosts_all | map('extract', hostvars) | selectattr('_t_ziti_ctrl_state.stdout', 'defined')
+            | selectattr('_t_ziti_ctrl_state.stdout', 'equalto', 'true') | map(attribute='ansible_host') | join(' '))
+      when:
+        - openziti_enabled | default(false) | bool
+        - openziti_create_dns_records | default(true) | bool
+      tags: [openziti]
+
+    - name: "OpenZiti | Record result — controller record names the serving node"
+      set_fact:
+        _test_results: >-
+          {{ _test_results + [{'name': 'OpenZiti record names the controller node (' + (_ziti_dns_answer | default('none', true))
+              + ', controller on ' + (_ziti_ctrl_ips | join(',') | default('none', true)) + ')',
+              'host': inventory_hostname,
+              'passed': (_ziti_ctrl_ips | length) == 1 and _ziti_dns_answer == (_ziti_ctrl_ips | first)}] }}
+      vars:
+        _ziti_dns_answer: "{{ _t_ziti_dns.stdout_lines | default([]) | sort | join(' ') }}"
+        _ziti_ctrl_ips: >-
+          {{ ansible_play_hosts_all | map('extract', hostvars) | selectattr('_t_ziti_ctrl_state.stdout', 'defined')
+             | selectattr('_t_ziti_ctrl_state.stdout', 'equalto', 'true') | map(attribute='ansible_host') | list }}
+      when:
+        - openziti_enabled | default(false) | bool
+        - openziti_create_dns_records | default(true) | bool
+      tags: [openziti]
+
     # ------------------------------------------------------------------
     # Platform DNS Switch Tests
     # ------------------------------------------------------------------
@@ -1643,6 +1681,47 @@
     - name: "Failover | Record result — DNS stays on surviving node (active-passive)"
       set_fact:
         _failover_results: "{{ _failover_results + [{'name': 'DNS points to surviving node after rejoin (active-passive, IP: ' + (_t_fo_dns_after_rejoin.stdout | default('') | trim) + ')', 'host': 'cluster', 'passed': hostvars[_surviving_node]['ansible_host'] in (_t_fo_dns_after_rejoin.stdout | default('')) and (_t_fo_dns_after_rejoin.stdout_lines | default([]) | length) == 1}] }}"
+      tags: [failover, never]
+
+    # Gotcha 180: the PG failover leaves the OpenZiti controller where it was,
+    # and its record must stay with it. It used to move with the PG primary,
+    # to the node without a controller, which answered 404.
+    - name: "Failover | OpenZiti — the Edge API answers at the node its record names"
+      shell: |
+        set -o pipefail
+        ip=$(dig +short {{ _zt_name }} A @{{ hostvars[_surviving_node]['ansible_host'] }} +time=3 +tries=2 | head -1)
+        [ -n "$ip" ] || { echo "no A record"; exit 1; }
+        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 \
+          --resolve "{{ _zt_name }}:443:${ip}" "https://{{ _zt_name }}/edge/client/v1/version")
+        echo "${ip} HTTP ${code}"
+        [ "$code" = "200" ]
+      args:
+        executable: /bin/bash
+      register: _t_fo_zt_record
+      retries: 3
+      delay: 10
+      until: _t_fo_zt_record.rc == 0
+      changed_when: false
+      ignore_errors: true
+      run_once: true
+      delegate_to: "{{ _surviving_node }}"
+      vars:
+        ansible_ssh_private_key_file: "{{ _surviving_key }}"
+        _zt_name: "{{ openziti_domain | default('ziti.' + platform_domain) }}"
+      when:
+        - openziti_enabled | default(false) | bool
+        - openziti_create_dns_records | default(true) | bool
+      tags: [failover, never]
+
+    - name: "Failover | Record result — OpenZiti record after the PG failover"
+      set_fact:
+        _failover_results: >-
+          {{ _failover_results + [{'name': 'OpenZiti Edge API at its record after the PG failover ('
+              + (_t_fo_zt_record.stdout | default('') | trim) + ')',
+              'host': 'cluster', 'passed': _t_fo_zt_record.rc | default(1) == 0}] }}
+      when:
+        - openziti_enabled | default(false) | bool
+        - openziti_create_dns_records | default(true) | bool
       tags: [failover, never]
 
     - name: "Failover | Verify pgproxy write via surviving node after PG failover"
